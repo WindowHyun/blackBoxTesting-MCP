@@ -157,8 +157,9 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 ## 5. MCP Tools 명세
 
-> 공통: FastMCP `@mcp.tool`로 노출. 반환은 구조화 dict(또는 텍스트), screenshot만
-> MCP image content. 입력 검증은 타입힌트 + Pydantic(FastMCP 자동).
+> 공통: FastMCP `@mcp.tool()`로 노출. 반환은 구조화 dict(또는 텍스트), screenshot만
+> `mcp.server.fastmcp.Image`로 반환(`return Image(data=..., format="png")`).
+> 입력 검증은 타입힌트 + Pydantic(FastMCP 자동).
 > 모든 tool은 30초 내 반환(제약), 장기작업은 분할.
 
 ### 5.1 브라우저 세션 (BR)
@@ -183,8 +184,11 @@ def register_all(mcp):             # server.py에서 1회 호출
 세부:
 - **navigate (CT-01):** `wait_until` ∈ {load, domcontentloaded, networkidle, commit}.
   리스너 미부착이면 부착. status는 main response status.
-- **snapshot (CT-02):** `a11y`=`page.accessibility.snapshot()` 가공 텍스트,
-  `dom`=태그/role/text 위주 간략 트리. **Q1 트리밍은 §8 참조.**
+- **snapshot (CT-02):** `a11y`=**`page.locator("body").aria_snapshot()`** 의
+  YAML 트리(권장 API). `page.accessibility.snapshot()`는 deprecated이므로
+  사용하지 않는다. `dom`=태그/role/text 위주 간략 트리. **Q1 트리밍은 §8 참조.**
+  > 검증: Playwright 공식 문서 기준 `accessibility.snapshot()` deprecated,
+  > `locator.aria_snapshot()` / `expect().to_match_aria_snapshot()` 권장.
 - **interact (CT-04):** action ∈ {click, type, hover, select, press}.
   `type`/`select`/`press`는 value 사용. 셀렉터는 §4 체인.
 - **assert_ (CT-05):** kind ∈ {text_visible, element_visible, url_is,
@@ -269,8 +273,9 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 ## 8. Q1 — snapshot 출력 크기 정책 (미결, Phase 1 실측 후 확정)
 
-대형 SPA a11y 트리가 MCP 컨텍스트 한도를 초과할 수 있음. **잠정 설계**:
+대형 SPA aria_snapshot(YAML) 출력이 MCP 컨텍스트 한도를 초과할 수 있음. **잠정 설계**:
 - `snapshot(mode, max_nodes=N, focus=selector)` 파라미터 도입 여지.
+  (`focus` 주어지면 `page.locator(focus).aria_snapshot()`로 서브트리만.)
 - 기본: 의미 없는 노드(빈 텍스트, presentational) 제거 + 깊이 제한.
 - `focus` 주어지면 해당 서브트리만.
 - Phase 1 PoC에서 실제 토큰/문자 크기를 측정 → N과 트리밍 규칙 확정.
