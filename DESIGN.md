@@ -109,9 +109,14 @@ def register_all(mcp):             # server.py에서 1회 호출
 ### 3.3 리스너 버퍼 (BR-02)
 `navigate` 시점(또는 page 생성 시) page에 부착:
 - `page.on("console", ...)` → `console_buffer` 누적 `{level, text, location, ts}`
-- `page.on("response", ...)` → status ≥ 400이면 `network_buffer`에 `{url, status, method}`
+- `page.on("response", ...)` → **status ≥ 400이면** `network_buffer`에 `{url, status, method}`
 - `page.on("requestfailed", ...)` → `network_buffer`에 `{url, failure, method}`
 - 버퍼는 세션에 보관, `reset_session`·`navigate`(옵션) 시 클리어 정책은 아래.
+
+> **검증(공식):** HTTP 4xx/5xx는 Playwright상 "성공한 응답"이라 `requestfailed`가
+> 아니라 `response` 이벤트로 전달된다. 따라서 4xx/5xx는 반드시 `response`의
+> `status >= 400`으로 판별하고, `requestfailed`는 네트워크 자체 실패(타임아웃·
+> DNS 등)에만 사용한다. (CT-07 구현이 두 경로를 모두 수집한다.)
 
 > **버퍼 클리어 정책(결정 필요 사항 아님, 기본 채택):** `navigate`는 버퍼를
 > 비우지 않고 누적한다. 명시적 초기화는 `reset_session()`. 이유: 한 시나리오가
@@ -194,9 +199,12 @@ def register_all(mcp):             # server.py에서 1회 호출
 - **assert_ (CT-05):** kind ∈ {text_visible, element_visible, url_is,
   url_contains, count}. count는 expected=숫자와 일치 검사.
 - **wait (CT-08):** ms 주어지면 고정 대기, selector 주어지면 등장/텍스트 변경 대기.
-- **expect_dialog (CT-10):** 호출 시 다음 dialog 이벤트를 일정 timeout 대기,
-  텍스트 검증 후 accept/dismiss. 미노출 시 `passed=False`. (action 트리거 전에
-  핸들러 arm 하는 사용 패턴을 README에 명시.)
+- **expect_dialog (CT-10):** `page.on("dialog", ...)`로 핸들러를 arm 하거나
+  `page.expect_event("dialog")` 컨텍스트로 대기 → `dialog.message()`로 텍스트
+  검증, `dialog.type()`로 종류 확인, `action`에 따라 `dialog.accept(prompt_text)`
+  / `dialog.dismiss()` 호출. 미노출(timeout) 시 `passed=False`. dialog는 반드시
+  accept/dismiss 처리하지 않으면 페이지가 멈추므로 핸들러에서 항상 처리.
+  (action 트리거 전에 arm 하는 사용 패턴을 README에 명시.)
 
 ### 5.3 시나리오 모드 (SM)
 | Tool | 시그니처 | 우선순위 |
@@ -278,6 +286,8 @@ def register_all(mcp):             # server.py에서 1회 호출
   (`focus` 주어지면 `page.locator(focus).aria_snapshot()`로 서브트리만.)
 - 기본: 의미 없는 노드(빈 텍스트, presentational) 제거 + 깊이 제한.
 - `focus` 주어지면 해당 서브트리만.
+- `aria_snapshot(boxes=True)` 옵션은 각 요소 bounding box를 덧붙여 주며
+  공식 문서가 "AI 소비에 유용"하다고 명시 → interact 셀렉터 매칭 보조로 검토.
 - Phase 1 PoC에서 실제 토큰/문자 크기를 측정 → N과 트리밍 규칙 확정.
 
 ---
@@ -327,3 +337,30 @@ def register_all(mcp):             # server.py에서 1회 호출
    생성하는 방식으로 설계함. PRD 문구("Claude가 ... 생성해 반환")와 합치하나,
    서버 내 LLM이 없다는 현실 반영. 구현 전 합의 확인 권장.
 3. **버퍼 클리어 정책** — navigate 누적/유지로 채택(§3.3). 이견 시 조정.
+
+---
+
+## 13. 공식 문서 검증 기록 (Verification Log)
+
+이 설계의 외부 API 가정은 아래 공식 소스로 대조 검증함.
+
+**MCP Python SDK (FastMCP)** — `modelcontextprotocol/python-sdk` README
+- `from mcp.server.fastmcp import FastMCP` / `@mcp.tool()` 데코레이터 ✅
+- 이미지 반환 `from mcp.server.fastmcp import Image` → `Image(data=..., format="png")` ✅
+- `mcp.run()` 기본 stdio transport ✅
+
+**Playwright (Python)** — playwright.dev / microsoft/playwright docs
+- `page.accessibility.snapshot()` **deprecated** → `locator.aria_snapshot()`(YAML),
+  `boxes=True` 옵션은 AI용으로 권장 ✅ (정정 반영)
+- `page.goto(url, wait_until=...)` 값: `load`/`domcontentloaded`/`networkidle`/`commit` ✅
+- `page.on("console")`, `page.on("response")`, `page.on("requestfailed")` ✅
+  — 4xx/5xx는 `response`(status≥400)로 전달, `requestfailed`는 네트워크 실패 한정 ✅
+- `page.on("dialog")` / `page.expect_event("dialog")`,
+  `dialog.accept(prompt_text)` · `dismiss()` · `message()` · `type()` ✅
+- `page.get_by_role(role, name=, exact=)`, `page.get_by_text(text, exact=)` ✅
+- `page.frame_locator(selector)` (snake_case) ✅
+- `page.wait_for_selector(...)`, `page.wait_for_timeout(ms)`, `page.expect_console_message(...)` ✅
+
+> 제약: playwright.dev API 페이지는 직접 fetch가 403으로 막혀, 일부 항목은
+> GitHub 원본 마크다운 + 공식 검색 결과로 교차 확인함. 구현 중 실제 버전의
+> 시그니처를 코드로 재확인한다.
