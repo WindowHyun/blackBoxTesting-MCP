@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ui-blackbox-mcp"
+version = "0.1.0"
+description = "UI Blackbox Tester MCP — natural-language UI testing for Claude Desktop via Playwright"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "연창현" }]
+license = { text = "MIT" }
+dependencies = [
+    "mcp>=1.2.0",
+    "playwright>=1.44.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+ui-blackbox-mcp = "blackbox_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["blackbox_mcp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

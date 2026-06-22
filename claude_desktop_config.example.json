@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "ui-blackbox": {
+      "command": "python",
+      "args": ["-m", "blackbox_mcp.server"],
+      "env": {
+        "HEADLESS": "true"
+      }
+    }
+  }
+}

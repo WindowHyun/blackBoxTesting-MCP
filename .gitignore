@@ -1,0 +1,22 @@
+# Python / venv
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Runtime output
+reports/
+scenarios/
+!scenarios/.gitkeep
+
+# Playwright
+.cache/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
