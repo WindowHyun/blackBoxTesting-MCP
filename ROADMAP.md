@@ -50,11 +50,13 @@
 미결 **Q1(snapshot 출력 크기)**을 실측으로 닫는다. 모든 후속 Phase의 토대.
 
 **작업**
-- venv에 `playwright` 설치 + `playwright install chromium` (환경 가능 여부 선확인)
+- venv에 `playwright>=1.60` 설치 + `playwright install chromium` (환경 가능 여부 선확인)
+- **FastMCP `lifespan` 배선** — 서버 시작 시 세션 준비, 종료 시 `close()` 정리(릭 방지)
+- `bootstrap`의 `executable_path` 시그니처(property/메서드)를 설치 버전으로 재확인
 - `tests/fixtures/*.html` 정적 픽스처 → `file://`로 `navigate` 통합 테스트
 - `snapshot(mode="a11y")` = `locator.aria_snapshot()`(YAML) 실동작 확인
-- **Q1 실측**: 실페이지 aria_snapshot 문자/토큰 크기 측정 → `_MAX_CHARS`·`focus`·
-  트리밍 규칙 확정 → DESIGN §8 갱신
+- **Q1 실측**: 실페이지 aria_snapshot 크기 측정 → 네이티브 `depth`/`mode="ai"` +
+  `_MAX_CHARS` 안전장치로 트리밍 규칙 확정 → DESIGN §8 갱신
 - `mode="dom"`을 임시 `inner_text`에서 태그/role/text 간략 트리로 정련
 
 **공식 문서 근거**
@@ -66,6 +68,7 @@
 
 **완료 기준(DoD)**
 - [ ] 실페이지 navigate→snapshot 통합 테스트 green
+- [ ] lifespan으로 브라우저 시작/종료 정리 동작(릭 없음) 확인
 - [ ] aria_snapshot 크기 측정값 기록 + 트리밍 정책 확정(Q1 close)
 - [ ] 콘솔/네트워크 버퍼가 실제 이벤트를 수집함을 테스트로 확인
 
@@ -77,15 +80,20 @@
 `get_console_logs`(CT-06), `get_network_errors`(CT-07)를 픽스처로 실검증.
 D2 셀렉터 체인(testid→role→text→css) 동작 확인.
 
+추가: **crash-recovery 배선(NFR)** — 공통 tool 래퍼에서 `TargetClosedError` 등
+캡처 → `BrowserSession.restart()` 1회 후 재시도(§DESIGN 3.5).
+
 **공식 문서 근거**
 - 이미지 반환: `Image(data=bytes, format="png")` (MCP SDK)
 - `page.get_by_role(role, name=, exact=)`, `page.get_by_text(text, exact=)`,
   `locator.fill/click/hover/select_option/press`
+- `FrameLocator`도 `get_by_role/get_by_text/get_by_test_id/locator` 지원 → frame root 동일 동작
 
 **DoD**
 - [ ] 5종 assert(text_visible/element_visible/url_is/url_contains/count) 테스트 통과
 - [ ] interact 5동작 + 셀렉터 체인 fallback 테스트 통과
 - [ ] screenshot이 유효 PNG 반환
+- [ ] 브라우저 강제 종료 후 자동 재시작 < 5s 확인(R3)
 
 ---
 
@@ -96,6 +104,7 @@ D2 셀렉터 체인(testid→role→text→css) 동작 확인.
 report_YYYYMMDD_HHMMSS.*`, `REPORT_DIR` 재정의, `${VAR}` 마스킹.
 **HTML 리포트(SM-04, SHOULD)** — 단일 self-contained `.html`(스텝 표 + 스크린샷
 인라인 + 콘솔/네트워크 에러), `report_format`에 `html`/`all` 추가.
+다수 스텝 장기 실행 시 `await ctx.report_progress(i, total)`로 진행률 표시(옵션).
 
 **DoD**
 - [ ] 성공/실패 혼합 시나리오가 정확한 per-step 결과·요약 생성
@@ -133,7 +142,8 @@ report_YYYYMMDD_HHMMSS.*`, `REPORT_DIR` 재정의, `${VAR}` 마스킹.
 - 서버는 navigate→snapshot 후 **결정론적 작성 키트** 반환
   (상호작용 요소 + D2로 미리 해석된 셀렉터 + 스텝 JSON 스키마 + few-shot)
 - **Claude(호스트 LLM)**가 키트로 steps 작성 → `save_scenario` 저장
-- 미래 대비: sampling 지원 클라이언트면 `sampling/createMessage`로 서버측 생성,
+- 미래 대비: sampling 지원 클라이언트면 tool에 `ctx: Context` 주입 →
+  `await ctx.session.create_message(messages=[...], max_tokens=...)`로 서버측 생성,
   미지원 시 키트로 graceful fallback
 
 **DoD**
@@ -160,12 +170,15 @@ report_YYYYMMDD_HHMMSS.*`, `REPORT_DIR` 재정의, `${VAR}` 마스킹.
 
 ## 검증 출처 (Official Docs)
 
-- **MCP Python SDK** — `modelcontextprotocol/python-sdk` README (FastMCP, `@mcp.tool()`, `Image`, `mcp.run()` stdio)
+- **MCP Python SDK** — `modelcontextprotocol/python-sdk` README (FastMCP, `@mcp.tool()`,
+  `Image`, `mcp.run()` stdio, 타입힌트→`outputSchema`, `Context`(로깅·`report_progress`),
+  `ctx.session.create_message` sampling, `lifespan` 시작/정리)
 - **MCP Sampling** — MCP 사양/문서 (옵셔널 client capability, 인간 승인 필요, Claude Desktop 미지원)
 - **Playwright (Python)** — playwright.dev / `microsoft/playwright` docs
-  (`aria_snapshot` 권장·`accessibility.snapshot` deprecated, `goto` wait_until,
-  console/response/requestfailed, dialog, get_by_role/text, frame_locator,
-  wait_for_selector/timeout)
+  (`aria_snapshot` 권장·`accessibility.snapshot` deprecated, `aria_snapshot`
+  `mode`/`depth`(≥1.59)·`boxes`(≥1.60), `goto` wait_until,
+  console/response/requestfailed, dialog, get_by_role/text, frame_locator 및
+  FrameLocator의 get_by_*/locator, wait_for_selector/timeout, executable_path)
 
 > 일부 playwright.dev API 페이지는 직접 fetch가 403으로 막혀 GitHub 원본 마크다운 +
 > 공식 검색 결과로 교차 확인함. 구현 중 설치된 버전의 시그니처를 코드로 재확인한다.

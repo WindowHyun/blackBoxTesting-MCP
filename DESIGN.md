@@ -101,6 +101,10 @@ def register_all(mcp):             # server.py에서 1회 호출
 - 프로세스 생존 동안 동일 `BrowserContext` 유지 → 쿠키·세션·로컬스토리지 보존.
 - 구성: `playwright` → `chromium.launch()` → `browser.new_context()` → `context.new_page()`.
 - 동시 세션 1개 (제약). 병렬 미지원.
+- **시작/정리는 FastMCP `lifespan`으로 관리(공식 권장):** `@asynccontextmanager`
+  로 서버 기동 시 세션을 준비하고 `finally`에서 `close()`로 브라우저를 정리한다.
+  지연 초기화(`get_session()`)와 병행하되, 종료 시 리소스 릭이 없도록 lifespan
+  `finally`에서 반드시 닫는다. (Phase 1에서 lifespan 배선.)
 
 ### 3.2 헤드리스 토글 (BR-03)
 - 기본 `headless=True`. `HEADLESS=false`(env)면 `headless=False`.
@@ -131,12 +135,18 @@ def register_all(mcp):             # server.py에서 1회 호출
 - Playwright 예외(`TargetClosedError` 등) 감지 시 `restart()`:
   context/browser 정리 → 재기동 → 진행 중 시나리오 스텝은 `error`로 마킹.
 - 재시작 후 다음 tool 호출 정상 수신.
+- **현황:** `BrowserSession.restart()`는 구현되어 있으나, tool 호출부에서
+  라이브니스 체크 → `restart()` 자동 호출하는 **래퍼는 미배선**이다. Phase 2에서
+  공통 tool 래퍼(예외 캡처 → 1회 재시작 후 재시도)로 배선한다.
 
 ### 3.6 프레임 컨텍스트 (CT-09)
 - 세션에 `current_frame` 보관(기본 None=메인 page).
 - `switch_frame(selector)` → `page.frame_locator(selector)` 기준으로 이후 동작.
 - `switch_frame(null/None)` → 메인 복귀.
 - actions/assertions는 `current_frame` 또는 page를 대상 root로 사용.
+- **검증(공식):** `FrameLocator`는 `get_by_role` / `get_by_text` /
+  `get_by_test_id` / `locator`를 모두 노출하므로, root가 frame_locator일 때도
+  §4 셀렉터 체인과 모든 tool이 동일하게 동작한다(코드 변경 불필요).
 
 ---
 
@@ -154,7 +164,7 @@ def register_all(mcp):             # server.py에서 1회 호출
 - 접두사 명시(`testid=`, `role=`, `text=`, `css=`)가 있으면 그 방식 우선.
 - 접두사 없으면: CSS 셀렉터로 보이면(`. # [ >` 포함) CSS 시도 후 실패 시
   텍스트로 fallback. 순수 문자열이면 role/text 우선.
-- 각 단계 timeout 짧게(예: 2s) 잡아 체인 전체가 30초 타임아웃 내 동작.
+- 각 단계 timeout 짧게(예: 2s) 잡아 체인 전체가 클라이언트 요청 타임아웃 내 동작.
 
 `locate(root, selector) -> Locator` 단일 함수로 추상화하여 모든 tool이 공유.
 
@@ -165,7 +175,10 @@ def register_all(mcp):             # server.py에서 1회 호출
 > 공통: FastMCP `@mcp.tool()`로 노출. 반환은 구조화 dict(또는 텍스트), screenshot만
 > `mcp.server.fastmcp.Image`로 반환(`return Image(data=..., format="png")`).
 > 입력 검증은 타입힌트 + Pydantic(FastMCP 자동).
-> 모든 tool은 30초 내 반환(제약), 장기작업은 분할.
+> 모든 tool은 클라이언트가 설정한 요청 타임아웃 내 반환해야 하며(제약), 장기작업은
+> 분할한다. ※ MCP는 고정 타임아웃을 강제하지 않는다 — 클라이언트가 정하는 값이다.
+> 반환 dict/list에 구체 타입힌트를 주면 FastMCP가 `outputSchema`(구조화 출력)를
+> 자동 생성한다.
 
 ### 5.1 브라우저 세션 (BR)
 | Tool | 시그니처 | 반환 | 우선순위 |
@@ -250,6 +263,11 @@ def register_all(mcp):             # server.py에서 1회 호출
   즉 tool은 "페이지 구조 + 셀렉터 후보 + 작성 가이드"를 돌려주고, Claude가
   description과 결합해 steps를 만든 뒤 `save_scenario`로 저장하는 흐름.
   (MCP 서버 자체에 LLM이 없으므로 분업. README에 흐름 명시.)
+- **sampling fallback(공식 API):** sampling을 지원하는 클라이언트에서는 tool에
+  `ctx: Context`를 주입받아 `await ctx.session.create_message(messages=[...],
+  max_tokens=...)`로 서버측에서 steps를 직접 생성할 수 있다. **Claude Desktop은
+  sampling 미지원**이므로 이 경로는 옵션이며, 미지원 시 위의 "작성 키트" 반환으로
+  graceful fallback 한다.
 - 저장: `scenarios/{name}.json`, 동일 이름이면 overwrite 확인.
 - `list_scenarios`: 이름·스텝 수·최종 실행 일시(메타 파일 또는 mtime).
 
@@ -274,7 +292,11 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 - `bootstrap.ensure_chromium()`: Chromium 존재 확인(`playwright`의 설치 경로 점검),
   없으면 `subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"])`.
-  이미 있으면 즉시 통과. `server.py` 최상단에서 1회 호출.
+  이미 있으면 즉시 통과. `server.py`의 `main()`에서 `mcp.run()` **이전에** 1회 호출.
+  > **확인 필요(Phase 1):** 설치 경로 점검에 쓰는 `browser_type.executable_path`는
+  > Playwright 버전에 따라 property/메서드 표기가 다를 수 있고, 반환값은 "설치
+  > 여부"가 아니라 "기대 경로"다 → `os.path.exists()`로 실제 존재를 확인한다.
+  > 설치된 버전 시그니처는 구현 시 코드로 재확인.
 - 설치: `pip install`(또는 `pip install -e .`) 1단계. 별도 명령 불필요.
 - Claude Desktop 등록: config 한 줄 (`claude_desktop_config.example.json` 제공).
 ```json
@@ -290,13 +312,16 @@ def register_all(mcp):             # server.py에서 1회 호출
 ## 8. Q1 — snapshot 출력 크기 정책 (미결, Phase 1 실측 후 확정)
 
 대형 SPA aria_snapshot(YAML) 출력이 MCP 컨텍스트 한도를 초과할 수 있음. **잠정 설계**:
-- `snapshot(mode, max_nodes=N, focus=selector)` 파라미터 도입 여지.
+- `snapshot(mode, depth=N, focus=selector)` 파라미터 도입.
   (`focus` 주어지면 `page.locator(focus).aria_snapshot()`로 서브트리만.)
-- 기본: 의미 없는 노드(빈 텍스트, presentational) 제거 + 깊이 제한.
-- `focus` 주어지면 해당 서브트리만.
+- **네이티브 트리밍 옵션 우선 사용(공식):** `aria_snapshot(depth=N)`로 깊이 제한,
+  `aria_snapshot(mode="ai")`로 AI 친화 포맷 — 단순 문자 절단보다 의미 보존.
+  ※ 버전 게이트: `mode`/`depth`는 **Playwright ≥ 1.59**, `boxes`는 **≥ 1.60**.
+  → pyproject 핀을 `playwright>=1.60`으로 상향(이 옵션 사용 전제).
 - `aria_snapshot(boxes=True)` 옵션은 각 요소 bounding box를 덧붙여 주며
   공식 문서가 "AI 소비에 유용"하다고 명시 → interact 셀렉터 매칭 보조로 검토.
-- Phase 1 PoC에서 실제 토큰/문자 크기를 측정 → N과 트리밍 규칙 확정.
+- 최후 안전장치로 문자수 상한(`_MAX_CHARS`) 절단은 유지.
+- Phase 1 PoC에서 실제 토큰/문자 크기를 측정 → depth·상한 규칙 확정.
 
 ---
 
@@ -311,7 +336,7 @@ def register_all(mcp):             # server.py에서 1회 호출
 | Usability (설치 1단계) | §7 |
 | Maintainability (Tool=파일1개) | §2 레지스트리 |
 | 자격증명 외부화 | env/.env 주입, `${VAR}` 치환, 리포트 마스킹 |
-| 30초 타임아웃 | 장기작업 분할, 셀렉터 체인 타임아웃 관리 |
+| 클라이언트 요청 타임아웃 | 장기작업 분할, 셀렉터 체인 타임아웃 관리 (MCP 고정값 아님·클라이언트 설정) |
 | 동시 세션 1개 | 싱글톤 |
 | Canvas/WebGL | screenshot 시각 확인만 (한계 명시) |
 
@@ -356,18 +381,34 @@ def register_all(mcp):             # server.py에서 1회 호출
 - `from mcp.server.fastmcp import FastMCP` / `@mcp.tool()` 데코레이터 ✅
 - 이미지 반환 `from mcp.server.fastmcp import Image` → `Image(data=..., format="png")` ✅
 - `mcp.run()` 기본 stdio transport ✅
+- **구조화 출력:** 타입힌트(`dict[str, T]`/TypedDict/dataclass/Pydantic)에서
+  `outputSchema` 자동 생성 ✅ → 반환 타입힌트 구체화 권장
+- **Context 주입:** tool에 `ctx: Context` 파라미터 → 로깅(`ctx.info/...`),
+  진행률 `await ctx.report_progress(progress, total, message)` ✅
+- **Sampling:** `await ctx.session.create_message(messages=[...], max_tokens=...)`
+  로 서버가 클라이언트 LLM에 생성 요청 ✅ (단 Claude Desktop 미지원)
+- **Lifespan:** `@asynccontextmanager` lifespan으로 시작/정리 — 브라우저 기동·종료
+  관리에 사용, `finally`에서 cleanup ✅
+
+**MCP Sampling 가용성** — MCP 사양/지원 현황
+- sampling은 **옵셔널 client capability**(클라이언트가 선언해야 동작), 인간 승인 권장,
+  **Claude Desktop 미지원** ✅ → generate_scenario는 키트 fallback이 기본 경로
 
 **Playwright (Python)** — playwright.dev / microsoft/playwright docs
-- `page.accessibility.snapshot()` **deprecated** → `locator.aria_snapshot()`(YAML),
-  `boxes=True` 옵션은 AI용으로 권장 ✅ (정정 반영)
+- `page.accessibility.snapshot()` **deprecated** → `locator.aria_snapshot()`(YAML) ✅ (정정)
+- `aria_snapshot` 옵션: `mode("ai"/"default")`·`depth`(**≥1.59**), `boxes`(**≥1.60**),
+  `timeout`(≥1.49) — Q1 트리밍에 활용, pyproject 핀 `>=1.60` 전제 ✅
 - `page.goto(url, wait_until=...)` 값: `load`/`domcontentloaded`/`networkidle`/`commit` ✅
 - `page.on("console")`, `page.on("response")`, `page.on("requestfailed")` ✅
   — 4xx/5xx는 `response`(status≥400)로 전달, `requestfailed`는 네트워크 실패 한정 ✅
 - `page.on("dialog")` / `page.expect_event("dialog")`,
   `dialog.accept(prompt_text)` · `dismiss()` · `message()` · `type()` ✅
 - `page.get_by_role(role, name=, exact=)`, `page.get_by_text(text, exact=)` ✅
-- `page.frame_locator(selector)` (snake_case) ✅
+- `page.frame_locator(selector)` (snake_case) — `FrameLocator`는 `get_by_role`/
+  `get_by_text`/`get_by_test_id`/`locator` 노출, frame root에서 셀렉터 체인 동작 ✅
 - `page.wait_for_selector(...)`, `page.wait_for_timeout(ms)`, `page.expect_console_message(...)` ✅
+- `BrowserType.executable_path`(기대 경로 반환, 설치 여부 ≠) — property/메서드 표기는
+  버전별 상이 가능 → 구현 시 재확인 ⚠️
 
 > 제약: playwright.dev API 페이지는 직접 fetch가 403으로 막혀, 일부 항목은
 > GitHub 원본 마크다운 + 공식 검색 결과로 교차 확인함. 구현 중 실제 버전의
