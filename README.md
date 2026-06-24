@@ -50,7 +50,7 @@ blackbox_mcp/
 - [x] 확장: `wait` `switch_frame` `reset_session`
 - [x] 라이브러리 저장: `save_scenario` `load_scenario` `list_scenarios`
 - [ ] **Phase 1** snapshot 크기 실측(Q1) · DOM 모드 정련
-- [ ] **Phase 3** `run_scenario` 실행 엔진 · 리포트 마크다운
+- [ ] **Phase 3** `run_scenario` 실행 엔진 · 리포트 JSON/MD/**HTML(SM-04)**
 - [ ] **Phase 4** `expect_dialog`
 - [ ] **Phase 5** `generate_scenario` 작성 키트(+sampling fallback)
 

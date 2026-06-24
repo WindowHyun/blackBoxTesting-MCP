@@ -216,6 +216,10 @@ def register_all(mcp):             # server.py에서 1회 호출
 - 실패 시 자동 스크린샷 캡처(SM-02) → 리포트 첨부.
 - `continue_on_fail=False`면 첫 실패에서 중단.
 - 종료 후 리포트 저장(SM-03) — §6.
+- **SM-04 (SHOULD):** `report_format`에 `html`/`all`을 지원해 단일 self-contained
+  HTML 리포트(스텝 표 + 스크린샷 인라인 + 콘솔/네트워크 에러)를 추가 생성한다.
+  비개발 페르소나(US-03) 가독성 향상. 외부 의존성 없이 CSS 인라인(NFR 로컬 전용).
+  Phase 3에서 마크다운 렌더러와 함께 구현.
 
 ### 5.4 시나리오 스텝 스키마
 ```json
@@ -258,7 +262,11 @@ def register_all(mcp):             # server.py에서 1회 호출
 - JSON: 시나리오 메타 + 스텝별 결과 배열 + 요약(passed/failed/total, 소요시간).
 - Markdown: 사람이 읽는 요약 — 스텝 표, 실패 스텝의 스크린샷 경로 링크,
   콘솔/네트워크 에러 섹션.
-- 스크린샷은 `reports/screenshots/`에 저장하고 리포트에서 상대경로 참조.
+- HTML(SM-04, SHOULD): 단일 self-contained `.html` — 스텝 표 + 스크린샷 `<img>`
+  인라인 임베드 + 콘솔/네트워크 에러. CSS 인라인, 외부 의존성/네트워크 없음.
+- `formats` ∈ {json, md, html, both(json+md), all(json+md+html)}.
+- 스크린샷은 `reports/screenshots/`에 저장하고 md/json은 상대경로 참조,
+  HTML은 base64 data URI로 임베드(단일 파일 이식성).
 
 ---
 
