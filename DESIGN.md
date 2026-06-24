@@ -1,8 +1,8 @@
 # UI Blackbox Tester MCP — 설계 문서 (DESIGN)
 
-> PRD `UI Blackbox MCP v0.6` 기반 구현 설계.
-> 스택: **Python 3.11+ · Playwright(Chromium) · MCP 공식 SDK(FastMCP) · stdio · Claude Desktop**
-> 범위: Phase 0~5 전체 (MUST/SHOULD/COULD 포함)
+> PRD `UI Blackbox MCP v0.6` 기반 구현 설계 + 확장(리포트 강화 SM-04~09).
+> 스택: **Python 3.11+ · Playwright(Chromium, async API, ≥1.60) · MCP 공식 SDK(FastMCP) · stdio · Claude Desktop**
+> 범위: Phase 0~5 전체 (MUST/SHOULD/COULD 포함). 마일스톤 상태는 ROADMAP 참조.
 
 ---
 
@@ -32,13 +32,12 @@ blackbox_mcp/
     __init__.py
     session.py          # BrowserSession 싱글톤 (BR-01, BR-03, BR-04, 크래시 재시작)
     listeners.py        # 콘솔/네트워크 버퍼 부착 (BR-02)
-    actions.py          # 셀렉터 fallback 체인 (D2), interact 실제 동작
-    locator.py          # 셀렉터 해석 유틸 (data-testid → role → text → css)
+    locator.py          # 셀렉터 fallback 체인 해석 (D2: data-testid → role → text → css)
 
   testing/
     __init__.py
     runner.py           # run_scenario 실행 엔진 (SM-01, SM-02)
-    report.py           # JSON+MD 리포트 생성/저장 (SM-03, D3)
+    report.py           # 리포트 생성/저장 JSON·MD·HTML (SM-03~09, D3)
     library.py          # 시나리오 저장/로드/목록 (SL-02~04)
     secrets.py          # 자격증명 마스킹
 
@@ -225,7 +224,8 @@ def register_all(mcp):             # server.py에서 1회 호출
 | `run_scenario` | `run_scenario(steps, continue_on_fail=False, save_report=True, report_format="both")` | MUST |
 
 - `steps`: JSON 배열, 각 스텝 `{action, ...args}`. action은 위 코어 tool 이름과 동일 어휘.
-- 각 스텝 결과: `{step, action, expected, actual, passed, screenshot_path, console_errors}`.
+- 각 스텝 결과 필드의 정식 정의는 **§6.1 리포트 스키마**를 따른다(`screenshot`·
+  `resolved_by`·`console_errors`/`network_errors`·`ai_reason`·`severity` 등).
 - 실패 시 자동 스크린샷 캡처(SM-02) → 리포트 첨부.
 - `continue_on_fail=False`면 첫 실패에서 중단.
 - 종료 후 리포트 저장(SM-03) — §6.
@@ -404,13 +404,19 @@ SM-01~04와 함께(또는 직후) 구현한다.
 
 ## 10. 구현 순서 (Phase)
 
-- **Phase 0** — 스캐폴드: pyproject, server.py, FastMCP 부팅, ensure_chromium, registry, config, 예시 config/.env, README 골격.
-- **Phase 1** — 코어 PoC(MUST): BrowserSession, listeners, navigate, snapshot. **Q1 실측 → §8 확정.**
-- **Phase 2** — 상호작용/검증(MUST): screenshot, locator 체인(D2), interact, assert_, console, network.
-- **Phase 3** — 시나리오/리포트(MUST/SHOULD): runner(continue_on_fail, 실패 스크린샷), report(JSON+MD, D3).
-- **Phase 4** — 확장(SHOULD): wait, switch_frame, expect_dialog, reset_session, HEADLESS 토글.
-- **Phase 5** — 라이브러리(SHOULD/COULD): generate_scenario, save/load/list_scenario.
-- 각 Phase: 단위 테스트(pytest) 추가, 커밋. 성공지표 측정은 Phase 3 이후 내부 베타 10페이지.
+마일스톤·완료기준(DoD)·상태의 **상세는 [`ROADMAP.md`](./ROADMAP.md)**가 단일
+출처(source of truth)다. 여기서는 개요만 둔다.
+
+| Phase | 범위 | 상태 |
+|---|---|---|
+| 0 | 스캐폴드(서버·레지스트리·세션 골격) | ✅ 완료 |
+| 1 | 코어 PoC: BrowserSession·listeners·navigate·snapshot, **Q1 실측** | 🔜 |
+| 2 | 상호작용/검증: screenshot·locator(D2)·interact·assert_·console·network | ☐ |
+| 3 | 시나리오/리포트: runner + report(JSON/MD/HTML, SM-03~09) | ☐ |
+| 4 | 확장: wait·switch_frame·expect_dialog·reset_session·HEADLESS | ☐ |
+| 5 | 라이브러리: generate_scenario·save/load/list_scenario | ☐ |
+
+각 Phase: 단위 테스트(pytest) 추가 후 커밋. 성공지표 측정은 Phase 3 이후 내부 베타 10페이지.
 
 ---
 
@@ -423,13 +429,19 @@ SM-01~04와 함께(또는 직후) 구현한다.
 
 ---
 
-## 12. 미해결/확인 필요
+## 12. 미해결 / 결정 사항
 
-1. **Q1 트리밍 수치** — Phase 1 실측 후 확정.
-2. **generate_scenario 분업 모델** — 서버가 페이지 구조만 주고 Claude가 steps
-   생성하는 방식으로 설계함. PRD 문구("Claude가 ... 생성해 반환")와 합치하나,
-   서버 내 LLM이 없다는 현실 반영. 구현 전 합의 확인 권장.
-3. **버퍼 클리어 정책** — navigate 누적/유지로 채택(§3.3). 이견 시 조정.
+**미해결 (추가 검토 필요)**
+1. **Q1 트리밍 수치** — Phase 1 실측 후 확정. (네이티브 `depth`/`mode="ai"` +
+   `_MAX_CHARS` 안전장치 방향은 §8에서 확정, 구체 수치만 미정.)
+
+**결정 완료**
+- **generate_scenario 분업 모델** — 서버는 페이지 구조/작성 키트를 반환하고
+  Claude가 steps 생성. sampling 지원 클라이언트에선 `ctx.session.create_message`
+  로 서버측 생성, 미지원(Claude Desktop) 시 키트 fallback. (§5.5)
+- **버퍼 클리어 정책** — navigate는 누적/유지, 명시적 초기화는 `reset_session`. (§3.3)
+- **리포트 형식·강화** — JSON/MD/HTML(SM-04) + SM-05~09 항목·스키마 확정. (§5.3·§6)
+- **a11y 스냅샷 API / sampling 가용성 / Playwright 핀(≥1.60)** — §13 검증 반영.
 
 ---
 
