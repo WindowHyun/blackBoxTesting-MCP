@@ -234,6 +234,21 @@ def register_all(mcp):             # server.py에서 1회 호출
   비개발 페르소나(US-03) 가독성 향상. 외부 의존성 없이 CSS 인라인(NFR 로컬 전용).
   Phase 3에서 마크다운 렌더러와 함께 구현.
 
+#### 리포트 강화 요구사항 (SM-05 ~ SM-09)
+포트폴리오/실무 가치를 위한 리포트 확장. 우선순위순으로 정리하며 Phase 3에서
+SM-01~04와 함께(또는 직후) 구현한다.
+
+| ID | 항목 | 내용 | 우선순위 |
+|---|---|---|---|
+| **SM-05** | **AI 판단 근거 + 수정 제안** | 각 스텝/실패에 Claude의 판단 사유(`ai_reason`)와 실패 시 가설·수정 제안(`ai_suggestion`)을 기록. 블랙박스 AI 검증의 핵심 차별점(공식 playwright-mcp 대비). | SHOULD |
+| **SM-06** | **스텝 캡처 + 셀렉터 투명성 + 에러 귀속** | 스텝마다 캡처(통과/실패 모두), D2 체인 중 **실제 매칭된 셀렉터 전략**(`resolved_by`) 기록, 콘솔/네트워크 에러를 전역이 아닌 **스텝 구간에 귀속**. | SHOULD |
+| **SM-07** | **회귀 비교(이전 실행 대비)** | 같은 시나리오의 직전 실행 결과와 diff("어제 통과 → 오늘 실패"). 시나리오 라이브러리의 최종 실행 메타와 연동. | COULD |
+| **SM-08** | **환경 메타 + 심각도 분류** | OS·Python·**Playwright/브라우저 버전**·뷰포트·타임스탬프 헤더. 실패를 assertion/JS에러/네트워크/타임아웃으로 분류·색상. | SHOULD |
+| **SM-09** | **a11y 발견사항** | `aria_snapshot` 부산물로 role/label 누락 등 접근성 이슈를 부수 리포트. | COULD |
+
+> 범위 관리: SM-05~09는 PRD v0.6 이후 추가되는 **신규 항목**이다. SM-02/03/04는
+> 기존 PRD 범위. 구현은 Phase 3에서 우선순위(SM-05·06·08 → 07·09)대로 진행.
+
 ### 5.4 시나리오 스텝 스키마
 ```json
 {
@@ -273,18 +288,63 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 ---
 
-## 6. 리포트 (testing/report.py, D3 / SM-03)
+## 6. 리포트 (testing/report.py, D3 / SM-03~09)
 
 - 기본 경로 `./reports/`(서버 실행 위치), `REPORT_DIR` env로 재정의, 없으면 자동 생성.
-- 파일명 `report_YYYYMMDD_HHMMSS.json` / `.md`.
-- JSON: 시나리오 메타 + 스텝별 결과 배열 + 요약(passed/failed/total, 소요시간).
-- Markdown: 사람이 읽는 요약 — 스텝 표, 실패 스텝의 스크린샷 경로 링크,
-  콘솔/네트워크 에러 섹션.
-- HTML(SM-04, SHOULD): 단일 self-contained `.html` — 스텝 표 + 스크린샷 `<img>`
-  인라인 임베드 + 콘솔/네트워크 에러. CSS 인라인, 외부 의존성/네트워크 없음.
+- 파일명 `report_YYYYMMDD_HHMMSS.json` / `.md` / `.html`.
 - `formats` ∈ {json, md, html, both(json+md), all(json+md+html)}.
 - 스크린샷은 `reports/screenshots/`에 저장하고 md/json은 상대경로 참조,
   HTML은 base64 data URI로 임베드(단일 파일 이식성).
+
+### 6.1 리포트 데이터 스키마 (JSON)
+```jsonc
+{
+  "name": "로그인 흐름",
+  "description": "이메일/비번 입력 후 대시보드 진입 검증",   // 자연어(②)
+  "meta": {                                              // SM-08
+    "started_at": "2026-06-24T10:00:00",
+    "duration_ms": 4210,
+    "target_url": "https://example.com/login",
+    "os": "Linux", "python": "3.11.x",
+    "playwright": "1.60.x", "browser": "chromium 1.60.x",
+    "headless": true, "viewport": "1280x720",
+    "credentials_masked": true                           // 보안 배지
+  },
+  "summary": { "total": 6, "passed": 5, "failed": 1, "pass_rate": 0.83 },
+  "steps": [
+    {
+      "step": 4,
+      "action": "interact", "raw": { "type": "click", "selector": "role=button name=로그인" },
+      "selector_input": "role=button name=로그인",
+      "resolved_by": "role",            // SM-06: D2 체인 중 실제 매칭 전략
+      "expected": "클릭 성공", "actual": "클릭됨",
+      "passed": true,
+      "duration_ms": 320,
+      "screenshot": "screenshots/step04.png",   // SM-06: 통과/실패 모두
+      "console_errors": [], "network_errors": [], // SM-06: 스텝 구간 귀속
+      "severity": null,                  // SM-08: assertion|js_error|network|timeout
+      "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
+      "ai_suggestion": null              // SM-05: 실패 시 가설/수정 제안
+    }
+  ],
+  "a11y_findings": [],                   // SM-09: role/label 누락 등
+  "regression": {                        // SM-07: 직전 실행 대비
+    "previous_run": "2026-06-23T18:00:00",
+    "changed": [{ "step": 4, "from": "passed", "to": "failed" }]
+  }
+}
+```
+
+### 6.2 출력별 표현
+- **JSON**: 위 스키마 그대로(기계 판독·CI 연계용).
+- **Markdown**: 헤더 요약 + 스텝 표(셀렉터/판단근거 포함) + 실패 상세 + 콘솔/네트워크 + a11y 섹션.
+- **HTML(SM-04)**: 단일 self-contained `.html` — 통과율 헤더, 스텝 카드(캡처 인라인),
+  실패 강조·심각도 색상, AI 판단근거·수정제안, 회귀 diff, 환경 메타 푸터.
+  CSS 인라인, 스크린샷 base64, 외부 의존성/네트워크 없음.
+
+### 6.3 단계적 구현
+- 1차(Phase 3): meta(SM-08) · 스텝 캡처/셀렉터/에러귀속(SM-06) · AI 근거/제안(SM-05) · JSON/MD/HTML.
+- 2차: 회귀 비교(SM-07) · a11y 발견(SM-09).
 
 ---
 
