@@ -132,13 +132,18 @@ HEADLESS 토글** `[BR-03]` ✅
 - DoD: ✅ iframe 스코프 / 다이얼로그 accept·dismiss·텍스트검증 / 시간기반 대기 /
   세션 초기화 버퍼 클리어 / HEADLESS 파싱.
 
-### Phase 5 — 라이브러리·생성  (의존: Phase 3)
+### Phase 5 — 라이브러리·생성  (의존: Phase 3) ✅
 
-**T5.1 save/load/list 통합** `[SL-02~04]` — Files: `tests/test_library.py` · DoD: 저장→로드→run 왕복.
+**T5.1 save/load/list 통합** `[SL-02~04]` ✅ — `tests/test_library.py`: 저장→로드→list
+왕복, overwrite 가드, 로드한 시나리오 run까지.
 
-**T5.2 generate_scenario 작성 키트** `[SL-01]` — Files: `tools/generate.py` · Steps: navigate→snapshot→상호작용 요소+D2 셀렉터+스텝 스키마+few-shot 반환. DoD: 유효 키트 반환.
+**T5.2 generate_scenario 작성 키트** `[SL-01]` ✅ — `tools/generate.py`: navigate→
+페이지 상호작용 요소 수집(JS) + **D2 suggested_selector**(testid>role+name>text>css)
++ step_schema + example 반환. 키트로 조합한 steps가 실제 실행됨을 검증.
 
-**T5.3 sampling fallback 분기** `[SL-01]` — Files: `tools/generate.py` · Steps: `ctx: Context` 주입, 지원 시 `ctx.session.create_message`로 생성, 미지원 시 키트. DoD: 분기 동작.
+**T5.3 sampling fallback 분기** `[SL-01]` ✅ — `ctx` 있고 sampling 지원 시
+`ctx.session.create_message`로 steps 생성(`mode:"generated"`), 미지원 시 키트
+(`mode:"kit"`). Desktop은 키트 경로(기본).
 
 ---
 
