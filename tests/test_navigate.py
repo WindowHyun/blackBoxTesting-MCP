@@ -27,3 +27,10 @@ async def test_network_buffer_captures_failed_request(session):
     net = await get_network_errors()
     # the missing image should surface as a failed request
     assert any("does-not-exist.png" in e["url"] for e in net)
+
+
+async def test_navigate_resets_frame_context(session):
+    # a stale iframe context must not survive a top-level navigation
+    session.set_frame("#some-frame")
+    await navigate(fixture_url("basic.html"), wait_until="load")
+    assert session._frame_selector is None

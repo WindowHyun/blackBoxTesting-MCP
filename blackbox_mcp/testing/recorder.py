@@ -11,11 +11,15 @@ import time
 
 from . import report, secrets
 
-# Tools whose calls become report steps.
+# Tools whose calls become report steps. (snapshot/get_* are observational reads
+# and intentionally excluded so they don't add noise to the report.)
 RECORDABLE = {
-    "navigate", "interact", "assert_", "snapshot", "screenshot", "wait",
+    "navigate", "interact", "assert_", "screenshot", "wait",
     "switch_frame", "expect_dialog", "reset_session", "use_real_browser",
 }
+
+# Safety cap so a long-lived server can't grow the log without bound.
+_MAX_STEPS = 1000
 
 _LOG: list[dict] = []
 
@@ -128,6 +132,9 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         "ai_reason": reason,
         "ai_suggestion": suggestion,
     })
+
+    if len(_LOG) > _MAX_STEPS:
+        del _LOG[:-_MAX_STEPS]
 
     if exc is not None:
         raise exc

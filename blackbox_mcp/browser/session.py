@@ -217,8 +217,15 @@ class BrowserSession:
 
     # ── accessors ────────────────────────────────────────────────
     def is_alive(self) -> bool:
-        """True if the browser is still connected (NFR crash detection)."""
+        """True if the browser is still usable (NFR crash detection).
+
+        Checks the page first: ``context.browser`` can be None for a persistent
+        context (per Playwright docs), so relying on it alone would make every
+        call think the session died → relaunch loop / new window each time.
+        """
         try:
+            if self._page is not None and not self._page.is_closed():
+                return True
             return self._browser is not None and self._browser.is_connected()
         except Exception:
             return False

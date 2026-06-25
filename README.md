@@ -9,7 +9,7 @@
   <br><em>자동 생성된 리포트 — 통과율·스텝별 스크린샷·실패 원인·회귀·접근성·자격증명 마스킹</em>
 </p>
 
-Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 52건 green**
+Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 55건 green**
 
 ---
 
@@ -138,7 +138,7 @@ blackbox_mcp/
 ## 🔧 개발
 ```bash
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q        # 52건 (단위 + file:// 통합 + E2E)
+.venv/bin/python -m pytest -q        # 55건 (단위 + file:// 통합 + E2E)
 ```
 
 ## ⚙️ 환경변수
