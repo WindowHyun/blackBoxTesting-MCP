@@ -11,21 +11,17 @@
       },
       "selector_input": null,
       "resolved_by": null,
-      "expected": "navigation",
-      "actual": {
-        "title": "Imperfect Login",
-        "url": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/imperfect.html",
-        "status": 200
-      },
+      "expected": "페이지 도착",
+      "actual": "“Imperfect Login” · HTTP 200",
       "passed": true,
-      "duration_ms": 21,
-      "screenshot": null,
+      "duration_ms": 25,
+      "screenshot": "screenshots/login_demo_step01.png",
       "console_errors": [
         {
           "level": "error",
           "text": "Failed to load resource: net::ERR_FILE_NOT_FOUND",
           "location": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/logo.png:0",
-          "ts": 1782369324.715274
+          "ts": 1782369918.8959408
         }
       ],
       "network_errors": [
@@ -55,7 +51,7 @@
       "actual": "typed",
       "passed": true,
       "duration_ms": 24,
-      "screenshot": null,
+      "screenshot": "screenshots/login_demo_step02.png",
       "console_errors": [],
       "network_errors": [],
       "severity": null,
@@ -64,6 +60,28 @@
     },
     {
       "step": 3,
+      "action": "interact",
+      "raw": {
+        "action": "interact",
+        "type": "type",
+        "selector": "testid=password",
+        "value": "$***"
+      },
+      "selector_input": "testid=password",
+      "resolved_by": "testid",
+      "expected": "type ok",
+      "actual": "typed",
+      "passed": true,
+      "duration_ms": 9,
+      "screenshot": "screenshots/login_demo_step03.png",
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "type via testid selector",
+      "ai_suggestion": null
+    },
+    {
+      "step": 4,
       "action": "interact",
       "raw": {
         "action": "interact",
@@ -76,7 +94,7 @@
       "actual": "clicked",
       "passed": true,
       "duration_ms": 38,
-      "screenshot": null,
+      "screenshot": "screenshots/login_demo_step04.png",
       "console_errors": [],
       "network_errors": [],
       "severity": null,
@@ -84,7 +102,7 @@
       "ai_suggestion": null
     },
     {
-      "step": 4,
+      "step": 5,
       "action": "assert",
       "raw": {
         "action": "assert",
@@ -96,8 +114,8 @@
       "expected": "text_visible",
       "actual": true,
       "passed": true,
-      "duration_ms": 6,
-      "screenshot": null,
+      "duration_ms": 7,
+      "screenshot": "screenshots/login_demo_step05.png",
       "console_errors": [],
       "network_errors": [],
       "severity": null,
@@ -105,7 +123,7 @@
       "ai_suggestion": null
     },
     {
-      "step": 5,
+      "step": 6,
       "action": "assert",
       "raw": {
         "action": "assert",
@@ -118,7 +136,7 @@
       "actual": false,
       "passed": false,
       "duration_ms": 3,
-      "screenshot": "screenshots/login_demo_step05.png",
+      "screenshot": "screenshots/login_demo_step06.png",
       "console_errors": [],
       "network_errors": [],
       "severity": "assertion",
@@ -127,13 +145,14 @@
     }
   ],
   "summary": {
-    "total": 5,
-    "passed": 4,
+    "total": 6,
+    "passed": 5,
     "failed": 1,
-    "pass_rate": 0.8
+    "pass_rate": 0.833
   },
+  "description": "이메일·비밀번호로 로그인하면 '로그인됨' 상태가 보여야 한다 (회귀/접근성 동시 점검)",
   "meta": {
-    "started_at": "2026-06-25T06:35:24",
+    "started_at": "2026-06-25T06:45:18",
     "os": "Linux",
     "python": "3.11.15",
     "playwright": "1.60.0",
@@ -141,7 +160,7 @@
     "headless": true,
     "executable": "/opt/pw-browsers/chromium",
     "credentials_masked": true,
-    "duration_ms": 162
+    "duration_ms": 425
   },
   "a11y_findings": [
     {
@@ -161,10 +180,10 @@
     }
   ],
   "regression": {
-    "previous_run": "2026-06-25T06:35:24",
+    "previous_run": "2026-06-25T06:45:18",
     "changed": [
       {
-        "step": 5,
+        "step": 6,
         "from": "absent",
         "to": "failed"
       }

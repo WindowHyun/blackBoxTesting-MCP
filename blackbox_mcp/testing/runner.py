@@ -61,7 +61,9 @@ async def _dispatch(step: dict) -> dict:
 
     if action == "navigate":
         res = await navigate(secrets.resolve(step["url"]), step.get("wait_until"))
-        out.update(expected="navigation", actual=res, passed=True,
+        out.update(expected="페이지 도착",
+                   actual=f"“{res.get('title')}” · HTTP {res.get('status')}",
+                   passed=True,
                    ai_reason=f"navigated to {res.get('url')} (status {res.get('status')})")
 
     elif action == "interact":
@@ -128,6 +130,7 @@ async def run(
     steps: list[dict],
     *,
     name: str = "scenario",
+    description: str = "",
     continue_on_fail: bool = False,
     screenshot_each: bool = False,
 ) -> dict[str, Any]:
@@ -135,6 +138,7 @@ async def run(
     session = await get_session()
     t0 = time.monotonic()
     result = empty_result(name)
+    result["description"] = description
     result["meta"] = _meta(session)
 
     for idx, step in enumerate(steps, start=1):

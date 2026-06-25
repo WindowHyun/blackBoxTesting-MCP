@@ -12,14 +12,15 @@ from ._registry import tool
 async def run_scenario(
     steps: list[dict],
     name: str = "scenario",
+    description: str = "",
     continue_on_fail: bool = False,
     save_report: bool = True,
     report_format: str = "both",
     screenshot_each: bool = False,
 ) -> dict:
     result = await runner.run(
-        steps, name=name, continue_on_fail=continue_on_fail,
-        screenshot_each=screenshot_each,
+        steps, name=name, description=description,
+        continue_on_fail=continue_on_fail, screenshot_each=screenshot_each,
     )
     if save_report:
         result["report_files"] = report.save(result, formats=report_format)
