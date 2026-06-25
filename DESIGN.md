@@ -378,19 +378,28 @@ SM-01~04와 함께(또는 직후) 구현한다.
 
 ---
 
-## 8. Q1 — snapshot 출력 크기 정책 (미결, Phase 1 실측 후 확정)
+## 8. Q1 — snapshot 출력 크기 정책 (Phase 1 실측 반영, 메커니즘 확정)
 
-대형 SPA aria_snapshot(YAML) 출력이 MCP 컨텍스트 한도를 초과할 수 있음. **잠정 설계**:
-- `snapshot(mode, depth=N, focus=selector)` 파라미터 도입.
-  (`focus` 주어지면 `page.locator(focus).aria_snapshot()`로 서브트리만.)
-- **네이티브 트리밍 옵션 우선 사용(공식):** `aria_snapshot(depth=N)`로 깊이 제한,
-  `aria_snapshot(mode="ai")`로 AI 친화 포맷 — 단순 문자 절단보다 의미 보존.
-  ※ 버전 게이트: `mode`/`depth`는 **Playwright ≥ 1.59**, `boxes`는 **≥ 1.60**.
-  → pyproject 핀을 `playwright>=1.60`으로 상향(이 옵션 사용 전제).
-- `aria_snapshot(boxes=True)` 옵션은 각 요소 bounding box를 덧붙여 주며
-  공식 문서가 "AI 소비에 유용"하다고 명시 → interact 셀렉터 매칭 보조로 검토.
-- 최후 안전장치로 문자수 상한(`_MAX_CHARS`) 절단은 유지.
-- Phase 1 PoC에서 실제 토큰/문자 크기를 측정 → depth·상한 규칙 확정.
+대형 SPA aria_snapshot(YAML) 출력이 MCP 컨텍스트 한도를 초과할 수 있음.
+
+**실측 (Playwright 1.60, 합성 DOM 30 섹션 기준):**
+| 호출 | 결과 |
+|---|---|
+| `aria_snapshot()` (기본) | 2317 chars / 121 lines — 이미 간결 |
+| `aria_snapshot(depth=N)` 단독 | **무효** (depth가 무시됨) |
+| `aria_snapshot(mode="ai")` | 4502 chars — element ref 포함해 더 김 |
+| `aria_snapshot(mode="ai", depth=1)` | **684 chars / 31 lines — 대폭 축소** |
+
+**확정된 메커니즘 (`tools/snapshot.py`):**
+- 기본 `mode="a11y"` → 평문 `aria_snapshot()` (간결, Claude 이해용 기본값).
+- `depth`가 주어지면 **`mode="ai"`와 함께** 적용해야 효과가 있음 → 내부적으로
+  `aria_snapshot(mode="ai", depth=N)` 사용(element ref도 같이 와 후속 interact에 유용).
+- `focus=<css>`로 서브트리 한정.
+- 최후 안전장치로 문자수 상한 `_MAX_CHARS`(현재 20000) 절단 유지.
+- ※ `mode`/`depth`는 Playwright ≥1.59, `boxes`는 ≥1.60 — 핀 `>=1.60` 충족.
+
+**미정(네트워크 필요):** 실제 대형 SPA의 절대 크기·권장 depth 수치는 아웃바운드가
+열린 환경에서 추가 측정 후 `_MAX_CHARS`/기본 depth 기본값을 조정한다.
 
 ---
 

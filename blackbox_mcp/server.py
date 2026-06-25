@@ -8,16 +8,30 @@ Boot order:
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 
 from mcp.server.fastmcp import FastMCP
 
 from .bootstrap import ensure_chromium
+from .browser.session import close_session
 from .tools import register_all
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("blackbox_mcp")
 
-mcp = FastMCP("ui-blackbox")
+
+@asynccontextmanager
+async def lifespan(_server: FastMCP):
+    """Manage browser lifecycle. The session is created lazily on first use;
+    here we guarantee it is torn down on shutdown so no browser process leaks."""
+    try:
+        yield {}
+    finally:
+        await close_session()
+        log.info("Browser session closed on shutdown.")
+
+
+mcp = FastMCP("ui-blackbox", lifespan=lifespan)
 
 
 def main() -> None:

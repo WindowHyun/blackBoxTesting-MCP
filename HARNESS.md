@@ -56,35 +56,28 @@ python -m venv .venv
 - Verify(통과): `PY -c "import asyncio,blackbox_mcp.browser as b; asyncio.run(b.get_session())"` 류 스모크 + aria_snapshot 동작.
 - DoD: ✅ async import / ✅ 사전설치 브라우저 런치 / ✅ pytest green.
 
-**T1.2 lifespan 배선 + 세션 정리** `[BR-01, NFR]`
+**T1.2 lifespan 배선 + 세션 정리** `[BR-01, NFR]` ✅
 - Files: `blackbox_mcp/server.py`, `blackbox_mcp/browser/session.py`
-- Steps: FastMCP `lifespan`(@asynccontextmanager)에서 세션 준비, `finally`에서 `close()`. `get_session()` 지연초기화와 병행.
-- Verify: `PY -c "import asyncio,blackbox_mcp.server as s; ..."` 서버 import + lifespan 진입/종료 스모크.
-- DoD: 종료 시 브라우저/PW 프로세스 정리(릭 없음) 확인.
+- 결과: `lifespan`(@asynccontextmanager) + `close_session()` → 종료 시 세션 정리.
+- DoD: ✅ lifespan 종료 시 세션 None(릭 없음) 스모크 통과.
 
-**T1.3 픽스처 + navigate 통합 테스트** `[CT-01, BR-02]`
-- Files: `tests/fixtures/basic.html`, `tests/test_navigate.py`
-- Steps: 정적 HTML 픽스처 작성 → `file://`로 `navigate` → `{title,url,status}` 검증. 콘솔/네트워크 버퍼 수집 확인.
-- Verify: `PYTEST tests/test_navigate.py`
-- DoD: navigate 결과 정확 / 콘솔·네트워크 버퍼에 이벤트 적재.
+**T1.3 픽스처 + navigate 통합 테스트** `[CT-01, BR-02]` ✅
+- Files: `tests/fixtures/basic.html`, `tests/conftest.py`, `tests/test_navigate.py`
+- 결과: `file://` navigate → title/url 검증(file://는 status 200 반환), 콘솔 error·
+  네트워크 실패(누락 이미지) 버퍼 적재 확인.
+- DoD: ✅ 3 테스트 통과 (browser 미가용 시 자동 skip).
 
-**T1.4 snapshot 실동작 + Q1 실측** `[CT-02, Q1]`
+**T1.4 snapshot 실동작 + Q1 실측** `[CT-02, Q1]` ✅
 - Files: `blackbox_mcp/tools/snapshot.py`, `tests/test_snapshot.py`, `DESIGN.md §8`
-- Steps: `aria_snapshot()` YAML 실동작 확인. 대형 페이지로 문자/토큰 크기 측정 → `depth`/`mode="ai"` + `_MAX_CHARS` 규칙 확정 → §8 수치 기입.
-- Verify: `PYTEST tests/test_snapshot.py`
-- DoD: a11y/dom 모드 동작 / Q1 측정값 §8 기록 / 트리밍 동작.
+- 결과: a11y(aria_snapshot)/dom 동작. **Q1 발견: `depth`는 `mode="ai"`와 함께만
+  유효**(단독 무시) → snapshot이 depth 시 ai모드 사용. §8에 수치 기록.
+- DoD: ✅ a11y/dom/depth 트리밍 테스트 통과 / §8 갱신.
 
-**T1.5 dom 모드 정련** `[CT-02]`
-- Files: `blackbox_mcp/tools/snapshot.py`
-- Steps: 임시 `inner_text` → 태그/role/text 간략 트리.
-- Verify: `PYTEST tests/test_snapshot.py`
-- DoD: dom 모드가 구조적 outline 반환.
+**T1.5 dom 모드 정련** `[CT-02]` — (보류) 현재 `inner_text` 유지. 태그/role 트리화는
+네트워크 열린 환경에서 실제 페이지로 효용 확인 후 진행.
 
-**T1.6 bootstrap executable_path 재확인** `[D1]`
-- Files: `blackbox_mcp/bootstrap.py`
-- Steps: 설치 버전에서 property/메서드 확정, 존재 체크 `os.path.exists` 견고화.
-- Verify: `PY -c "from blackbox_mcp.bootstrap import ensure_chromium; ensure_chromium()"`
-- DoD: 이미 설치 시 즉시 통과 / 미설치 시 install 호출.
+**T1.6 bootstrap executable_path** `[D1]` ✅ — T1.1에서 `executable_path` +
+`os.path.exists` 견고화로 함께 처리(다운로드 실패 비크래시).
 
 ### Phase 2 — 상호작용·검증  (의존: T1.2~1.4)
 

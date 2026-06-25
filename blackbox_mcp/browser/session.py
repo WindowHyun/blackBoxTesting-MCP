@@ -104,3 +104,11 @@ async def get_session() -> BrowserSession:
         _SESSION = BrowserSession()
         await _SESSION.start()
     return _SESSION
+
+
+async def close_session() -> None:
+    """Close and drop the singleton (used by the server lifespan on shutdown)."""
+    global _SESSION
+    if _SESSION is not None:
+        await _SESSION.close()
+        _SESSION = None
