@@ -120,7 +120,12 @@ assert/snapshot/wait 매핑 + `continue_on_fail`. per-step 결과.
 
 **T3.10 마스킹 연동** `[제약]` ✅ — `secrets.mask_step`로 `${VAR}`/민감값 리포트 마스킹.
 
-**T3.9 (2차) 회귀·a11y** `[SM-07, SM-09]` — 보류(다음 사이클).
+**T3.9 (2차) 회귀·a11y** `[SM-07, SM-09]` ✅ — `report.compute_regression()`(히스토리
+`reports/history/{name}.json` 대비 step 상태 diff) + runner `_a11y_audit()`(img-alt·
+label·accessible-name). MD/HTML에 섹션 렌더. test_backlog.py 4건.
+
+**T1.5 dom 모드 트리화** `[CT-02]` ✅ — `inner_text` → 구조 outline(tag[testid]{role}:text)
+JS 워크. test_backlog의 dom outline 검증.
 
 ### Phase 4 — 확장 Tools  (의존: Phase 2) ✅
 

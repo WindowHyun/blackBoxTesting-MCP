@@ -187,7 +187,37 @@ async def run(
         "pass_rate": round(passed_n / total, 3) if total else 0.0,
     }
     result["meta"]["duration_ms"] = int((time.monotonic() - t0) * 1000)
+    result["a11y_findings"] = await _a11y_audit(session)   # SM-09
+    report.compute_regression(result)                      # SM-07
     return result
+
+
+_A11Y_JS = """
+() => {
+  const out = [];
+  document.querySelectorAll('img:not([alt])').forEach(e =>
+    out.push({type: 'img-missing-alt', tag: 'img', info: (e.getAttribute('src')||'').slice(-40)}));
+  document.querySelectorAll('button, a[href]').forEach(e => {
+    const name = (e.getAttribute('aria-label') || e.textContent || '').trim();
+    if (!name) out.push({type: 'no-accessible-name', tag: e.tagName.toLowerCase()});
+  });
+  document.querySelectorAll('input:not([type=hidden]), select, textarea').forEach(e => {
+    const hasLabel = e.id && document.querySelector('label[for="' + e.id + '"]');
+    const aria = e.getAttribute('aria-label') || e.getAttribute('placeholder');
+    if (!hasLabel && !aria)
+      out.push({type: 'control-missing-label', tag: e.tagName.toLowerCase(), name: e.name || null});
+  });
+  return out.slice(0, 50);
+}
+"""
+
+
+async def _a11y_audit(session) -> list[dict]:
+    """SM-09: cheap accessibility findings as a by-product of the page state."""
+    try:
+        return await session.page.evaluate(_A11Y_JS)
+    except Exception:
+        return []
 
 
 def _meta(session) -> dict[str, Any]:

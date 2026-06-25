@@ -12,5 +12,11 @@
 시나리오(요약):
 ```
 navigate → type(email) → click(submit) → assert "로그인됨"(pass) → assert "없는텍스트"(fail)
-결과: 4/5 passed (0.8), 실패 스텝 5에 스크린샷·심각도(assertion)·수정 제안 첨부
+결과: 4/5 passed (0.8)
 ```
+한 리포트에 담긴 것:
+- 스텝 표(셀렉터 `resolved_by`, 소요시간, 심각도)
+- 실패 스텝 5: 스크린샷 + AI 수정 제안(SM-05)
+- **회귀(SM-07)**: 직전 실행 대비 step 5 `absent → failed`
+- **접근성 발견(SM-09)**: img-missing-alt, control-missing-label ×2
+- 환경 메타(OS/Python/Playwright)·자격증명 마스킹 배지

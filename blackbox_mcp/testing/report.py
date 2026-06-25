@@ -29,6 +29,46 @@ def ensure_dirs() -> Path:
     return report_dir
 
 
+def compute_regression(result: dict) -> dict:
+    """SM-07: compare this run with the previous run of the same scenario.
+
+    Reads/writes reports/history/{name}.json. Sets result['regression'] with the
+    previous run timestamp and the list of steps whose pass/fail status changed,
+    then records the current run as the new baseline.
+    """
+    name = result.get("name", "scenario")
+    hist_dir = CONFIG.report_dir / "history"
+    hist_dir.mkdir(parents=True, exist_ok=True)
+    path = hist_dir / f"{_SAFE.sub('_', name)}.json"
+
+    cur = [{"step": s["step"], "action": s.get("action"), "passed": s["passed"]}
+           for s in result.get("steps", [])]
+    changed = []
+    prev_ts = None
+    if path.exists():
+        try:
+            prev = json.loads(path.read_text(encoding="utf-8"))
+            prev_ts = prev.get("ts")
+            prev_by_step = {s["step"]: s["passed"] for s in prev.get("steps", [])}
+            for s in cur:
+                was = prev_by_step.get(s["step"])
+                if was is None:
+                    changed.append({"step": s["step"], "from": "absent",
+                                    "to": "passed" if s["passed"] else "failed"})
+                elif was != s["passed"]:
+                    changed.append({"step": s["step"],
+                                    "from": "passed" if was else "failed",
+                                    "to": "passed" if s["passed"] else "failed"})
+        except Exception:
+            pass
+
+    result["regression"] = {"previous_run": prev_ts, "changed": changed}
+    path.write_text(json.dumps(
+        {"ts": result.get("meta", {}).get("started_at"), "steps": cur},
+        ensure_ascii=False, indent=2), encoding="utf-8")
+    return result
+
+
 async def capture_step_screenshot(session, name: str, idx: int) -> str | None:
     """Capture the current page to reports/screenshots and return a rel path."""
     try:
@@ -105,6 +145,19 @@ def _render_markdown(result: dict) -> str:
             for ne in st.get("network_errors", []):
                 lines.append(f"  - network: {ne.get('url')} "
                              f"{ne.get('status') or ne.get('failure')}")
+
+    reg = result.get("regression") or {}
+    if reg.get("changed"):
+        lines += ["", "## 회귀 (직전 실행 대비)"]
+        lines.append(f"_기준: {reg.get('previous_run')}_")
+        for c in reg["changed"]:
+            lines.append(f"- step {c['step']}: {c['from']} → **{c['to']}**")
+
+    a11y = result.get("a11y_findings") or []
+    if a11y:
+        lines += ["", f"## 접근성 발견 ({len(a11y)})"]
+        for f in a11y[:20]:
+            lines.append(f"- `{f.get('type')}` <{f.get('tag')}> {f.get('name') or f.get('info') or ''}")
     return "\n".join(lines)
 
 
@@ -184,7 +237,29 @@ img{{margin-top:8px}}
 <th>result</th><th>time</th><th>detail</th></tr></thead>
 <tbody>{''.join(rows)}</tbody>
 </table></div>
+{_extras_html(result)}
 </body></html>"""
+
+
+def _extras_html(result: dict) -> str:
+    out = ""
+    reg = result.get("regression") or {}
+    if reg.get("changed"):
+        items = "".join(
+            f"<li>step {c['step']}: {html.escape(c['from'])} → "
+            f"<b>{html.escape(c['to'])}</b></li>" for c in reg["changed"])
+        out += (f'<div class="card"><h1>회귀 (직전 실행 대비)</h1>'
+                f'<div class="meta">기준: {html.escape(str(reg.get("previous_run")))}</div>'
+                f'<ul>{items}</ul></div>')
+    a11y = result.get("a11y_findings") or []
+    if a11y:
+        items = "".join(
+            f"<li><code>{html.escape(str(f.get('type')))}</code> "
+            f"&lt;{html.escape(str(f.get('tag')))}&gt; "
+            f"{html.escape(str(f.get('name') or f.get('info') or ''))}</li>"
+            for f in a11y[:30])
+        out += (f'<div class="card"><h1>접근성 발견 ({len(a11y)})</h1><ul>{items}</ul></div>')
+    return out
 
 
 def _b64(path: Path) -> str | None:

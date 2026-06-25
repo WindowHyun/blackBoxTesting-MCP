@@ -53,9 +53,9 @@ blackbox_mcp/
       · 셀렉터투명성/에러귀속(SM-06) · 환경메타·심각도(SM-08) · 마스킹. 샘플: [`examples/`](./examples/)
 - [x] **Phase 4** `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `HEADLESS`
 - [x] **Phase 5** `generate_scenario`(작성 키트 + sampling fallback) · `save/load/list_scenario`
-- [ ] 백로그: 회귀비교(SM-07) · a11y(SM-09) · dom 모드 트리화(T1.5)
+- [x] 백로그: 회귀비교(SM-07) · a11y(SM-09) · dom 트리화(T1.5)
 
-테스트 47건 green (단위 + `file://` 통합 + E2E).
+테스트 51건 green (단위 + `file://` 통합 + E2E).
 
 ## 개발
 ```bash
