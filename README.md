@@ -1,64 +1,127 @@
 # UI Blackbox Tester MCP
 
-자연어 지시만으로 UI를 검증하는 MCP 서버. Claude Desktop에 브라우저 조작 능력을
-붙여, 테스트 코드 없이 "로그인 흐름이 되는지 확인해줘"라고 말하면 Claude가 직접
-브라우저를 열고 클릭·입력·검증한 뒤 리포트를 남긴다. (블랙박스 방식)
+> **자연어로 UI를 테스트하는 MCP 서버.** Claude Desktop에 브라우저 조작 능력을 붙여,
+> 테스트 코드 없이 *"로그인 흐름이 되는지 확인해줘"* 라고 말하면 Claude가 직접
+> 브라우저를 열고 클릭·입력·검증한 뒤 **QA용 리포트(HTML/MD/JSON)**를 남긴다.
 
-> 설계 근거는 [`DESIGN.md`](./DESIGN.md), 마일스톤은 [`ROADMAP.md`](./ROADMAP.md),
-> 실행 플레이북은 [`HARNESS.md`](./HARNESS.md), 에이전트 컨텍스트는
-> [`CLAUDE.md`](./CLAUDE.md). 요구사항은 PRD v0.6 기준.
+<p align="center">
+  <img src="examples/sample_report_preview.png" alt="샘플 리포트" width="620">
+  <br><em>자동 생성된 리포트 — 통과율·스텝별 스크린샷·실패 원인·회귀·접근성·자격증명 마스킹</em>
+</p>
 
-## 스택
-Python 3.11+ · Playwright(Chromium) · MCP 공식 SDK(FastMCP) · stdio · Claude Desktop
+Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 51건 green**
 
-## 설치
+---
+
+## ✨ 무엇이 다른가 (vs 일반 Playwright MCP)
+
+브라우저 조작만 하는 도구는 많다. 이 프로젝트는 **QA 워크플로**에 초점을 둔다.
+
+| | 일반 브라우저 MCP | **UI Blackbox MCP** |
+|---|---|---|
+| 시나리오 작성 | 셀렉터를 직접 작성 | **자연어 → 키트 → 재사용 시나리오 생성**(`generate_scenario`) |
+| 재사용 | 매번 새로 | **이름 붙여 저장·로드**(시나리오 라이브러리) |
+| 결과 | 텍스트/로그 | **QA 리포트**: 통과율·스텝 스크린샷·**AI 실패 원인·수정 제안**·**회귀 비교**·**접근성 발견**·심각도 |
+| 셀렉터 안정성 | 빌드마다 깨짐 | **D2 우선순위 체인**(data-testid→role+name→text→css) + `resolved_by` 투명성 |
+| 보안 | — | **자격증명 마스킹**(`${VAR}` env 주입, 리포트 비노출) |
+
+→ 개발자 도구가 아니라 **비개발 QA/기획자도 자연어로 쓰는 회귀 테스트 자동화**.
+
+---
+
+## 🚀 빠른 시작
+
+### 1) 설치
 ```bash
-pip install -e .
-```
-Chromium은 서버 **최초 실행 시 자동 설치**된다(D1). 별도 명령 불필요.
+git clone https://github.com/WindowHyun/blackBoxTesting-MCP.git
+cd blackBoxTesting-MCP
 
-## Claude Desktop 등록
-`claude_desktop_config.json`에 한 블록 추가 (예시: `claude_desktop_config.example.json`):
+python -m venv .venv
+.venv/bin/pip install -e .          # 의존성(mcp, playwright) 설치
+.venv/bin/playwright install chromium   # 브라우저(최초 1회). 생략 시 서버 첫 실행에 자동 설치
+```
+> 사내/CI 등 브라우저 CDN이 막힌 환경은 사전설치 바이너리를 쓰도록
+> `CHROMIUM_EXECUTABLE=/path/to/chrome` 환경변수를 지정하면 된다.
+
+### 2) Claude Desktop 등록
+설정 파일에 한 블록 추가:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
 ```json
 {
   "mcpServers": {
-    "ui-blackbox": { "command": "python", "args": ["-m", "blackbox_mcp.server"] }
+    "ui-blackbox": {
+      "command": "/절대경로/blackBoxTesting-MCP/.venv/bin/python",
+      "args": ["-m", "blackbox_mcp.server"],
+      "env": {
+        "HEADLESS": "true",
+        "REPORT_DIR": "/절대경로/blackBoxTesting-MCP/reports"
+      }
+    }
   }
 }
 ```
+> `command`는 **venv의 python 절대경로**를 권장(시스템 python의 의존성 충돌 회피).
+> Windows는 `".venv\\Scripts\\python.exe"`.
 
-## 환경변수
-`.env.example` 참고. 주요 항목: `HEADLESS`, `BROWSER`, `REPORT_DIR`,
-`SCENARIO_DIR`, `DEFAULT_WAIT_UNTIL`.
+### 3) Claude Desktop 재시작 → 대화에서 바로
+> *"https://example.com/login 열어서 로그인 흐름 테스트하고 리포트 만들어줘"*
 
-## 구조
+리포트는 `REPORT_DIR`(기본 `./reports`)에 `report_YYYYMMDD_HHMMSS.{json,md,html}`로 저장된다.
+
+---
+
+## 💬 사용 예 (자연어)
+- *"이 페이지에서 회원가입 폼이 빈 값일 때 에러 뜨는지 확인해줘"*
+- *"로그인 시나리오를 만들어서 'smoke_login'으로 저장해줘"* → 다음부턴 *"smoke_login 돌려줘"*
+- *"방금 테스트, 어제 대비 뭐가 깨졌어?"* (회귀 비교)
+- *"콘솔 에러랑 4xx 응답 있었어?"*
+
+---
+
+## 🧰 MCP Tools (16)
+
+| 그룹 | Tool |
+|---|---|
+| 코어 | `navigate` · `snapshot`(a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
+| 확장 | `wait` · `switch_frame` · `expect_dialog` · `reset_session` |
+| 시나리오 | `run_scenario` · `generate_scenario` |
+| 라이브러리 | `save_scenario` · `load_scenario` · `list_scenarios` |
+
+> **Tool 추가 = `tools/`에 파일 1개 + import 한 줄.** `server.py`는 수정하지 않는다.
+
+---
+
+## 🧪 리포트
+실제 산출물은 [`examples/`](./examples/) 참고 (`sample_report.html`을 브라우저로 열면 됨).
+단일 self-contained HTML(스크린샷 base64 내장, 외부 의존성 0) — 스텝별 결과·실패
+스크린샷·AI 수정 제안·**회귀(직전 실행 대비)**·**접근성 발견**·환경 메타·마스킹 배지.
+
+---
+
+## 🏗️ 구조
 ```
 blackbox_mcp/
-  server.py        # FastMCP 부팅 + ensure_chromium + register_all
+  server.py        # FastMCP 부팅 + ensure_chromium + lifespan + register_all
   bootstrap.py     # Chromium 자동 설치 (D1)
   config.py        # 환경변수
-  browser/         # 세션 싱글톤 · 이벤트 버퍼 · 셀렉터 체인(D2)
-  testing/         # 시나리오 실행 · 리포트(D3) · 라이브러리 · 마스킹
+  browser/         # 세션 싱글톤 · 이벤트 버퍼 · D2 셀렉터 체인
+  testing/         # 시나리오 runner · 리포트(JSON/MD/HTML) · 라이브러리 · 마스킹
   tools/           # MCP Tool = 파일 1개 (레지스트리 자동 등록)
 ```
-**Tool 추가 = `tools/`에 파일 1개 + `tools/__init__.py`에 import 한 줄.**
-`server.py`는 수정하지 않는다.
+설계: [`DESIGN.md`](./DESIGN.md) · 마일스톤: [`ROADMAP.md`](./ROADMAP.md) ·
+실행 플레이북: [`HARNESS.md`](./HARNESS.md) · 에이전트 컨텍스트: [`CLAUDE.md`](./CLAUDE.md)
 
-## 구현 현황 (Phase) — 상세는 [`ROADMAP.md`](./ROADMAP.md)
-- [x] **Phase 0** 스캐폴드: 레지스트리(Tool=파일1개), 세션 싱글톤, config, 부트스트랩
-- [x] **Phase 1** 코어 PoC: `navigate` · `snapshot`(aria_snapshot, Q1 실측) · lifespan 정리
-- [x] **Phase 2** 상호작용·검증: `interact` · `assert_`(5종) · `screenshot` · 콘솔/네트워크
-      · D2 셀렉터 체인(`resolved_by`) · crash-recovery
-- [x] **Phase 3** `run_scenario` + 리포트 JSON/MD/**HTML(SM-04)** + AI 근거·제안(SM-05)
-      · 셀렉터투명성/에러귀속(SM-06) · 환경메타·심각도(SM-08) · 마스킹. 샘플: [`examples/`](./examples/)
-- [x] **Phase 4** `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `HEADLESS`
-- [x] **Phase 5** `generate_scenario`(작성 키트 + sampling fallback) · `save/load/list_scenario`
-- [x] 백로그: 회귀비교(SM-07) · a11y(SM-09) · dom 트리화(T1.5)
+---
 
-테스트 51건 green (단위 + `file://` 통합 + E2E).
-
-## 개발
+## 🔧 개발
 ```bash
-pip install -e ".[dev]"
-pytest
+.venv/bin/pip install -e ".[dev]"
+.venv/bin/python -m pytest -q        # 51건 (단위 + file:// 통합 + E2E)
 ```
+
+## ⚙️ 환경변수
+`HEADLESS`(기본 true) · `BROWSER`(chromium) · `CHROMIUM_EXECUTABLE` ·
+`REPORT_DIR`(./reports) · `SCENARIO_DIR`(./scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
+`DEFAULT_WAIT_UNTIL`(networkidle). 자세히는 `.env.example`.
