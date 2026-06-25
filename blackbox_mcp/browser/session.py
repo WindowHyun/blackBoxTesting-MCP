@@ -25,6 +25,7 @@ class BrowserSession:
         self._page = None
         self._cdp = False          # attached to a user-owned browser via CDP
         self._persistent = False   # launched a real browser with a saved profile
+        self._persistent_opts: dict | None = None
         # Current iframe context for CT-09; None == main page.
         self._frame_selector: str | None = None
         self.buffers = EventBuffers()
@@ -110,19 +111,27 @@ class BrowserSession:
                                    channel: str = "chrome") -> dict:
         """Switch the session to a real browser with a saved profile.
 
-        Launches Chrome (real channel preferred, falling back to the bundled
-        binary) using a persistent user-data-dir, so login/cookies survive across
-        runs — ideal for sites needing login/CAPTCHA. The user logs in once in the
-        window; later runs reuse it.
+        Idempotent: if a real browser is already open and alive, reuse it (keeps
+        the logged-in window — no new window, no re-login). Otherwise launch
+        Chrome (real channel preferred, falling back to the bundled binary) with a
+        persistent user-data-dir so login/cookies survive across runs.
         """
-        from playwright.async_api import async_playwright
+        from pathlib import Path
 
+        profile = str(Path.home() / "ui-blackbox" / "chrome-profile")
+
+        # Already on a live real browser → reuse it, don't relaunch.
+        if self._persistent and self.is_alive():
+            log.info("BrowserSession reuse existing real browser (no relaunch).")
+            return {"used": "existing", "profile": profile,
+                    "headless": headless, "reused": True}
+
+        from playwright.async_api import async_playwright
         if self._pw is None:
             self._pw = await async_playwright().start()
         await self._teardown_current()
 
-        from pathlib import Path
-        profile = str(Path.home() / "ui-blackbox" / "chrome-profile")
+        self._persistent_opts = {"headless": headless, "channel": channel}
         base = {"user_data_dir": profile, "headless": headless}
 
         attempts = []
@@ -151,7 +160,7 @@ class BrowserSession:
         self.buffers.clear()
         attach(self._page, self.buffers)
         log.info("BrowserSession → real persistent browser (%s, profile=%s)", used, profile)
-        return {"used": used, "profile": profile, "headless": headless}
+        return {"used": used, "profile": profile, "headless": headless, "reused": False}
 
     async def _teardown_current(self) -> None:
         """Close whatever browser is currently open, keeping Playwright running."""
@@ -171,10 +180,20 @@ class BrowserSession:
         self._cdp = self._persistent = False
 
     async def restart(self) -> None:
-        """Recover from a browser crash (NFR Reliability, < 5s)."""
+        """Recover from a browser crash (NFR Reliability, < 5s).
+
+        Preserves the real-browser mode: if we were on a persistent profile,
+        re-open it (cookies on disk → still logged in) instead of dropping back to
+        a fresh bundled browser.
+        """
         log.warning("BrowserSession restarting after failure.")
+        persistent = self._persistent
+        opts = self._persistent_opts or {"headless": False, "channel": "chrome"}
         await self.close()
-        await self.start()
+        if persistent:
+            await self.switch_to_persistent(**opts)
+        else:
+            await self.start()
 
     async def close(self) -> None:
         try:

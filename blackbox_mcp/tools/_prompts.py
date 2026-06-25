@@ -39,10 +39,11 @@ def ui_scenario(description: str, url: str = "") -> str:
         description="실제 크롬(로그인 유지)으로 전환해 로그인이 필요한 사이트를 테스트한다")
 def ui_login(task: str, url: str = "") -> str:
     target = f" 대상: {url}." if url else ""
-    return (f"{_ONLY}\n\n먼저 `use_real_browser`를 호출해 실제 크롬(영구 프로필)으로 "
-            f"전환해. 로그인 페이지로 이동한 뒤, **로그인/캡차가 필요하면 사용자가 그 "
-            f"창에서 직접 처리하도록 안내하고 잠시 대기**한 다음 작업을 이어가.{target}\n\n"
-            f"작업: {task}")
+    return (f"{_ONLY}\n\n`use_real_browser`를 **한 번만** 호출해 실제 크롬(영구 프로필)으로 "
+            f"전환해(이미 떠 있으면 같은 창을 재사용하니 다시 호출하지 마). 로그인 페이지로 "
+            f"이동한 뒤, **로그인/캡차가 필요하면 사용자가 그 창에서 직접 처리하도록 안내하고 "
+            f"잠시 대기**한 다음 같은 창에서 작업을 이어가. 절대 새 창을 열거나 재로그인을 "
+            f"요구하지 마.{target}\n\n작업: {task}")
 
 
 @prompt(name="ui-generate",
