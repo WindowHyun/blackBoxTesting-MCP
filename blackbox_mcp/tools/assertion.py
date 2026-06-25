@@ -26,10 +26,13 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
     actual: object = None
 
     if kind == "text_visible":
-        actual = await root.get_by_text(target).is_visible()
+        loc = root.get_by_text(target)
+        # "visible somewhere": tolerate multiple matches (no strict-mode throw).
+        actual = await loc.count() > 0 and await loc.first.is_visible()
         passed = bool(actual)
     elif kind == "element_visible":
-        actual = await locate(root, target).is_visible()
+        loc = locate(root, target)
+        actual = await loc.count() > 0 and await loc.first.is_visible()
         passed = bool(actual)
     elif kind == "url_is":
         actual = session.page.url
@@ -39,7 +42,11 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
         passed = target in actual
     elif kind == "count":
         actual = await locate(root, target).count()
-        passed = expected is not None and actual == int(expected)
+        try:
+            passed = expected is not None and actual == int(expected)
+        except (TypeError, ValueError):
+            passed = False
+            actual = f"{actual} (expected not an int: {expected!r})"
 
     return {"passed": passed, "kind": kind, "target": target,
             "expected": expected, "actual": actual}
