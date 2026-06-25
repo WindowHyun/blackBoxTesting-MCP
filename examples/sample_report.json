@@ -1,0 +1,152 @@
+{
+  "name": "login_demo",
+  "steps": [
+    {
+      "step": 1,
+      "action": "navigate",
+      "raw": {
+        "action": "navigate",
+        "url": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/basic.html",
+        "wait_until": "load"
+      },
+      "selector_input": null,
+      "resolved_by": null,
+      "expected": "navigation",
+      "actual": {
+        "title": "Blackbox Fixture",
+        "url": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/basic.html",
+        "status": 200
+      },
+      "passed": true,
+      "duration_ms": 39,
+      "screenshot": null,
+      "console_errors": [
+        {
+          "level": "error",
+          "text": "fixture console error",
+          "location": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/basic.html:20",
+          "ts": 1782367015.59678
+        },
+        {
+          "level": "error",
+          "text": "Failed to load resource: net::ERR_FILE_NOT_FOUND",
+          "location": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/does-not-exist.png:0",
+          "ts": 1782367015.5989087
+        }
+      ],
+      "network_errors": [
+        {
+          "url": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/does-not-exist.png",
+          "method": "GET",
+          "status": null,
+          "failure": "net::ERR_FILE_NOT_FOUND"
+        }
+      ],
+      "severity": null,
+      "ai_reason": "navigated to file:///home/user/blackBoxTesting-MCP/tests/fixtures/basic.html (status 200)",
+      "ai_suggestion": null
+    },
+    {
+      "step": 2,
+      "action": "interact",
+      "raw": {
+        "action": "interact",
+        "type": "type",
+        "selector": "testid=email",
+        "value": "qa@example.com"
+      },
+      "selector_input": "testid=email",
+      "resolved_by": "testid",
+      "expected": "type ok",
+      "actual": "typed",
+      "passed": true,
+      "duration_ms": 38,
+      "screenshot": null,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "type via testid selector",
+      "ai_suggestion": null
+    },
+    {
+      "step": 3,
+      "action": "interact",
+      "raw": {
+        "action": "interact",
+        "type": "click",
+        "selector": "testid=submit"
+      },
+      "selector_input": "testid=submit",
+      "resolved_by": "testid",
+      "expected": "click ok",
+      "actual": "clicked",
+      "passed": true,
+      "duration_ms": 57,
+      "screenshot": null,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "click via testid selector",
+      "ai_suggestion": null
+    },
+    {
+      "step": 4,
+      "action": "assert",
+      "raw": {
+        "action": "assert",
+        "kind": "text_visible",
+        "target": "로그인됨"
+      },
+      "selector_input": "로그인됨",
+      "resolved_by": null,
+      "expected": "text_visible",
+      "actual": true,
+      "passed": true,
+      "duration_ms": 17,
+      "screenshot": null,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "text_visible held",
+      "ai_suggestion": null
+    },
+    {
+      "step": 5,
+      "action": "assert",
+      "raw": {
+        "action": "assert",
+        "kind": "text_visible",
+        "target": "존재하지_않는_텍스트"
+      },
+      "selector_input": "존재하지_않는_텍스트",
+      "resolved_by": null,
+      "expected": "text_visible",
+      "actual": false,
+      "passed": false,
+      "duration_ms": 3,
+      "screenshot": "screenshots/login_demo_step05.png",
+      "console_errors": [],
+      "network_errors": [],
+      "severity": "assertion",
+      "ai_reason": "text_visible did not hold",
+      "ai_suggestion": "expected text_visible on '존재하지_않는_텍스트' — verify the target"
+    }
+  ],
+  "summary": {
+    "total": 5,
+    "passed": 4,
+    "failed": 1,
+    "pass_rate": 0.8
+  },
+  "meta": {
+    "started_at": "2026-06-25T05:56:55",
+    "os": "Linux",
+    "python": "3.11.15",
+    "playwright": "1.60.0",
+    "browser": "chromium",
+    "headless": true,
+    "executable": "/opt/pw-browsers/chromium",
+    "credentials_masked": true,
+    "duration_ms": 237
+  }
+}

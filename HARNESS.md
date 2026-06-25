@@ -98,27 +98,29 @@ strict-mode 회귀 + non-int count 처리.
 **T2.6 crash-recovery** `[NFR Reliability]` ✅ — `BrowserSession.is_alive()` +
 `get_session()`이 죽은 브라우저 감지 시 `restart()`. `test_recovery.py`로 검증.
 
-### Phase 3 — 시나리오 실행·리포트  (의존: Phase 2)
+### Phase 3 — 시나리오 실행·리포트  (의존: Phase 2) ✅ (2차 SM-07/09 보류)
 
-**T3.1 runner 스텝 디스패치** `[SM-01]` — Files: `blackbox_mcp/testing/runner.py` · Steps: step.action → navigate/interact/assert_/wait/... 매핑, `continue_on_fail` 처리. DoD: 성공/실패 혼합 시나리오 per-step 결과.
+**T3.1 runner 스텝 디스패치** `[SM-01]` ✅ — `testing/runner.py`: navigate/interact/
+assert/snapshot/wait 매핑 + `continue_on_fail`. per-step 결과.
 
-**T3.2 실패 자동 캡처 + 스텝 스키마** `[SM-02]` — Files: `runner.py` · DoD: 실패 시 스크린샷 첨부, 결과가 `DESIGN §6.1` 스키마 준수.
+**T3.2 실패 자동 캡처 + 스텝 스키마** `[SM-02]` ✅ — 실패 시 스크린샷 저장, 결과가
+`DESIGN §6.1` 스키마 준수(`screenshot_each`로 전스텝 캡처 옵션).
 
-**T3.3 리포트 JSON** `[SM-03]` — Files: `testing/report.py`, `tests/test_report.py` · DoD: §6.1 JSON 생성.
+**T3.3 리포트 JSON** `[SM-03]` ✅ · **T3.4 Markdown** ✅ · **T3.5 HTML** `[SM-04]` ✅
+— `testing/report.py`. HTML은 단일 self-contained(스크린샷 base64). 샘플: `examples/`.
 
-**T3.4 리포트 Markdown** `[SM-03]` — Files: `report.py` · DoD: 헤더 요약 + 스텝 표 + 에러 섹션.
+**T3.6 AI 판단근거/제안** `[SM-05]` ✅ — `ai_reason`/`ai_suggestion`(규칙기반 힌트,
+호스트 LLM이 보강 가능) 리포트 표시.
 
-**T3.5 리포트 HTML** `[SM-04]` — Files: `report.py` · DoD: 단일 self-contained HTML, 스크린샷 base64, 외부 의존성 0.
+**T3.7 셀렉터 투명성 + 에러 스텝귀속** `[SM-06]` ✅ — `resolved_by` 기록 + 콘솔/네트워크
+에러를 스텝 버퍼 슬라이스로 귀속.
 
-**T3.6 AI 판단근거/제안 배선** `[SM-05]` — Files: `runner.py`, `report.py` · Steps: 스텝 결과에 `ai_reason`/`ai_suggestion` 필드 수용·렌더. DoD: 필드가 리포트에 표시.
+**T3.8 환경 메타 + 심각도** `[SM-08]` ✅ — meta(OS/Python/PW·브라우저) + severity
+(assertion/timeout/error) 분류·색상.
 
-**T3.7 셀렉터 투명성 + 에러 스텝귀속** `[SM-06]` — Files: `browser/locator.py`(resolved_by 반환), `runner.py` · DoD: `resolved_by` 기록, 콘솔/네트워크 에러가 스텝 구간에 귀속.
+**T3.10 마스킹 연동** `[제약]` ✅ — `secrets.mask_step`로 `${VAR}`/민감값 리포트 마스킹.
 
-**T3.8 환경 메타 + 심각도** `[SM-08]` — Files: `report.py` · DoD: meta(OS/Python/PW·브라우저 버전/뷰포트) + severity 분류.
-
-**T3.9 (2차) 회귀·a11y** `[SM-07, SM-09]` — Files: `report.py`, `testing/library.py` · DoD: 직전 실행 diff, a11y 발견 섹션.
-
-**T3.10 마스킹 연동** `[제약]` — Files: `runner.py`/`report.py` + `secrets.py` · DoD: 민감 값이 리포트에 마스킹.
+**T3.9 (2차) 회귀·a11y** `[SM-07, SM-09]` — 보류(다음 사이클).
 
 ### Phase 4 — 확장 Tools  (의존: Phase 2)
 

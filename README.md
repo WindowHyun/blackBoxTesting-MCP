@@ -52,9 +52,9 @@ blackbox_mcp/
 - [x] 확장: `wait` `switch_frame` `reset_session`
 - [x] 라이브러리 저장: `save_scenario` `load_scenario` `list_scenarios`
 - [ ] **Phase 1** snapshot 크기 실측(Q1) · DOM 모드 정련
-- [ ] **Phase 3** `run_scenario` 실행 엔진 · 리포트 JSON/MD/**HTML(SM-04)**
-      + 강화: AI 판단근거·수정제안(SM-05) · 스텝캡처/셀렉터투명성/에러귀속(SM-06)
-      · 환경메타·심각도(SM-08) · 회귀비교(SM-07) · a11y(SM-09)
+- [x] **Phase 3** `run_scenario` 실행 엔진 · 리포트 JSON/MD/**HTML(SM-04)**
+      + AI 판단근거·수정제안(SM-05) · 셀렉터투명성/에러귀속(SM-06) · 환경메타·심각도(SM-08)
+      · 마스킹. 샘플 리포트: [`examples/`](./examples/). (회귀 SM-07·a11y SM-09 보류)
 - [ ] **Phase 4** `expect_dialog`
 - [ ] **Phase 5** `generate_scenario` 작성 키트(+sampling fallback)
 
