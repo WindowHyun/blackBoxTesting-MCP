@@ -16,6 +16,7 @@ from . import (  # noqa: F401  (imported for side-effect registration)
     frame,
     dialog,
     session,
+    realbrowser,
     scenario,
     generate,
     library,

@@ -23,7 +23,8 @@ class BrowserSession:
         self._browser = None
         self._context = None
         self._page = None
-        self._cdp = False   # attached to a user-owned browser via CDP
+        self._cdp = False          # attached to a user-owned browser via CDP
+        self._persistent = False   # launched a real browser with a saved profile
         # Current iframe context for CT-09; None == main page.
         self._frame_selector: str | None = None
         self.buffers = EventBuffers()
@@ -88,15 +89,79 @@ class BrowserSession:
 
     async def reset(self) -> None:
         """BR-04: wipe context (cookies/session/storage) + buffers, fresh page."""
-        if self._cdp:
-            # Never wipe the user's real session over CDP — just clear our buffers.
+        if self._cdp or self._persistent:
+            # Don't wipe a real/logged-in browser — just clear our buffers.
             self.buffers.clear()
-            log.info("BrowserSession reset (CDP: buffers only).")
+            log.info("BrowserSession reset (real browser: buffers only).")
             return
         if self._context is not None:
             await self._context.close()
         await self._new_context()
         log.info("BrowserSession reset.")
+
+    async def switch_to_persistent(self, headless: bool = False,
+                                   channel: str = "chrome") -> dict:
+        """Switch the session to a real browser with a saved profile.
+
+        Launches Chrome (real channel preferred, falling back to the bundled
+        binary) using a persistent user-data-dir, so login/cookies survive across
+        runs — ideal for sites needing login/CAPTCHA. The user logs in once in the
+        window; later runs reuse it.
+        """
+        from playwright.async_api import async_playwright
+
+        if self._pw is None:
+            self._pw = await async_playwright().start()
+        await self._teardown_current()
+
+        from pathlib import Path
+        profile = str(Path.home() / "ui-blackbox" / "chrome-profile")
+        base = {"user_data_dir": profile, "headless": headless}
+
+        attempts = []
+        if channel:
+            attempts.append({"channel": channel})
+        if CONFIG.chromium_executable:
+            attempts.append({"executable_path": CONFIG.chromium_executable})
+        attempts.append({})  # bundled default
+
+        used, last_err = None, None
+        for extra in attempts:
+            try:
+                self._context = await self._pw.chromium.launch_persistent_context(**base, **extra)
+                used = extra.get("channel") or extra.get("executable_path") or "bundled"
+                break
+            except Exception as exc:
+                last_err = exc
+                continue
+        if self._context is None:
+            raise RuntimeError(f"failed to launch real browser: {last_err}")
+
+        self._browser = self._context.browser
+        self._page = (self._context.pages[0] if self._context.pages
+                      else await self._context.new_page())
+        self._persistent, self._cdp, self._frame_selector = True, False, None
+        self.buffers.clear()
+        attach(self._page, self.buffers)
+        log.info("BrowserSession → real persistent browser (%s, profile=%s)", used, profile)
+        return {"used": used, "profile": profile, "headless": headless}
+
+    async def _teardown_current(self) -> None:
+        """Close whatever browser is currently open, keeping Playwright running."""
+        try:
+            if self._cdp and self._browser is not None:
+                await self._browser.close()
+            elif self._persistent and self._context is not None:
+                await self._context.close()
+            else:
+                if self._context is not None:
+                    await self._context.close()
+                if self._browser is not None:
+                    await self._browser.close()
+        except Exception:
+            pass
+        self._browser = self._context = self._page = None
+        self._cdp = self._persistent = False
 
     async def restart(self) -> None:
         """Recover from a browser crash (NFR Reliability, < 5s)."""
@@ -110,18 +175,19 @@ class BrowserSession:
                 # Detach only — the browser belongs to the user. Don't close it.
                 if self._browser is not None:
                     await self._browser.close()  # closes CDP connection, not Chrome
-                if self._pw is not None:
-                    await self._pw.stop()
+            elif self._persistent:
+                if self._context is not None:
+                    await self._context.close()  # profile on disk persists
             else:
                 if self._context is not None:
                     await self._context.close()
                 if self._browser is not None:
                     await self._browser.close()
-                if self._pw is not None:
-                    await self._pw.stop()
+            if self._pw is not None:
+                await self._pw.stop()
         finally:
             self._pw = self._browser = self._context = self._page = None
-            self._cdp = False
+            self._cdp = self._persistent = False
 
     # ── accessors ────────────────────────────────────────────────
     def is_alive(self) -> bool:

@@ -83,6 +83,7 @@ python -m venv .venv
 |---|---|---|
 | `/ui-test` | task | 자연어 작업을 ui-blackbox 도구로 수행 |
 | `/ui-scenario` | description, url | 시나리오 구성→실행→리포트(all) |
+| `/ui-login` | task, url | **실제 크롬(로그인 유지)으로 전환** 후 로그인 필요한 사이트 테스트 |
 | `/ui-generate` | description, url, name | 페이지 분석→재사용 시나리오 생성·저장 |
 
 예: `/ui-test` → `네이버 열어서 로그인 버튼 클릭하고 스크린샷 찍어줘`
@@ -95,12 +96,12 @@ python -m venv .venv
 
 ---
 
-## 🧰 MCP Tools (16)
+## 🧰 MCP Tools (17)
 
 | 그룹 | Tool |
 |---|---|
 | 코어 | `navigate` · `snapshot`(a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
-| 확장 | `wait` · `switch_frame` · `expect_dialog` · `reset_session` |
+| 확장 | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` |
 | 시나리오 | `run_scenario` · `generate_scenario` |
 | 라이브러리 | `save_scenario` · `load_scenario` · `list_scenarios` |
 
@@ -147,16 +148,18 @@ blackbox_mcp/
 > 서비스 약관 위반 소지가 있다. 정상 테스트의 오탐은 `BROWSER_CHANNEL=chrome` +
 > `STEALTH=true`로 줄일 수 있다.
 
-### 🔗 내 브라우저에 붙이기 (CDP) — 로그인/캡차가 있는 경우 권장
-번들 브라우저를 새로 띄우는 대신, **이미 로그인해 둔 내 크롬**에 붙는다. 로그인·캡차는
-내가 직접 처리하고 자동화는 그 실제 세션에서 돌아가 봇 탐지에 가장 덜 걸린다.
+### 🔗 로그인이 필요한 사이트 — 실제 브라우저 (수동 설정 불필요)
+**권장(자동):** 대화에서 `/ui-login` 또는 "실제 브라우저로 로그인해서 ~~"라고 하면
+Claude가 `use_real_browser` tool을 호출해 **실제 Chrome을 영구 프로필로 자동 실행**한다.
+그 창에서 **처음 한 번만 직접 로그인**하면 프로필(`~/ui-blackbox/chrome-profile`)에
+저장돼 다음 실행에도 유지된다. 번들 헤드리스보다 봇 탐지에 훨씬 덜 걸린다.
+> 실제 Chrome이 없으면 자동으로 번들 브라우저로 폴백한다. `BROWSER_CHANNEL=msedge`
+> 등으로 채널 지정 가능.
+
+**고급(수동 CDP):** 이미 떠 있는 내 크롬에 붙이려면 디버그 포트로 실행 후
+`BROWSER_CDP` 지정:
 ```bash
-# 1) 디버그 포트로 크롬 실행 (별도 프로필 권장)
-#    Windows
-"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\cdp-profile"
-#    macOS
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir=/tmp/cdp-profile
-# 2) 그 창에서 직접 로그인해 둔다. 3) 서버 env에 BROWSER_CDP 지정
+chrome --remote-debugging-port=9222 --user-data-dir="C:\cdp-profile"   # 그 창에서 로그인
 ```
-config `env`: `"BROWSER_CDP": "http://localhost:9222"` → 세션이 그 브라우저에 attach.
-세션을 닫아도 **네 브라우저는 그대로 유지**된다(우리가 종료하지 않음).
+config `env`: `"BROWSER_CDP": "http://localhost:9222"` → attach. 세션을 닫아도
+**내 브라우저는 유지**된다.
