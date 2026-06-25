@@ -15,14 +15,19 @@ _ONLY = ("**ui-blackbox MCP 서버의 도구만** 사용해. 다른 브라우저
          "(예: Claude in Chrome, 일반 브라우저 커넥터)는 절대 쓰지 마. "
          "사용 가능한 도구: navigate · snapshot · screenshot · interact · assert_ · "
          "get_console_logs · get_network_errors · wait · switch_frame · "
-         "expect_dialog · reset_session · run_scenario · generate_scenario · "
-         "save_scenario · load_scenario · list_scenarios.")
+         "expect_dialog · reset_session · use_real_browser · run_scenario · "
+         "save_report · generate_scenario · save_scenario · load_scenario · list_scenarios.")
+
+# Every test flow must end with a saved report.
+_FINISH = ("\n\n**마지막에 반드시 `save_report(report_format='all')`를 호출해 "
+           "JSON/MD/HTML 리포트를 저장하고, 저장된 파일 경로를 알려줘.** "
+           "(run_scenario를 썼다면 그건 자체적으로 리포트를 저장하므로 생략 가능.)")
 
 
-@prompt(name="ui-test", description="ui-blackbox 도구로 UI를 테스트한다 (자연어 작업 입력)")
+@prompt(name="ui-test", description="ui-blackbox 도구로 UI를 테스트하고 리포트를 남긴다")
 def ui_test(task: str) -> str:
     return (f"{_ONLY}\n\n다음 작업을 수행하고, 각 단계의 결과(통과/실패)와 발견한 "
-            f"콘솔/네트워크 에러를 요약해줘.\n\n작업: {task}")
+            f"콘솔/네트워크 에러를 요약해줘.\n\n작업: {task}{_FINISH}")
 
 
 @prompt(name="ui-scenario",
@@ -43,7 +48,7 @@ def ui_login(task: str, url: str = "") -> str:
             f"전환해(이미 떠 있으면 같은 창을 재사용하니 다시 호출하지 마). 로그인 페이지로 "
             f"이동한 뒤, **로그인/캡차가 필요하면 사용자가 그 창에서 직접 처리하도록 안내하고 "
             f"잠시 대기**한 다음 같은 창에서 작업을 이어가. 절대 새 창을 열거나 재로그인을 "
-            f"요구하지 마.{target}\n\n작업: {task}")
+            f"요구하지 마.{target}\n\n작업: {task}{_FINISH}")
 
 
 @prompt(name="ui-generate",

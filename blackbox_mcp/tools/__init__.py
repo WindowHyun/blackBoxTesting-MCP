@@ -18,6 +18,7 @@ from . import (  # noqa: F401  (imported for side-effect registration)
     session,
     realbrowser,
     scenario,
+    savereport,
     generate,
     library,
 )

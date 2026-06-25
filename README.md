@@ -96,14 +96,18 @@ python -m venv .venv
 
 ---
 
-## 🧰 MCP Tools (17)
+## 🧰 MCP Tools (18)
 
 | 그룹 | Tool |
 |---|---|
 | 코어 | `navigate` · `snapshot`(a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
 | 확장 | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` |
-| 시나리오 | `run_scenario` · `generate_scenario` |
+| 시나리오·리포트 | `run_scenario` · `generate_scenario` · `save_report` |
 | 라이브러리 | `save_scenario` · `load_scenario` · `list_scenarios` |
+
+> **모든 테스트 흐름은 리포트로 끝난다.** 임의 도구 호출(navigate/interact/assert…)은
+> 자동 기록되고, 마지막에 `save_report`가 JSON/MD/HTML 리포트를 남긴다(슬래시 명령은
+> 이를 자동 지시). `run_scenario`는 자체적으로 리포트를 저장한다.
 
 > **Tool 추가 = `tools/`에 파일 1개 + import 한 줄.** `server.py`는 수정하지 않는다.
 

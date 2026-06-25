@@ -8,6 +8,8 @@ line in ``tools/__init__.py``.
 """
 from __future__ import annotations
 
+import functools
+import inspect
 from dataclasses import dataclass
 from typing import Callable
 
@@ -43,6 +45,31 @@ def prompt(name: str | None = None, description: str | None = None):
     return decorator
 
 
+def _with_recorder(name: str, fn: Callable) -> Callable:
+    """Wrap an MCP-exposed tool so its call is recorded for the final report.
+
+    Only wraps recordable action tools; preserves the original signature so
+    FastMCP still builds the correct input schema. The module-level function
+    stays unwrapped, so run_scenario's internal use is never double-recorded.
+    """
+    from ..testing import recorder
+
+    if name not in recorder.RECORDABLE:
+        return fn
+
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        return await recorder.run_and_record(name, fn, args, kwargs)
+
+    # Preserve input params for FastMCP's schema, but drop the return annotation:
+    # some tools return Image, which pydantic can't schema-ify through a wrapper.
+    sig = inspect.signature(fn)
+    wrapper.__signature__ = sig.replace(return_annotation=inspect.Signature.empty)
+    wrapper.__annotations__ = {k: v for k, v in getattr(fn, "__annotations__", {}).items()
+                               if k != "return"}
+    return wrapper
+
+
 def register_all(mcp) -> int:
     """Register every pending tool and prompt onto the FastMCP instance.
 
@@ -54,7 +81,8 @@ def register_all(mcp) -> int:
             kwargs["name"] = pending.name
         if pending.description:
             kwargs["description"] = pending.description
-        mcp.tool(**kwargs)(pending.fn)
+        fn = _with_recorder(pending.name or pending.fn.__name__, pending.fn)
+        mcp.tool(**kwargs)(fn)
     for pending in _PENDING_PROMPTS:
         kwargs = {}
         if pending.name:
