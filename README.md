@@ -4,7 +4,9 @@
 붙여, 테스트 코드 없이 "로그인 흐름이 되는지 확인해줘"라고 말하면 Claude가 직접
 브라우저를 열고 클릭·입력·검증한 뒤 리포트를 남긴다. (블랙박스 방식)
 
-> 설계 근거는 [`DESIGN.md`](./DESIGN.md), 요구사항은 PRD v0.6 기준.
+> 설계 근거는 [`DESIGN.md`](./DESIGN.md), 마일스톤은 [`ROADMAP.md`](./ROADMAP.md),
+> 실행 플레이북은 [`HARNESS.md`](./HARNESS.md), 에이전트 컨텍스트는
+> [`CLAUDE.md`](./CLAUDE.md). 요구사항은 PRD v0.6 기준.
 
 ## 스택
 Python 3.11+ · Playwright(Chromium) · MCP 공식 SDK(FastMCP) · stdio · Claude Desktop
