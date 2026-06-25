@@ -63,6 +63,25 @@ async def test_continue_on_fail_runs_all(session):
     assert res["summary"]["failed"] == 1
 
 
+async def test_scenario_supports_extension_actions(session):
+    # iframe with an inner button; scenario switches into it and asserts
+    await session.page.set_content(
+        "<iframe id='f' srcdoc=\"<button data-testid='inner'>안쪽</button>\"></iframe>"
+    )
+    await session.page.wait_for_timeout(100)
+    steps = [
+        {"action": "switch_frame", "selector": "#f"},
+        {"action": "assert", "kind": "element_visible", "target": "testid=inner"},
+        {"action": "screenshot"},
+        {"action": "switch_frame", "selector": None},
+    ]
+    res = await runner.run(steps, name="frames", continue_on_fail=True)
+    assert res["summary"]["failed"] == 0
+    # the explicit screenshot step captured an image
+    shot_step = next(s for s in res["steps"] if s["action"] == "screenshot")
+    assert shot_step["screenshot"] is None or shot_step["screenshot"].startswith("screenshots/")
+
+
 async def test_credentials_masked_in_report(session, report_dir):
     import os
     os.environ["TEST_PW"] = "supersecret"

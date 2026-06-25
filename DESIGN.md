@@ -237,6 +237,8 @@ API:
 - 실패 시 자동 스크린샷 캡처(SM-02) → 리포트 첨부.
 - `continue_on_fail=False`면 첫 실패에서 중단.
 - 종료 후 리포트 저장(SM-03) — §6.
+- **지원 스텝 action**: `navigate` · `interact` · `assert` · `snapshot` · `wait` ·
+  `switch_frame` · `reset_session` · `screenshot` · `expect_dialog`. (runner 디스패치)
 - **SM-04 (SHOULD):** `report_format`에 `html`/`all`을 지원해 단일 self-contained
   HTML 리포트(스텝 표 + 스크린샷 인라인 + 콘솔/네트워크 에러)를 추가 생성한다.
   비개발 페르소나(US-03) 가독성 향상. 외부 의존성 없이 CSS 인라인(NFR 로컬 전용).

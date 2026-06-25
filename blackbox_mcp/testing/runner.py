@@ -23,8 +23,11 @@ from typing import Any
 from ..browser import get_session
 from ..config import CONFIG
 from ..tools.assertion import assert_
+from ..tools.dialog import expect_dialog
+from ..tools.frame import switch_frame
 from ..tools.interact import interact
 from ..tools.navigate import navigate
+from ..tools.session import reset_session
 from ..tools.snapshot import snapshot
 from ..tools.wait import wait
 from . import report, secrets
@@ -39,9 +42,12 @@ def empty_result(name: str) -> dict[str, Any]:
 
 
 def _severity(action: str, exc: Exception | None) -> str | None:
+    """Classify a *failed* step. (Only called when passed is False.)"""
     if exc is not None:
         return "timeout" if "Timeout" in type(exc).__name__ else "error"
-    return "assertion" if action in ("assert", "assert_") else None
+    if action in ("assert", "assert_"):
+        return "assertion"
+    return "error"  # failed interact/wait/dialog/etc.
 
 
 async def _dispatch(step: dict) -> dict:
@@ -85,6 +91,32 @@ async def _dispatch(step: dict) -> dict:
         out.update(expected="wait", actual=res.get("waited"), passed=bool(res.get("ok")),
                    ai_reason=f"waited {res.get('waited')}")
 
+    elif action == "switch_frame":
+        res = await switch_frame(step.get("selector"))
+        out.update(expected="frame switch", actual=res.get("context"),
+                   passed=bool(res.get("ok")), ai_reason=f"context → {res.get('context')}")
+
+    elif action == "reset_session":
+        res = await reset_session()
+        out.update(expected="reset", actual=res.get("message"), passed=bool(res.get("ok")),
+                   ai_reason="session reset")
+
+    elif action == "screenshot":
+        # the actual capture happens in run() (it owns name/idx); flag it.
+        out.update(expected="screenshot", actual="captured", passed=True,
+                   ai_reason="explicit screenshot step", force_screenshot=True)
+
+    elif action == "expect_dialog":
+        res = await expect_dialog(step.get("dialog_action", "accept"),
+                                  step.get("expected_text"), step.get("trigger"),
+                                  step.get("accept_text"))
+        out.update(expected=step.get("expected_text") or "dialog",
+                   actual=res.get("message") or res.get("error"),
+                   passed=bool(res.get("passed")),
+                   ai_reason=f"dialog {res.get('dialog_type')} {res.get('handled')}")
+        if not res.get("passed"):
+            out["ai_suggestion"] = "expected dialog did not appear or text mismatch"
+
     else:
         out.update(actual=f"unknown action: {action}", passed=False,
                    ai_reason="unknown action", ai_suggestion="use a supported action verb")
@@ -124,7 +156,7 @@ async def run(
         new_network = [n.__dict__ for n in session.buffers.network[n0:]]
 
         shot = None
-        if not passed or screenshot_each:
+        if not passed or screenshot_each or fields.get("force_screenshot"):
             shot = await report.capture_step_screenshot(session, name, idx)
 
         result["steps"].append({
