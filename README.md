@@ -68,7 +68,10 @@ python -m venv .venv
 ### 3) Claude Desktop 재시작 → 대화에서 바로
 > *"https://example.com/login 열어서 로그인 흐름 테스트하고 리포트 만들어줘"*
 
-리포트는 `REPORT_DIR`(기본 `./reports`)에 `report_YYYYMMDD_HHMMSS.{json,md,html}`로 저장된다.
+리포트는 `REPORT_DIR`(미설정 시 `~/ui-blackbox/reports`)에
+`report_YYYYMMDD_HHMMSS.{json,md,html}`로 저장된다. **MCP 서버는 cwd가 시스템
+경로일 수 있어 상대경로 저장이 막히므로, config `env`에 `REPORT_DIR` 절대경로를
+지정하길 권장**한다.
 
 ---
 
