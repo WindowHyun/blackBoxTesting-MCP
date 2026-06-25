@@ -48,11 +48,13 @@ python -m venv .venv
 
 ### Phase 1 — 코어 PoC  (의존: Phase 0 ✅)
 
-**T1.1 의존성 핀 & 설치 확인** `[D1]`
-- Files: `pyproject.toml`(이미 `playwright>=1.60`), —
-- Steps: venv 재설치, `PY -c "import playwright; print(playwright.__version__)"` ≥1.60 확인.
-- Verify: `.venv/bin/playwright install chromium && PY -c "from playwright.async_api import async_playwright"`
-- DoD: chromium 설치 성공 / async import OK.
+**T1.1 의존성 핀 & 브라우저 가용성** `[D1]` ✅
+- Files: `pyproject.toml`, `config.py`, `bootstrap.py`, `browser/session.py`, `.env.example`
+- 결과: playwright **1.60** 설치 확인. 브라우저 CDN 차단으로 `playwright install` 불가
+  → **사전설치 `/opt/pw-browsers/chromium`을 `executable_path`로 사용**(자동 감지,
+  `CHROMIUM_EXECUTABLE`로 override). bootstrap은 다운로드 실패 시 비크래시.
+- Verify(통과): `PY -c "import asyncio,blackbox_mcp.browser as b; asyncio.run(b.get_session())"` 류 스모크 + aria_snapshot 동작.
+- DoD: ✅ async import / ✅ 사전설치 브라우저 런치 / ✅ pytest green.
 
 **T1.2 lifespan 배선 + 세션 정리** `[BR-01, NFR]`
 - Files: `blackbox_mcp/server.py`, `blackbox_mcp/browser/session.py`

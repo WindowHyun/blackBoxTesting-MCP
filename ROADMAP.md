@@ -169,7 +169,7 @@ report_YYYYMMDD_HHMMSS.*`, `REPORT_DIR` 재정의, `${VAR}` 마스킹.
 | ID | 내용 | 해소 시점 |
 |---|---|---|
 | **Q1** | 대형 SPA aria_snapshot이 MCP 컨텍스트 한도 초과 가능 → 트리밍 수치 | Phase 1 실측 |
-| R1 | 환경별 Chromium(~150MB) 자동 설치 가능 여부 | Phase 1 착수 시 선확인 |
+| R1 | 환경별 Chromium 설치 — CDN 차단 시 다운로드 불가 | ✅ 해소: `CHROMIUM_EXECUTABLE`/사전설치(`/opt/pw-browsers`) `executable_path` 사용 (T1.1) |
 | R2 | sampling 미지원 환경에서 generate_scenario UX | Phase 5 (fallback 설계 반영됨) |
 | R3 | 브라우저 크래시 자동 재시작 < 5s (NFR) 실측 | Phase 2~3 |
 

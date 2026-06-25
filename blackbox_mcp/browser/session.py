@@ -33,9 +33,15 @@ class BrowserSession:
 
         self._pw = await async_playwright().start()
         browser_type = getattr(self._pw, CONFIG.browser)
-        self._browser = await browser_type.launch(headless=CONFIG.headless)
+        launch_kwargs = {"headless": CONFIG.headless}
+        if CONFIG.chromium_executable:
+            launch_kwargs["executable_path"] = CONFIG.chromium_executable
+        self._browser = await browser_type.launch(**launch_kwargs)
         await self._new_context()
-        log.info("BrowserSession started (%s, headless=%s)", CONFIG.browser, CONFIG.headless)
+        log.info(
+            "BrowserSession started (%s, headless=%s, executable=%s)",
+            CONFIG.browser, CONFIG.headless, CONFIG.chromium_executable or "bundled",
+        )
 
     async def _new_context(self) -> None:
         self._context = await self._browser.new_context()

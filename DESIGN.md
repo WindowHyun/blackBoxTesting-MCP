@@ -358,6 +358,15 @@ SM-01~04와 함께(또는 직후) 구현한다.
   > 여부"가 아니라 "기대 경로"다 → `os.path.exists()`로 실제 존재를 확인한다.
   > 설치된 버전 시그니처는 구현 시 코드로 재확인.
 - 설치: `pip install`(또는 `pip install -e .`) 1단계. 별도 명령 불필요.
+- **사전 제공 브라우저(`CHROMIUM_EXECUTABLE`):** 브라우저 CDN(`cdn.playwright.dev`)이
+  네트워크 정책으로 차단된 환경(예: Claude Code web)에서는 다운로드가 불가하다.
+  이때 `CONFIG.chromium_executable`(env `CHROMIUM_EXECUTABLE`, 미설정 시
+  `/opt/pw-browsers/chromium` 자동 감지)을 세션 `launch(executable_path=...)`에
+  전달해 사전 설치 바이너리를 사용한다. `ensure_chromium()`은 이 경로가 있으면
+  다운로드를 건너뛰고, 다운로드 시도가 실패해도 크래시 없이 경고만 남긴다.
+  > 검증(2026-06): preinstalled chromium **build 1194** + Playwright **1.60** 드라이버를
+  > `executable_path`로 런치 → `aria_snapshot` 포함 정상 동작 확인(빌드 버전 불일치
+  > 무방). R1 해소.
 - Claude Desktop 등록: config 한 줄 (`claude_desktop_config.example.json` 제공).
 ```json
 {
