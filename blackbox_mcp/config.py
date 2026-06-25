@@ -38,6 +38,11 @@ class Config:
     browser: str          # chromium (default) | firefox | webkit
     # Explicit browser binary path (executable_path). None => Playwright default.
     chromium_executable: str | None
+    # Use an installed browser channel (e.g. "chrome", "msedge") instead of the
+    # bundled Chromium — real UA reduces anti-bot false positives.
+    browser_channel: str | None
+    # Apply light anti-automation-fingerprint hardening for legitimate testing.
+    stealth: bool
     report_dir: Path
     scenario_dir: Path
     # Per-step selector resolution budget (ms); the whole fallback chain must
@@ -52,6 +57,8 @@ class Config:
             headless=_as_bool(os.getenv("HEADLESS"), True),
             browser=os.getenv("BROWSER", "chromium").strip().lower(),
             chromium_executable=_detect_chromium_executable(),
+            browser_channel=(os.getenv("BROWSER_CHANNEL") or None),
+            stealth=_as_bool(os.getenv("STEALTH"), False),
             report_dir=Path(os.getenv("REPORT_DIR", "./reports")).expanduser(),
             scenario_dir=Path(os.getenv("SCENARIO_DIR", "./scenarios")).expanduser(),
             selector_timeout_ms=int(os.getenv("SELECTOR_TIMEOUT_MS", "2000")),

@@ -135,5 +135,11 @@ blackbox_mcp/
 
 ## ⚙️ 환경변수
 `HEADLESS`(기본 true) · `BROWSER`(chromium) · `CHROMIUM_EXECUTABLE` ·
+`BROWSER_CHANNEL`(chrome/msedge — 실제 브라우저) · `STEALTH`(봇오탐 완화) ·
 `REPORT_DIR`(./reports) · `SCENARIO_DIR`(./scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
 `DEFAULT_WAIT_UNTIL`(networkidle). 자세히는 `.env.example`.
+
+> **봇 탐지 안내**: 이 도구는 **자신의 UI/스테이징 테스트**에 맞춰져 있다. 네이버 등
+> 제3자 사이트는 안티봇으로 자동화를 막을 수 있고, 이를 우회한 로그인 자동화는 해당
+> 서비스 약관 위반 소지가 있다. 정상 테스트의 오탐은 `BROWSER_CHANNEL=chrome` +
+> `STEALTH=true`로 줄일 수 있다.

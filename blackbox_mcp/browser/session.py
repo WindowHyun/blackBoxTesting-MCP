@@ -34,17 +34,36 @@ class BrowserSession:
         self._pw = await async_playwright().start()
         browser_type = getattr(self._pw, CONFIG.browser)
         launch_kwargs = {"headless": CONFIG.headless}
-        if CONFIG.chromium_executable:
+        if CONFIG.browser_channel:
+            launch_kwargs["channel"] = CONFIG.browser_channel  # real Chrome/Edge
+        elif CONFIG.chromium_executable:
             launch_kwargs["executable_path"] = CONFIG.chromium_executable
+        if CONFIG.stealth:
+            launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
         self._browser = await browser_type.launch(**launch_kwargs)
         await self._new_context()
         log.info(
-            "BrowserSession started (%s, headless=%s, executable=%s)",
-            CONFIG.browser, CONFIG.headless, CONFIG.chromium_executable or "bundled",
+            "BrowserSession started (%s, headless=%s, channel=%s, stealth=%s)",
+            CONFIG.browser, CONFIG.headless, CONFIG.browser_channel or "-", CONFIG.stealth,
         )
 
     async def _new_context(self) -> None:
-        self._context = await self._browser.new_context()
+        ctx_kwargs: dict = {}
+        if CONFIG.stealth:
+            ctx_kwargs.update(
+                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                            "AppleWebKit/537.36 (KHTML, like Gecko) "
+                            "Chrome/124.0.0.0 Safari/537.36"),
+                locale="ko-KR",
+                timezone_id="Asia/Seoul",
+                viewport={"width": 1280, "height": 800},
+            )
+        self._context = await self._browser.new_context(**ctx_kwargs)
+        if CONFIG.stealth:
+            # hide the most obvious automation signal
+            await self._context.add_init_script(
+                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
+            )
         self._page = await self._context.new_page()
         self._frame_selector = None
         self.buffers.clear()
