@@ -37,18 +37,25 @@ class BrowserSession:
 
         if CONFIG.cdp_url:
             # Attach to the user's already-running, logged-in browser. Reuse its
-            # existing context/page so cookies, session and CAPTCHA state persist.
-            self._cdp = True
-            self._browser = await self._pw.chromium.connect_over_cdp(CONFIG.cdp_url)
-            self._context = (self._browser.contexts[0] if self._browser.contexts
-                             else await self._browser.new_context())
-            self._page = (self._context.pages[0] if self._context.pages
-                          else await self._context.new_page())
-            self._frame_selector = None
-            self.buffers.clear()
-            attach(self._page, self.buffers)
-            log.info("BrowserSession attached over CDP: %s", CONFIG.cdp_url)
-            return
+            # existing context/page so cookies/session/CAPTCHA state persist. If
+            # nothing is listening (stale BROWSER_CDP), fall back to a normal
+            # launch rather than bricking every tool call.
+            try:
+                self._browser = await self._pw.chromium.connect_over_cdp(CONFIG.cdp_url)
+                self._cdp = True
+                self._context = (self._browser.contexts[0] if self._browser.contexts
+                                 else await self._browser.new_context())
+                self._page = (self._context.pages[0] if self._context.pages
+                              else await self._context.new_page())
+                self._frame_selector = None
+                self.buffers.clear()
+                attach(self._page, self.buffers)
+                log.info("BrowserSession attached over CDP: %s", CONFIG.cdp_url)
+                return
+            except Exception as exc:
+                self._cdp = False
+                log.warning("CDP connect to %s failed (%s) — launching a normal "
+                            "browser instead.", CONFIG.cdp_url, exc)
 
         browser_type = getattr(self._pw, CONFIG.browser)
         launch_kwargs = {"headless": CONFIG.headless}
