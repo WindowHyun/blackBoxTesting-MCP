@@ -136,7 +136,7 @@ blackbox_mcp/
 ## ⚙️ 환경변수
 `HEADLESS`(기본 true) · `BROWSER`(chromium) · `CHROMIUM_EXECUTABLE` ·
 `BROWSER_CHANNEL`(chrome/msedge — 실제 브라우저) · `STEALTH`(봇오탐 완화) ·
-`REPORT_DIR`(./reports) · `SCENARIO_DIR`(./scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
+`REPORT_DIR`(기본 ~/ui-blackbox/reports) · `SCENARIO_DIR`(~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
 `DEFAULT_WAIT_UNTIL`(networkidle). 자세히는 `.env.example`.
 
 > **봇 탐지 안내**: 이 도구는 **자신의 UI/스테이징 테스트**에 맞춰져 있다. 네이버 등

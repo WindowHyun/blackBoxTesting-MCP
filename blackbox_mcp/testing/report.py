@@ -1,7 +1,9 @@
 """Report generation (SM-03, SM-04, SM-08, D3).
 
-Writes JSON / Markdown / HTML reports under REPORT_DIR (default ./reports),
-created if missing. Filenames: report_YYYYMMDD_HHMMSS.{json,md,html}. Step
+Writes JSON / Markdown / HTML reports under REPORT_DIR (absolute; default
+~/ui-blackbox/reports — NOT cwd-relative, since the MCP server's cwd is
+unpredictable/often unwritable), created if missing, with a home fallback.
+Filenames: report_YYYYMMDD_HHMMSS.{json,md,html}. Step
 screenshots go under reports/screenshots/ and are embedded into the HTML as
 base64 data URIs for single-file portability.
 """
@@ -24,9 +26,22 @@ def _stamp() -> str:
 
 
 def ensure_dirs() -> Path:
-    report_dir = CONFIG.report_dir
-    (report_dir / "screenshots").mkdir(parents=True, exist_ok=True)
-    return report_dir
+    """Return a writable report dir, creating it. Falls back to the user's home
+    if the configured dir cannot be created/written (e.g. server cwd is a system
+    path with no write permission)."""
+    candidates = [CONFIG.report_dir, Path.home() / "ui-blackbox" / "reports"]
+    last_err: Exception | None = None
+    for report_dir in candidates:
+        try:
+            (report_dir / "screenshots").mkdir(parents=True, exist_ok=True)
+            probe = report_dir / ".write_test"
+            probe.write_text("", encoding="utf-8")
+            probe.unlink()
+            return report_dir
+        except Exception as exc:  # PermissionError, OSError, ...
+            last_err = exc
+            continue
+    raise RuntimeError(f"No writable report directory ({last_err})")
 
 
 def compute_regression(result: dict) -> dict:
@@ -72,10 +87,10 @@ def compute_regression(result: dict) -> dict:
 async def capture_step_screenshot(session, name: str, idx: int) -> str | None:
     """Capture the current page to reports/screenshots and return a rel path."""
     try:
-        ensure_dirs()
+        base = ensure_dirs()
         safe = _SAFE.sub("_", name)
         rel = Path("screenshots") / f"{safe}_step{idx:02d}.png"
-        await session.page.screenshot(path=str(CONFIG.report_dir / rel))
+        await session.page.screenshot(path=str(base / rel))
         return str(rel)
     except Exception:
         return None

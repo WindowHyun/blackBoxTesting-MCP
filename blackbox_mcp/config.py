@@ -32,6 +32,15 @@ def _detect_chromium_executable() -> str | None:
     return None  # let Playwright resolve its bundled browser normally
 
 
+def _resolve_dir(value: str | None, default_name: str) -> Path:
+    """Absolute output dir. When unset, default under the user's home — NOT the
+    cwd, which is unpredictable when the server is spawned by Claude Desktop and
+    is often not writable (e.g. system32)."""
+    if value:
+        return Path(value).expanduser().resolve()
+    return (Path.home() / "ui-blackbox" / default_name).resolve()
+
+
 @dataclass(frozen=True)
 class Config:
     headless: bool
@@ -64,8 +73,8 @@ class Config:
             browser_channel=(os.getenv("BROWSER_CHANNEL") or None),
             cdp_url=(os.getenv("BROWSER_CDP") or None),
             stealth=_as_bool(os.getenv("STEALTH"), False),
-            report_dir=Path(os.getenv("REPORT_DIR", "./reports")).expanduser(),
-            scenario_dir=Path(os.getenv("SCENARIO_DIR", "./scenarios")).expanduser(),
+            report_dir=_resolve_dir(os.getenv("REPORT_DIR"), "reports"),
+            scenario_dir=_resolve_dir(os.getenv("SCENARIO_DIR"), "scenarios"),
             selector_timeout_ms=int(os.getenv("SELECTOR_TIMEOUT_MS", "2000")),
             default_wait_until=os.getenv("DEFAULT_WAIT_UNTIL", "networkidle"),
         )

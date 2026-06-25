@@ -300,7 +300,8 @@ SM-01~04와 함께(또는 직후) 구현한다.
 
 ## 6. 리포트 (testing/report.py, D3 / SM-03~09)
 
-- 기본 경로 `./reports/`(서버 실행 위치), `REPORT_DIR` env로 재정의, 없으면 자동 생성.
+- 기본 경로 **`~/ui-blackbox/reports`(홈 기준 절대경로)**, `REPORT_DIR` env로 재정의, 없으면 자동 생성.
+  > cwd 상대(`./reports`)는 MCP 서버 cwd가 예측 불가·쓰기 불가(system32 등)일 수 있어 폐기. 쓰기 실패 시 홈으로 폴백.
 - 파일명 `report_YYYYMMDD_HHMMSS.json` / `.md` / `.html`.
 - `formats` ∈ {json, md, html, both(json+md), all(json+md+html)}.
 - 스크린샷은 `reports/screenshots/`에 저장하고 md/json은 상대경로 참조,
