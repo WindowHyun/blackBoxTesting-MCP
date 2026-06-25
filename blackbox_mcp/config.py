@@ -41,6 +41,10 @@ class Config:
     # Use an installed browser channel (e.g. "chrome", "msedge") instead of the
     # bundled Chromium — real UA reduces anti-bot false positives.
     browser_channel: str | None
+    # Attach to an already-running browser via CDP (chrome --remote-debugging-port).
+    # When set, we connect to the user's real, logged-in browser instead of
+    # launching one. e.g. http://localhost:9222
+    cdp_url: str | None
     # Apply light anti-automation-fingerprint hardening for legitimate testing.
     stealth: bool
     report_dir: Path
@@ -58,6 +62,7 @@ class Config:
             browser=os.getenv("BROWSER", "chromium").strip().lower(),
             chromium_executable=_detect_chromium_executable(),
             browser_channel=(os.getenv("BROWSER_CHANNEL") or None),
+            cdp_url=(os.getenv("BROWSER_CDP") or None),
             stealth=_as_bool(os.getenv("STEALTH"), False),
             report_dir=Path(os.getenv("REPORT_DIR", "./reports")).expanduser(),
             scenario_dir=Path(os.getenv("SCENARIO_DIR", "./scenarios")).expanduser(),

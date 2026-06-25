@@ -143,3 +143,17 @@ blackbox_mcp/
 > 제3자 사이트는 안티봇으로 자동화를 막을 수 있고, 이를 우회한 로그인 자동화는 해당
 > 서비스 약관 위반 소지가 있다. 정상 테스트의 오탐은 `BROWSER_CHANNEL=chrome` +
 > `STEALTH=true`로 줄일 수 있다.
+
+### 🔗 내 브라우저에 붙이기 (CDP) — 로그인/캡차가 있는 경우 권장
+번들 브라우저를 새로 띄우는 대신, **이미 로그인해 둔 내 크롬**에 붙는다. 로그인·캡차는
+내가 직접 처리하고 자동화는 그 실제 세션에서 돌아가 봇 탐지에 가장 덜 걸린다.
+```bash
+# 1) 디버그 포트로 크롬 실행 (별도 프로필 권장)
+#    Windows
+"C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\cdp-profile"
+#    macOS
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222 --user-data-dir=/tmp/cdp-profile
+# 2) 그 창에서 직접 로그인해 둔다. 3) 서버 env에 BROWSER_CDP 지정
+```
+config `env`: `"BROWSER_CDP": "http://localhost:9222"` → 세션이 그 브라우저에 attach.
+세션을 닫아도 **네 브라우저는 그대로 유지**된다(우리가 종료하지 않음).

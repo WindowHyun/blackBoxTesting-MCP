@@ -23,6 +23,7 @@ class BrowserSession:
         self._browser = None
         self._context = None
         self._page = None
+        self._cdp = False   # attached to a user-owned browser via CDP
         # Current iframe context for CT-09; None == main page.
         self._frame_selector: str | None = None
         self.buffers = EventBuffers()
@@ -32,6 +33,22 @@ class BrowserSession:
         from playwright.async_api import async_playwright
 
         self._pw = await async_playwright().start()
+
+        if CONFIG.cdp_url:
+            # Attach to the user's already-running, logged-in browser. Reuse its
+            # existing context/page so cookies, session and CAPTCHA state persist.
+            self._cdp = True
+            self._browser = await self._pw.chromium.connect_over_cdp(CONFIG.cdp_url)
+            self._context = (self._browser.contexts[0] if self._browser.contexts
+                             else await self._browser.new_context())
+            self._page = (self._context.pages[0] if self._context.pages
+                          else await self._context.new_page())
+            self._frame_selector = None
+            self.buffers.clear()
+            attach(self._page, self.buffers)
+            log.info("BrowserSession attached over CDP: %s", CONFIG.cdp_url)
+            return
+
         browser_type = getattr(self._pw, CONFIG.browser)
         launch_kwargs = {"headless": CONFIG.headless}
         if CONFIG.browser_channel:
@@ -71,6 +88,11 @@ class BrowserSession:
 
     async def reset(self) -> None:
         """BR-04: wipe context (cookies/session/storage) + buffers, fresh page."""
+        if self._cdp:
+            # Never wipe the user's real session over CDP — just clear our buffers.
+            self.buffers.clear()
+            log.info("BrowserSession reset (CDP: buffers only).")
+            return
         if self._context is not None:
             await self._context.close()
         await self._new_context()
@@ -84,14 +106,22 @@ class BrowserSession:
 
     async def close(self) -> None:
         try:
-            if self._context is not None:
-                await self._context.close()
-            if self._browser is not None:
-                await self._browser.close()
-            if self._pw is not None:
-                await self._pw.stop()
+            if self._cdp:
+                # Detach only — the browser belongs to the user. Don't close it.
+                if self._browser is not None:
+                    await self._browser.close()  # closes CDP connection, not Chrome
+                if self._pw is not None:
+                    await self._pw.stop()
+            else:
+                if self._context is not None:
+                    await self._context.close()
+                if self._browser is not None:
+                    await self._browser.close()
+                if self._pw is not None:
+                    await self._pw.stop()
         finally:
             self._pw = self._browser = self._context = self._page = None
+            self._cdp = False
 
     # ── accessors ────────────────────────────────────────────────
     def is_alive(self) -> bool:
