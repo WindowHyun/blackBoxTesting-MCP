@@ -16,7 +16,7 @@
 | **1** | 코어 PoC — 실제 브라우저로 탐색/이해 | CT-01, CT-02, BR-02 / Q1 | 🟡 진행중 (T1.1~1.4 ✅) |
 | **2** | 상호작용·검증 (실검증) | CT-03~07, D2 | ✅ 완료 |
 | **3** | 시나리오 실행·리포트(강화 포함) | SM-01~09, D3 | ✅ 핵심 완료 (SM-07/09 보류) |
-| **4** | 확장 Tools | CT-08~10, BR-03/04 | ☐ |
+| **4** | 확장 Tools | CT-08~10, BR-03/04 | ✅ 완료 |
 | **5** | 시나리오 라이브러리·생성 | SL-01~04 | ☐ |
 
 > 성공지표(설치 <5분 / 탐지율 80% / 허위실패 <5%) 측정은 **Phase 3 이후**
@@ -128,10 +128,11 @@ report_YYYYMMDD_HHMMSS.*`, `REPORT_DIR` 재정의, `${VAR}` 마스킹.
 
 ---
 
-## Phase 4 — 확장 Tools
+## Phase 4 — 확장 Tools ✅ 완료
 
-**작업** `wait`(CT-08), `switch_frame`(CT-09), `expect_dialog`(CT-10),
-`reset_session`(BR-04, 구현완료·검증), `HEADLESS` 토글(BR-03).
+**완료** `wait`(CT-08), `switch_frame`(CT-09), `expect_dialog`(CT-10, 스텁→구현),
+`reset_session`(BR-04), `HEADLESS` 토글(BR-03). test_extensions 8 + test_config 3.
+expect_dialog는 `expect_event` 데드락을 피해 `page.once("dialog")` 핸들러로 구현.
 
 **공식 문서 근거**
 - `page.wait_for_selector` / `page.wait_for_timeout(ms)` / `page.expect_event`

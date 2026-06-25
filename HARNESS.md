@@ -122,10 +122,15 @@ assert/snapshot/wait 매핑 + `continue_on_fail`. per-step 결과.
 
 **T3.9 (2차) 회귀·a11y** `[SM-07, SM-09]` — 보류(다음 사이클).
 
-### Phase 4 — 확장 Tools  (의존: Phase 2)
+### Phase 4 — 확장 Tools  (의존: Phase 2) ✅
 
-**T4.1 wait** `[CT-08]` · **T4.2 switch_frame** `[CT-09]` · **T4.3 expect_dialog** `[CT-10]`(스텁→구현) · **T4.4 reset_session 검증** `[BR-04]` · **T4.5 HEADLESS 토글** `[BR-03]`
-- 각 Files: `tools/*.py` + `tests/test_*.py` · DoD: iframe 조작 / dialog 텍스트검증·accept·dismiss / 시간기반 대기 / 헤드풀 전환.
+**T4.1 wait** `[CT-08]` ✅ · **T4.2 switch_frame** `[CT-09]` ✅ · **T4.3 expect_dialog**
+`[CT-10]` ✅(스텁→구현: `page.once("dialog")` 핸들러로 트리거 클릭 중 처리, accept/
+dismiss/텍스트검증, 미노출 시 실패) · **T4.4 reset_session** `[BR-04]` ✅ · **T4.5
+HEADLESS 토글** `[BR-03]` ✅
+- Tests: `tests/test_extensions.py`(8), `tests/test_config.py`(3).
+- DoD: ✅ iframe 스코프 / 다이얼로그 accept·dismiss·텍스트검증 / 시간기반 대기 /
+  세션 초기화 버퍼 클리어 / HEADLESS 파싱.
 
 ### Phase 5 — 라이브러리·생성  (의존: Phase 3)
 
