@@ -509,6 +509,12 @@ SM-01~04와 함께(또는 직후) 구현한다.
 - `page.wait_for_selector(...)`, `page.wait_for_timeout(ms)`, `page.expect_console_message(...)` ✅
 - `BrowserType.executable_path`(기대 경로 반환, 설치 여부 ≠) — property/메서드 표기는
   버전별 상이 가능 → 구현 시 재확인 ⚠️
+- `BrowserType.connect_over_cdp(endpoint_url)` — **Chromium 전용**. `http://localhost:9222/`
+  또는 `ws://...` 허용. `Browser` 반환. 기존 컨텍스트/페이지는 `browser.contexts()[0]` ·
+  `defaultContext.pages()[0]`로 접근(구현이 이 패턴 사용). 공식 주의: "Playwright
+  프로토콜보다 fidelity 낮음", 브라우저가 Playwright 권장 인자 없이 떠 있으면 일부
+  기능이 깨질 수 있음. close()가 실제 브라우저를 닫는지는 문서 미명시 → 실측 결과
+  **disconnect만 되고 사용자 브라우저는 유지**됨(CDP 경로에서 context/browser 안 닫음).
 
 > 제약: playwright.dev API 페이지는 직접 fetch가 403으로 막혀, 일부 항목은
 > GitHub 원본 마크다운 + 공식 검색 결과로 교차 확인함. 구현 중 실제 버전의
