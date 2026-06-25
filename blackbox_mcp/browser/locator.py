@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import re
 
-_CSS_HINT = re.compile(r"[.#\[\]>]|^[a-zA-Z]+\[")
+# CSS-looking: contains selector punctuation AND no whitespace (sentences with a
+# trailing '.' shouldn't be mistaken for CSS).
+_CSS_PUNCT = re.compile(r"[.#\[\]>]")
 
 
 def _parse_role(rest: str) -> tuple[str, str | None]:
@@ -38,8 +40,16 @@ def _parse_role(rest: str) -> tuple[str, str | None]:
     return role, name
 
 
+def _looks_like_css(s: str) -> bool:
+    return bool(_CSS_PUNCT.search(s)) and not any(c.isspace() for c in s)
+
+
 def locate(root, selector: str):
-    """Resolve ``selector`` against ``root`` and return a Locator."""
+    """Synchronous single-strategy resolution (explicit prefix or inference).
+
+    Used where one deterministic strategy is fine. For the full fallback chain
+    with which-strategy reporting, use ``resolve`` (async).
+    """
     s = selector.strip()
 
     if s.startswith("testid="):
@@ -52,7 +62,46 @@ def locate(root, selector: str):
     if s.startswith("css="):
         return root.locator(s[len("css="):].strip())
 
-    # No prefix: infer. CSS-looking strings go to CSS; plain text to get_by_text.
-    if _CSS_HINT.search(s):
+    if _looks_like_css(s):
         return root.locator(s)
     return root.get_by_text(s)
+
+
+async def resolve(root, selector: str):
+    """Resolve ``selector`` to ``(locator, resolved_by)`` using the D2 chain.
+
+    Explicit prefixes (testid=/role=/text=/css=) pick that strategy directly.
+    A bare, CSS-looking string is treated as CSS. A bare plain string tries the
+    D2 order — data-testid → visible text — and returns the first strategy that
+    matches at least one element (falling back to text so errors are sensible).
+    ``resolved_by`` records which strategy won (feeds SM-06 report transparency).
+    """
+    s = selector.strip()
+
+    if s.startswith("testid="):
+        return root.locator(f'[data-testid="{s[len("testid="):].strip()}"]'), "testid"
+    if s.startswith("role="):
+        role, name = _parse_role(s[len("role="):])
+        loc = root.get_by_role(role, name=name) if name else root.get_by_role(role)
+        return loc, "role"
+    if s.startswith("text="):
+        return root.get_by_text(s[len("text="):].strip()), "text"
+    if s.startswith("css="):
+        return root.locator(s[len("css="):].strip()), "css"
+
+    if _looks_like_css(s):
+        return root.locator(s), "css"
+
+    # Bare plain string: try the chain in D2 priority, pick first with a match.
+    candidates = [
+        ("testid", root.locator(f'[data-testid="{s}"]')),
+        ("text", root.get_by_text(s)),
+    ]
+    for name, loc in candidates:
+        try:
+            if await loc.count() > 0:
+                return loc, name
+        except Exception:
+            continue
+    return root.get_by_text(s), "text"
+

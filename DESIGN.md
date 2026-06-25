@@ -159,13 +159,21 @@ def register_all(mcp):             # server.py에서 1회 호출
 3. **가시 텍스트** — `text=로그인` → `get_by_text`
 4. **CSS** — 최후 수단, 명시적으로 CSS로 보일 때만
 
-해석 규칙:
-- 접두사 명시(`testid=`, `role=`, `text=`, `css=`)가 있으면 그 방식 우선.
-- 접두사 없으면: CSS 셀렉터로 보이면(`. # [ >` 포함) CSS 시도 후 실패 시
-  텍스트로 fallback. 순수 문자열이면 role/text 우선.
-- 각 단계 timeout 짧게(예: 2s) 잡아 체인 전체가 클라이언트 요청 타임아웃 내 동작.
+해석 규칙 (구현 반영):
+- 접두사 명시(`testid=`, `role=`, `text=`, `css=`)가 있으면 그 방식으로 단일 해석.
+- 접두사 없는 **CSS형 문자열**(`. # [ ] >` 포함 + 공백 없음)은 CSS로 해석.
+  (공백 가드로 "Welcome." 같은 문장이 CSS로 오인되지 않음.)
+- 접두사 없는 **평문**은 D2 순서로 실제 fallback: `[data-testid="s"]` → 가시 텍스트
+  중 **count>0 인 첫 전략**을 채택(없으면 텍스트로 귀결해 에러 메시지가 자연스럽게).
+- 액션 timeout은 `CONFIG.selector_timeout_ms`(기본 2000) 적용 → 없는 요소에서
+  30초 대기 없이 빠르게 실패.
 
-`locate(root, selector) -> Locator` 단일 함수로 추상화하여 모든 tool이 공유.
+API:
+- `async resolve(root, selector) -> (Locator, resolved_by)` — 위 체인. `resolved_by`
+  ∈ {testid, role, text, css}는 **SM-06 리포트 셀렉터 투명성**의 원천. `interact`가 사용.
+- `locate(root, selector) -> Locator` — 동기 단일 해석(체인 불필요한 곳에서 사용).
+- `interact` 실패는 예외 대신 `{ok:False, resolved_by, error}` 구조화 반환,
+  값(value)은 `detail`에서 마스킹.
 
 ---
 

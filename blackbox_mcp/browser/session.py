@@ -75,6 +75,13 @@ class BrowserSession:
             self._pw = self._browser = self._context = self._page = None
 
     # ── accessors ────────────────────────────────────────────────
+    def is_alive(self) -> bool:
+        """True if the browser is still connected (NFR crash detection)."""
+        try:
+            return self._browser is not None and self._browser.is_connected()
+        except Exception:
+            return False
+
     @property
     def page(self):
         if self._page is None:
@@ -103,6 +110,9 @@ async def get_session() -> BrowserSession:
     if _SESSION is None:
         _SESSION = BrowserSession()
         await _SESSION.start()
+    elif not _SESSION.is_alive():
+        # Browser crashed/closed since last call — recover transparently (NFR).
+        await _SESSION.restart()
     return _SESSION
 
 

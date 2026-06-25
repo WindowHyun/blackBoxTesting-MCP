@@ -79,22 +79,24 @@ python -m venv .venv
 **T1.6 bootstrap executable_path** `[D1]` ✅ — T1.1에서 `executable_path` +
 `os.path.exists` 견고화로 함께 처리(다운로드 실패 비크래시).
 
-### Phase 2 — 상호작용·검증  (의존: T1.2~1.4)
+### Phase 2 — 상호작용·검증  (의존: T1.2~1.4) ✅
 
-**T2.1 screenshot 통합** `[CT-03]` — Files: `tests/test_screenshot.py` · Verify: `PYTEST -k screenshot` · DoD: 유효 PNG 바이트 반환.
+**T2.1 screenshot 통합** `[CT-03]` ✅ — `tests/test_screenshot.py`: 유효 PNG(매직바이트) 확인.
 
-**T2.2 locator 체인 단위/통합** `[D2]` — Files: `tests/test_locator_live.py` · DoD: testid/role/text/css 각 전략 + fallback 동작.
+**T2.2 locator 체인 + resolved_by** `[D2]` ✅ — `browser/locator.py`에 async `resolve()`
+실제 fallback 체인(testid→text) + `resolved_by` 반환. `test_interact.py`에서 검증.
 
-**T2.3 interact 5동작** `[CT-04]` — Files: `tests/test_interact.py` · DoD: click/type/hover/select/press 모두 통과.
+**T2.3 interact 5동작** `[CT-04]` ✅ — click/type/hover/select/press 통과. 실패는
+`{ok:False, error}` 구조화 반환, 값 마스킹, `selector_timeout_ms` 적용.
 
-**T2.4 assert_ 5종** `[CT-05]` — Files: `tests/test_assert.py` · DoD: text_visible/element_visible/url_is/url_contains/count 정확.
+**T2.4 assert_ 5종** `[CT-05]` ✅ — `tests/test_assert.py`: 5종 + multi-match
+strict-mode 회귀 + non-int count 처리.
 
-**T2.5 console/network 통합** `[CT-06, CT-07]` — Files: `tests/test_events.py` · DoD: 의도적 4xx/JS에러를 버퍼에서 확인.
+**T2.5 console/network 통합** `[CT-06, CT-07]` ✅ — `test_navigate.py`에서 콘솔 error·
+네트워크 실패 버퍼 적재 검증.
 
-**T2.6 crash-recovery 래퍼** `[NFR Reliability]`
-- Files: `blackbox_mcp/browser/session.py`, 공통 tool 래퍼(예: `tools/_registry.py` 또는 `browser/session.py` 헬퍼)
-- Steps: tool 실행을 감싸 `TargetClosedError` 등 캡처 → `restart()` 1회 후 재시도.
-- DoD: 강제 종료 후 다음 호출 정상, 재시작 < 5s.
+**T2.6 crash-recovery** `[NFR Reliability]` ✅ — `BrowserSession.is_alive()` +
+`get_session()`이 죽은 브라우저 감지 시 `restart()`. `test_recovery.py`로 검증.
 
 ### Phase 3 — 시나리오 실행·리포트  (의존: Phase 2)
 

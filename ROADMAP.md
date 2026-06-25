@@ -14,7 +14,7 @@
 |---|---|---|---|
 | **0** | 스캐폴드 — 서버·레지스트리·세션 골격 | BR-01, D1, 레지스트리 | ✅ **완료** |
 | **1** | 코어 PoC — 실제 브라우저로 탐색/이해 | CT-01, CT-02, BR-02 / Q1 | 🟡 진행중 (T1.1~1.4 ✅) |
-| **2** | 상호작용·검증 (실검증) | CT-03~07, D2 | ☐ |
+| **2** | 상호작용·검증 (실검증) | CT-03~07, D2 | ✅ 완료 |
 | **3** | 시나리오 실행·리포트(강화 포함) | SM-01~09, D3 | ☐ |
 | **4** | 확장 Tools | CT-08~10, BR-03/04 | ☐ |
 | **5** | 시나리오 라이브러리·생성 | SL-01~04 | ☐ |
@@ -74,14 +74,16 @@
 
 ---
 
-## Phase 2 — 상호작용·검증
+## Phase 2 — 상호작용·검증 ✅ 완료
 
-**작업** `screenshot`(CT-03), `interact`(CT-04), `assert_`(CT-05),
-`get_console_logs`(CT-06), `get_network_errors`(CT-07)를 픽스처로 실검증.
-D2 셀렉터 체인(testid→role→text→css) 동작 확인.
+**완료** `screenshot`(CT-03)·`interact`(CT-04)·`assert_`(CT-05)·`get_console_logs`
+(CT-06)·`get_network_errors`(CT-07)를 `file://` 픽스처로 실검증.
+D2 셀렉터를 **async `resolve()` 실제 fallback 체인 + `resolved_by`**(SM-06 토대)로 구현.
+`selector_timeout_ms` 적용, interact 실패 구조화 반환·값 마스킹.
 
-추가: **crash-recovery 배선(NFR)** — 공통 tool 래퍼에서 `TargetClosedError` 등
-캡처 → `BrowserSession.restart()` 1회 후 재시도(§DESIGN 3.5).
+**crash-recovery(NFR)** ✅ — `is_alive()` + `get_session()` 자동 `restart()`.
+
+> 리뷰 발견·수정: assert_ multi-match strict-mode 크래시 → `count>0 && first` 로 수정.
 
 **공식 문서 근거**
 - 이미지 반환: `Image(data=bytes, format="png")` (MCP SDK)
