@@ -9,7 +9,7 @@
   <br><em>자동 생성된 리포트 — 통과율·스텝별 스크린샷·실패 원인·회귀·접근성·자격증명 마스킹</em>
 </p>
 
-Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 51건 green**
+Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 52건 green**
 
 ---
 
@@ -138,13 +138,14 @@ blackbox_mcp/
 ## 🔧 개발
 ```bash
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q        # 51건 (단위 + file:// 통합 + E2E)
+.venv/bin/python -m pytest -q        # 52건 (단위 + file:// 통합 + E2E)
 ```
 
 ## ⚙️ 환경변수
 `HEADLESS`(기본 true) · `BROWSER`(chromium) · `CHROMIUM_EXECUTABLE` ·
-`BROWSER_CHANNEL`(chrome/msedge — 실제 브라우저) · `STEALTH`(봇오탐 완화) ·
-`REPORT_DIR`(기본 ~/ui-blackbox/reports) · `SCENARIO_DIR`(~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
+`BROWSER_CHANNEL`(chrome/msedge — 실제 브라우저) · `BROWSER_CDP`(실행 중 브라우저 attach) ·
+`STEALTH`(봇오탐 완화) · `REPORT_DIR`(기본 ~/ui-blackbox/reports) ·
+`SCENARIO_DIR`(~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
 `DEFAULT_WAIT_UNTIL`(networkidle). 자세히는 `.env.example`.
 
 > **봇 탐지 안내**: 이 도구는 **자신의 UI/스테이징 테스트**에 맞춰져 있다. 네이버 등

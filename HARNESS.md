@@ -150,6 +150,19 @@ HEADLESS 토글** `[BR-03]` ✅
 `ctx.session.create_message`로 steps 생성(`mode:"generated"`), 미지원 시 키트
 (`mode:"kit"`). Desktop은 키트 경로(기본).
 
+### Phase 6 — 운영 보강 (PRD 외, 실사용 대응) ✅
+실제 Claude Desktop 사용에서 나온 요구로 추가. DESIGN §3.7 / §5 참조.
+
+- **E1 슬래시 명령**(`_prompts.py`) — `/ui-test·ui-scenario·ui-login·ui-generate`.
+  "ui-blackbox 도구만" 지시로 Claude in Chrome 충돌 차단.
+- **E2 브라우저 모드** — `BROWSER_CHANNEL`/`STEALTH`(봇오탐 완화), `BROWSER_CDP`
+  attach, `use_real_browser`(영구 프로필·idempotent). CDP 실패 시 launch 폴백.
+- **E3 출력 경로 견고화** — 기본 `~/ui-blackbox/...` 절대경로 + 쓰기 실패 홈 폴백
+  (MCP cwd 불가측 대응).
+- **E4 액션 레코더 + save_report** — 임의 도구 흐름도 리포트로 종료. register_all이
+  액션 도구를 래핑(스키마 보존), run_scenario는 이중 기록 안 됨.
+- **E5 환경 우회** — 브라우저 CDN 차단 시 `CHROMIUM_EXECUTABLE`/사전설치 자동감지.
+
 ---
 
 ## 3. 검증 자산

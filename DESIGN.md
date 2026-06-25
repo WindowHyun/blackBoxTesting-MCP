@@ -30,37 +30,33 @@ blackbox_mcp/
 
   browser/
     __init__.py
-    session.py          # BrowserSession 싱글톤 (BR-01, BR-03, BR-04, 크래시 재시작)
+    session.py          # BrowserSession 싱글톤 (BR-01·03·04, 크래시 재시작,
+                        #   CDP/persistent/stealth 브라우저 모드 — §3.7)
     listeners.py        # 콘솔/네트워크 버퍼 부착 (BR-02)
     locator.py          # 셀렉터 fallback 체인 해석 (D2: data-testid → role → text → css)
 
   testing/
     __init__.py
-    runner.py           # run_scenario 실행 엔진 (SM-01, SM-02)
-    report.py           # 리포트 생성/저장 JSON·MD·HTML (SM-03~09, D3)
+    runner.py           # run_scenario 실행 엔진 (SM-01·02) + _meta·_a11y_audit
+    report.py           # 리포트 생성/저장 JSON·MD·HTML + 회귀 (SM-03~09, D3)
+    recorder.py         # MCP 호출 액션 자동 기록 → save_report 원천
     library.py          # 시나리오 저장/로드/목록 (SL-02~04)
     secrets.py          # 자격증명 마스킹
 
   tools/
     __init__.py         # registry: 데코레이터로 등록된 tool 자동 수집
-    _registry.py        # @tool 데코레이터 + register_all(mcp)
-    navigate.py         # CT-01
-    snapshot.py         # CT-02
-    screenshot.py       # CT-03
-    interact.py         # CT-04
-    assertion.py        # CT-05  (assert_)
-    console.py          # CT-06
-    network.py          # CT-07
-    wait.py             # CT-08
-    frame.py            # CT-09  (switch_frame)
-    dialog.py           # CT-10  (expect_dialog)
-    session.py          # BR-04  (reset_session)
-    scenario.py         # SM-01  (run_scenario)
-    generate.py         # SL-01  (generate_scenario)
-    library.py          # SL-02~04 (save/load/list_scenario)
+    _registry.py        # @tool/@prompt 데코레이터 + register_all(recorder 래핑)
+    _prompts.py         # MCP 프롬프트(슬래시 명령): ui-test/ui-scenario/ui-login/ui-generate
+    navigate.py · snapshot.py · screenshot.py · interact.py · assertion.py(assert_)
+    console.py · network.py · wait.py · frame.py(switch_frame) · dialog.py(expect_dialog)
+    session.py(reset_session) · realbrowser.py(use_real_browser)
+    scenario.py(run_scenario) · savereport.py(save_report)
+    generate.py(generate_scenario) · library.py(save/load/list_scenario)
 
-scenarios/              # 저장된 시나리오 JSON (런타임 생성, SCENARIO_DIR 재정의 가능)
-reports/                # 리포트 출력 (런타임 생성, REPORT_DIR 재정의 가능)
+# 출력 경로(절대, 기본 ~/ui-blackbox/ — MCP cwd가 불가측·쓰기불가일 수 있어 홈 기준):
+~/ui-blackbox/scenarios/   # 저장 시나리오 (SCENARIO_DIR 재정의)
+~/ui-blackbox/reports/     # 리포트 출력 (REPORT_DIR 재정의, 쓰기 실패 시 홈 폴백)
+~/ui-blackbox/chrome-profile/  # use_real_browser 영구 프로필(로그인 유지)
 
 pyproject.toml
 README.md
@@ -147,6 +143,21 @@ def register_all(mcp):             # server.py에서 1회 호출
   `get_by_test_id` / `locator`를 모두 노출하므로, root가 frame_locator일 때도
   §4 셀렉터 체인과 모든 tool이 동일하게 동작한다(코드 변경 불필요).
 
+### 3.7 브라우저 모드 (PRD 외 확장)
+세션은 4가지 모드로 기동·전환된다. `is_alive()`(browser.is_connected)로 생존을 확인하고,
+죽으면 `get_session()`이 `restart()`로 복구하되 **모드를 보존**한다.
+
+| 모드 | 트리거 | 동작 | 종료 시 |
+|---|---|---|---|
+| 번들(기본) | 기본값 | bundled Chromium launch + new_context | 브라우저 닫음 |
+| 채널/스텔스 | `BROWSER_CHANNEL`·`STEALTH` | 실제 Chrome/Edge 채널, AutomationControlled off·UA·webdriver 숨김 | 브라우저 닫음 |
+| 영구 프로필 | `use_real_browser` tool | `launch_persistent_context`(실제 Chrome, 프로필 유지) — **idempotent**(살아있으면 재사용) | context만 닫음·프로필 유지 |
+| CDP attach | `BROWSER_CDP` | `connect_over_cdp`로 사용자 브라우저에 attach(기존 context/page 재사용) | **detach만**·사용자 브라우저 유지 |
+
+- 영구/ CDP 모드에서 `reset_session`은 로그인 보존을 위해 **버퍼만** 비운다.
+- CDP 연결 실패(스테일 포트) 시 경고 후 번들 launch로 폴백(세션 안 막힘).
+- 검증: §13 connect_over_cdp / launch_persistent_context 실측.
+
 ---
 
 ## 4. 셀렉터 전략 (D2) — `browser/locator.py`
@@ -191,6 +202,7 @@ API:
 | Tool | 시그니처 | 반환 | 우선순위 |
 |---|---|---|---|
 | `reset_session` | `reset_session()` | `{ok, message}` | SHOULD |
+| `use_real_browser` | `use_real_browser(headless=False, channel="chrome")` | `{ok, mode, browser, profile}` | 확장 |
 
 ### 5.2 코어 (CT)
 | Tool | 시그니처 | 반환 | 우선순위 |
@@ -229,7 +241,14 @@ API:
 ### 5.3 시나리오 모드 (SM)
 | Tool | 시그니처 | 우선순위 |
 |---|---|---|
-| `run_scenario` | `run_scenario(steps, continue_on_fail=False, save_report=True, report_format="both")` | MUST |
+| `run_scenario` | `run_scenario(steps, name, description, continue_on_fail=False, save_report=True, report_format="both", screenshot_each=False)` | MUST |
+| `save_report` | `save_report(name="session", description="", report_format="all")` | 확장 |
+
+> **save_report (확장):** run_scenario 없이 임의 도구 호출만으로 진행한 흐름도 리포트로
+> 끝낼 수 있게 한다. MCP로 호출되는 액션 도구는 `testing/recorder.py`가 자동 기록(§6.1
+> 스텝)하며, `save_report`가 그 기록을 JSON/MD/HTML로 저장 후 초기화한다. 슬래시 명령
+> `/ui-test`·`/ui-login`이 마지막에 이를 호출하도록 지시한다. 내부적으로 runner는 raw
+> 함수를 호출(레지스트리 래핑 대상 아님)하므로 run_scenario는 이중 기록되지 않는다.
 
 - `steps`: JSON 배열, 각 스텝 `{action, ...args}`. action은 위 코어 tool 이름과 동일 어휘.
 - 각 스텝 결과 필드의 정식 정의는 **§6.1 리포트 스키마**를 따른다(`screenshot`·

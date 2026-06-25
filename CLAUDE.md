@@ -22,11 +22,11 @@ python -m venv .venv
 ```
 
 ## 아키텍처 지도 (어디에 뭐가 있나)
-- `blackbox_mcp/server.py` — FastMCP 부팅: `ensure_chromium()` → `register_all()` → `mcp.run()`
-- `blackbox_mcp/tools/` — **MCP Tool = 파일 1개**. `_registry.py`의 `@tool`로 등록
-- `blackbox_mcp/browser/` — `session.py`(싱글톤), `listeners.py`(콘솔/네트워크 버퍼), `locator.py`(D2 셀렉터 체인)
-- `blackbox_mcp/testing/` — `runner.py`(시나리오), `report.py`(JSON/MD/HTML), `library.py`, `secrets.py`(마스킹)
-- `tests/` — 브라우저 없는 단위 + `file://` 픽스처 통합
+- `blackbox_mcp/server.py` — FastMCP 부팅: `ensure_chromium()` → `register_all()` → `mcp.run()`, lifespan으로 세션 정리
+- `blackbox_mcp/tools/` — **MCP Tool = 파일 1개**. `_registry.py`의 `@tool`로 등록(`@prompt`=슬래시 명령은 `_prompts.py`). register_all이 액션 도구를 recorder로 래핑
+- `blackbox_mcp/browser/` — `session.py`(싱글톤 + 4 모드: 번들/채널·스텔스/영구프로필/CDP — DESIGN §3.7), `listeners.py`(콘솔/네트워크 버퍼), `locator.py`(D2 체인)
+- `blackbox_mcp/testing/` — `runner.py`(시나리오), `report.py`(JSON/MD/HTML+회귀), `recorder.py`(액션 자동 기록→save_report), `library.py`, `secrets.py`(마스킹)
+- `tests/` — 브라우저 없는 단위 + `file://` 픽스처 통합 (현재 52건)
 
 ## 불변 규칙 (반드시 지킬 것)
 1. **Tool 추가 = `tools/`에 파일 1개 + `tools/__init__.py`에 import 한 줄.** `server.py`는 절대 수정하지 않는다.
@@ -45,3 +45,6 @@ python -m venv .venv
 - Chromium 다운로드 ~150MB. Phase 1 착수 시 환경 가능 여부 먼저 확인.
 - `BrowserType.executable_path`는 "설치 여부"가 아니라 "기대 경로" → `os.path.exists()`로 확인.
 - 4xx/5xx는 `requestfailed`가 아니라 `response`(status≥400)로 잡힌다.
+- 출력 경로는 **홈 기준 절대경로**(`~/ui-blackbox/...`). MCP 서버 cwd가 시스템 경로일 수 있어 상대경로 저장은 막힌다(`ensure_dirs` 홈 폴백).
+- recorder 래핑은 **MCP 등록 함수만** 감싼다(모듈 함수는 unwrapped) → `run_scenario` 내부 호출은 이중 기록 안 됨. 래퍼는 반환 어노테이션을 떼서 `Image` 스키마 오류를 피한다.
+- 브라우저 CDN(`cdn.playwright.dev`) 차단 환경: `CHROMIUM_EXECUTABLE`/사전설치 자동감지로 우회.
