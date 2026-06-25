@@ -72,6 +72,18 @@ python -m venv .venv
 
 ---
 
+## ⌨️ 슬래시 명령 (권장 — 다른 브라우저 도구와 충돌 방지)
+입력창에 `/` 를 치면 아래 명령이 뜬다. **ui-blackbox 도구만 쓰도록 자동 지시**되어,
+"Claude in Chrome" 같은 다른 브라우저 도구가 가로채는 걸 막는다.
+
+| 명령 | 인수 | 용도 |
+|---|---|---|
+| `/ui-test` | task | 자연어 작업을 ui-blackbox 도구로 수행 |
+| `/ui-scenario` | description, url | 시나리오 구성→실행→리포트(all) |
+| `/ui-generate` | description, url, name | 페이지 분석→재사용 시나리오 생성·저장 |
+
+예: `/ui-test` → `네이버 열어서 로그인 버튼 클릭하고 스크린샷 찍어줘`
+
 ## 💬 사용 예 (자연어)
 - *"이 페이지에서 회원가입 폼이 빈 값일 때 에러 뜨는지 확인해줘"*
 - *"로그인 시나리오를 만들어서 'smoke_login'으로 저장해줘"* → 다음부턴 *"smoke_login 돌려줘"*

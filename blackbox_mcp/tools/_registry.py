@@ -20,6 +20,7 @@ class _PendingTool:
 
 
 _PENDING: list[_PendingTool] = []
+_PENDING_PROMPTS: list[_PendingTool] = []
 
 
 def tool(name: str | None = None, description: str | None = None):
@@ -32,8 +33,18 @@ def tool(name: str | None = None, description: str | None = None):
     return decorator
 
 
+def prompt(name: str | None = None, description: str | None = None):
+    """Mark a function for registration as an MCP prompt (slash command)."""
+
+    def decorator(fn: Callable) -> Callable:
+        _PENDING_PROMPTS.append(_PendingTool(fn=fn, name=name, description=description))
+        return fn
+
+    return decorator
+
+
 def register_all(mcp) -> int:
-    """Register every pending tool onto the given FastMCP instance.
+    """Register every pending tool and prompt onto the FastMCP instance.
 
     Returns the number of tools registered.
     """
@@ -44,4 +55,11 @@ def register_all(mcp) -> int:
         if pending.description:
             kwargs["description"] = pending.description
         mcp.tool(**kwargs)(pending.fn)
+    for pending in _PENDING_PROMPTS:
+        kwargs = {}
+        if pending.name:
+            kwargs["name"] = pending.name
+        if pending.description:
+            kwargs["description"] = pending.description
+        mcp.prompt(**kwargs)(pending.fn)
     return len(_PENDING)

@@ -20,6 +20,7 @@ from . import (  # noqa: F401  (imported for side-effect registration)
     generate,
     library,
 )
+from . import _prompts  # noqa: F401  (registers MCP prompts / slash commands)
 from ._registry import register_all
 
 __all__ = ["register_all"]
