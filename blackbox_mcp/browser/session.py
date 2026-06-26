@@ -219,9 +219,10 @@ class BrowserSession:
     def is_alive(self) -> bool:
         """True if the browser is still usable (NFR crash detection).
 
-        Checks the page first: ``context.browser`` can be None for a persistent
-        context (per Playwright docs), so relying on it alone would make every
-        call think the session died → relaunch loop / new window each time.
+        Checks the page first: ``context.browser`` is None when the context is
+        created outside a normal browser (Android/Electron, per Playwright docs);
+        checking ``page.is_closed()`` is robust to that and to version quirks, so
+        we don't falsely think the session died → relaunch loop / new window.
         """
         try:
             if self._page is not None and not self._page.is_closed():

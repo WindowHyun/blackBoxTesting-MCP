@@ -458,13 +458,14 @@ SM-01~04와 함께(또는 직후) 구현한다.
 | Phase | 범위 | 상태 |
 |---|---|---|
 | 0 | 스캐폴드(서버·레지스트리·세션 골격) | ✅ 완료 |
-| 1 | 코어 PoC: BrowserSession·listeners·navigate·snapshot, **Q1 실측** | 🔜 |
-| 2 | 상호작용/검증: screenshot·locator(D2)·interact·assert_·console·network | ☐ |
-| 3 | 시나리오/리포트: runner + report(JSON/MD/HTML, SM-03~09) | ☐ |
-| 4 | 확장: wait·switch_frame·expect_dialog·reset_session·HEADLESS | ☐ |
-| 5 | 라이브러리: generate_scenario·save/load/list_scenario | ☐ |
+| 1 | 코어 PoC: BrowserSession·listeners·navigate·snapshot, Q1 실측 | ✅ 완료 |
+| 2 | 상호작용/검증: screenshot·locator(D2)·interact·assert_·console·network | ✅ 완료 |
+| 3 | 시나리오/리포트: runner + report(JSON/MD/HTML, SM-03~09) | ✅ 완료 |
+| 4 | 확장: wait·switch_frame·expect_dialog·reset_session·HEADLESS | ✅ 완료 |
+| 5 | 라이브러리: generate_scenario·save/load/list_scenario | ✅ 완료 |
+| 6 | 운영 보강(PRD 외): 슬래시명령·브라우저 4모드·레코더+save_report | ✅ 완료 |
 
-각 Phase: 단위 테스트(pytest) 추가 후 커밋. 성공지표 측정은 Phase 3 이후 내부 베타 10페이지.
+각 Phase: 단위 테스트(pytest, 현재 55건) 후 커밋. 성공지표 측정은 내부 베타 10페이지(향후).
 
 ---
 
@@ -535,7 +536,29 @@ SM-01~04와 함께(또는 직후) 구현한다.
   프로토콜보다 fidelity 낮음", 브라우저가 Playwright 권장 인자 없이 떠 있으면 일부
   기능이 깨질 수 있음. close()가 실제 브라우저를 닫는지는 문서 미명시 → 실측 결과
   **disconnect만 되고 사용자 브라우저는 유지**됨(CDP 경로에서 context/browser 안 닫음).
+- `BrowserType.launch_persistent_context(user_data_dir, channel=, executable_path=,
+  headless=)` → `BrowserContext` 반환. 공식: "이 context를 닫으면 브라우저가 자동
+  종료"(우리 persistent close()와 일치) ✅. `BrowserType.launch(channel=, executable_path=,
+  args=, headless=)` ✅
+- `BrowserContext.browser()` — context가 **normal browser 밖(Android/Electron)**에서
+  생성됐을 때 None 반환(영속 컨텍스트는 Browser 반환). → `is_alive()`는 `page.is_closed()`
+  우선으로 견고화 ✅
+- `BrowserContext.add_init_script(...)` ✅ (stealth webdriver 숨김)
+- `Browser.new_context(user_agent=, locale=, timezone_id=, viewport=)` — stealth 컨텍스트
+  옵션, 실측(UA 적용)으로 확인 ✅
+- `page.once(event, handler)` · `page.remove_listener(event, handler)` · `page.is_closed()` ✅
+  (expect_dialog는 once 핸들러로 데드락 회피)
+- `page.evaluate(expr, arg)` · `locator.evaluate(expr, arg)` — arg가 JS 2번째 인자 ✅
+- `locator.click/fill/hover/select_option/press(timeout=)` · `count()` · `first` ·
+  `is_visible()` · `wait_for(state=)` ✅
+- `request.failure`(property, 실패 텍스트/None) · `request.method`(property) ✅
+- `ConsoleMessage.type`/`text`/`location`(property) — location 키는 `url`/`line`/`column`
+  (`lineNumber`/`columnNumber`는 deprecated) → `line` 우선 사용으로 정정 ✅
+- `page.screenshot(path=, full_page=)` ✅
+
+**MCP Prompts** — `@mcp.prompt(name=, description=)` 데코레이터, 문자열 인자 → 문자열
+반환이 user 메시지로 직렬화, 인자는 클라이언트에 `PromptArgument`로 노출 ✅
+(슬래시 명령 ui-test/ui-scenario/ui-login/ui-generate)
 
 > 제약: playwright.dev API 페이지는 직접 fetch가 403으로 막혀, 일부 항목은
-> GitHub 원본 마크다운 + 공식 검색 결과로 교차 확인함. 구현 중 실제 버전의
-> 시그니처를 코드로 재확인한다.
+> GitHub 원본 마크다운 + 공식 검색 결과 + **로컬 실측**으로 교차 확인함.

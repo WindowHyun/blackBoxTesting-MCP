@@ -44,9 +44,10 @@ def attach(page, buffers: EventBuffers) -> None:
     def on_console(msg) -> None:
         loc = ""
         try:
-            location = msg.location  # {url, lineNumber, columnNumber}
+            location = msg.location  # {url, line, column} (lineNumber deprecated)
             if location:
-                loc = f"{location.get('url', '')}:{location.get('lineNumber', '')}"
+                line = location.get("line", location.get("lineNumber", ""))
+                loc = f"{location.get('url', '')}:{line}"
         except Exception:
             pass
         buffers.console.append(
