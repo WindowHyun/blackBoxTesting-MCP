@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Blackbox Fixture</title>
+</head>
+<body>
+  <h1 data-testid="title">로그인</h1>
+  <form>
+    <input data-testid="email" type="email" placeholder="email">
+    <input data-testid="password" type="password" placeholder="password">
+    <button data-testid="submit" type="button">로그인</button>
+  </form>
+  <p id="status">대기 중</p>
+
+  <!-- triggers a requestfailed (CT-07): the file does not exist -->
+  <img src="does-not-exist.png" alt="missing">
+
+  <script>
+    // triggers a console error (CT-06)
+    console.error("fixture console error");
+    document.querySelector('[data-testid="submit"]').addEventListener('click', () => {
+      document.getElementById('status').textContent = '로그인됨';
+    });
+  </script>
+</body>
+</html>

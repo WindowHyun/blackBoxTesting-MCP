@@ -15,6 +15,13 @@ def test_all_tools_registered():
     assert expected <= names
 
 
+def test_prompts_registered():
+    from blackbox_mcp.tools._registry import _PENDING_PROMPTS
+
+    names = {p.name or p.fn.__name__ for p in _PENDING_PROMPTS}
+    assert {"ui-test", "ui-scenario", "ui-generate"} <= names
+
+
 def test_locator_prefix_parsing():
     from blackbox_mcp.browser import locator
 

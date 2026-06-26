@@ -1,8 +1,8 @@
 # UI Blackbox Tester MCP — 설계 문서 (DESIGN)
 
-> PRD `UI Blackbox MCP v0.6` 기반 구현 설계.
-> 스택: **Python 3.11+ · Playwright(Chromium) · MCP 공식 SDK(FastMCP) · stdio · Claude Desktop**
-> 범위: Phase 0~5 전체 (MUST/SHOULD/COULD 포함)
+> PRD `UI Blackbox MCP v0.6` 기반 구현 설계 + 확장(리포트 강화 SM-04~09).
+> 스택: **Python 3.11+ · Playwright(Chromium, async API, ≥1.60) · MCP 공식 SDK(FastMCP) · stdio · Claude Desktop**
+> 범위: Phase 0~5 전체 (MUST/SHOULD/COULD 포함). 마일스톤 상태는 ROADMAP 참조.
 
 ---
 
@@ -30,38 +30,33 @@ blackbox_mcp/
 
   browser/
     __init__.py
-    session.py          # BrowserSession 싱글톤 (BR-01, BR-03, BR-04, 크래시 재시작)
+    session.py          # BrowserSession 싱글톤 (BR-01·03·04, 크래시 재시작,
+                        #   CDP/persistent/stealth 브라우저 모드 — §3.7)
     listeners.py        # 콘솔/네트워크 버퍼 부착 (BR-02)
-    actions.py          # 셀렉터 fallback 체인 (D2), interact 실제 동작
-    locator.py          # 셀렉터 해석 유틸 (data-testid → role → text → css)
+    locator.py          # 셀렉터 fallback 체인 해석 (D2: data-testid → role → text → css)
 
   testing/
     __init__.py
-    runner.py           # run_scenario 실행 엔진 (SM-01, SM-02)
-    report.py           # JSON+MD 리포트 생성/저장 (SM-03, D3)
+    runner.py           # run_scenario 실행 엔진 (SM-01·02) + _meta·_a11y_audit
+    report.py           # 리포트 생성/저장 JSON·MD·HTML + 회귀 (SM-03~09, D3)
+    recorder.py         # MCP 호출 액션 자동 기록 → save_report 원천
     library.py          # 시나리오 저장/로드/목록 (SL-02~04)
     secrets.py          # 자격증명 마스킹
 
   tools/
     __init__.py         # registry: 데코레이터로 등록된 tool 자동 수집
-    _registry.py        # @tool 데코레이터 + register_all(mcp)
-    navigate.py         # CT-01
-    snapshot.py         # CT-02
-    screenshot.py       # CT-03
-    interact.py         # CT-04
-    assertion.py        # CT-05  (assert_)
-    console.py          # CT-06
-    network.py          # CT-07
-    wait.py             # CT-08
-    frame.py            # CT-09  (switch_frame)
-    dialog.py           # CT-10  (expect_dialog)
-    session.py          # BR-04  (reset_session)
-    scenario.py         # SM-01  (run_scenario)
-    generate.py         # SL-01  (generate_scenario)
-    library.py          # SL-02~04 (save/load/list_scenario)
+    _registry.py        # @tool/@prompt 데코레이터 + register_all(recorder 래핑)
+    _prompts.py         # MCP 프롬프트(슬래시 명령): ui-test/ui-scenario/ui-login/ui-generate
+    navigate.py · snapshot.py · screenshot.py · interact.py · assertion.py(assert_)
+    console.py · network.py · wait.py · frame.py(switch_frame) · dialog.py(expect_dialog)
+    session.py(reset_session) · realbrowser.py(use_real_browser)
+    scenario.py(run_scenario) · savereport.py(save_report)
+    generate.py(generate_scenario) · library.py(save/load/list_scenario)
 
-scenarios/              # 저장된 시나리오 JSON (런타임 생성, SCENARIO_DIR 재정의 가능)
-reports/                # 리포트 출력 (런타임 생성, REPORT_DIR 재정의 가능)
+# 출력 경로(절대, 기본 ~/ui-blackbox/ — MCP cwd가 불가측·쓰기불가일 수 있어 홈 기준):
+~/ui-blackbox/scenarios/   # 저장 시나리오 (SCENARIO_DIR 재정의)
+~/ui-blackbox/reports/     # 리포트 출력 (REPORT_DIR 재정의, 쓰기 실패 시 홈 폴백)
+~/ui-blackbox/chrome-profile/  # use_real_browser 영구 프로필(로그인 유지)
 
 pyproject.toml
 README.md
@@ -148,6 +143,25 @@ def register_all(mcp):             # server.py에서 1회 호출
   `get_by_test_id` / `locator`를 모두 노출하므로, root가 frame_locator일 때도
   §4 셀렉터 체인과 모든 tool이 동일하게 동작한다(코드 변경 불필요).
 
+### 3.7 브라우저 모드 (PRD 외 확장)
+세션은 4가지 모드로 기동·전환된다. `is_alive()`(browser.is_connected)로 생존을 확인하고,
+죽으면 `get_session()`이 `restart()`로 복구하되 **모드를 보존**한다.
+
+| 모드 | 트리거 | 동작 | 종료 시 |
+|---|---|---|---|
+| 번들(기본) | 기본값 | bundled Chromium launch + new_context | 브라우저 닫음 |
+| 채널/스텔스 | `BROWSER_CHANNEL`·`STEALTH` | 실제 Chrome/Edge 채널, AutomationControlled off·UA·webdriver 숨김 | 브라우저 닫음 |
+| 영구 프로필 | `use_real_browser` tool | `launch_persistent_context`(실제 Chrome, 프로필 유지) — **idempotent**(살아있으면 재사용) | context만 닫음·프로필 유지 |
+| CDP attach | `BROWSER_CDP` | `connect_over_cdp`로 사용자 브라우저에 attach(기존 context/page 재사용) | **detach만**·사용자 브라우저 유지 |
+
+- 영구/ CDP 모드에서 `reset_session`은 로그인 보존을 위해 **버퍼만** 비운다.
+- CDP 연결 실패(스테일 포트) 시 경고 후 번들 launch로 폴백(세션 안 막힘).
+- **팝업/새 탭 자동 추적:** `context.on("page")`로 새 페이지를 활성 페이지로 채택
+  (target=_blank·window.open·OAuth 팝업), 닫히면 남은 페이지로 복귀.
+- **실 사이트 견고화:** navigate는 `networkidle` 미도달 시 `NAV_TIMEOUT_MS` 초과하면
+  현재 상태로 진행(`settled:false`). `IGNORE_HTTPS_ERRORS`로 스테이징 인증서 수용.
+- 검증: §13 connect_over_cdp / launch_persistent_context 실측.
+
 ---
 
 ## 4. 셀렉터 전략 (D2) — `browser/locator.py`
@@ -160,13 +174,21 @@ def register_all(mcp):             # server.py에서 1회 호출
 3. **가시 텍스트** — `text=로그인` → `get_by_text`
 4. **CSS** — 최후 수단, 명시적으로 CSS로 보일 때만
 
-해석 규칙:
-- 접두사 명시(`testid=`, `role=`, `text=`, `css=`)가 있으면 그 방식 우선.
-- 접두사 없으면: CSS 셀렉터로 보이면(`. # [ >` 포함) CSS 시도 후 실패 시
-  텍스트로 fallback. 순수 문자열이면 role/text 우선.
-- 각 단계 timeout 짧게(예: 2s) 잡아 체인 전체가 클라이언트 요청 타임아웃 내 동작.
+해석 규칙 (구현 반영):
+- 접두사 명시(`testid=`, `role=`, `text=`, `css=`)가 있으면 그 방식으로 단일 해석.
+- 접두사 없는 **CSS형 문자열**(`. # [ ] >` 포함 + 공백 없음)은 CSS로 해석.
+  (공백 가드로 "Welcome." 같은 문장이 CSS로 오인되지 않음.)
+- 접두사 없는 **평문**은 D2 순서로 실제 fallback: `[data-testid="s"]` → 가시 텍스트
+  중 **count>0 인 첫 전략**을 채택(없으면 텍스트로 귀결해 에러 메시지가 자연스럽게).
+- 액션 timeout은 `CONFIG.selector_timeout_ms`(기본 2000) 적용 → 없는 요소에서
+  30초 대기 없이 빠르게 실패.
 
-`locate(root, selector) -> Locator` 단일 함수로 추상화하여 모든 tool이 공유.
+API:
+- `async resolve(root, selector) -> (Locator, resolved_by)` — 위 체인. `resolved_by`
+  ∈ {testid, role, text, css}는 **SM-06 리포트 셀렉터 투명성**의 원천. `interact`가 사용.
+- `locate(root, selector) -> Locator` — 동기 단일 해석(체인 불필요한 곳에서 사용).
+- `interact` 실패는 예외 대신 `{ok:False, resolved_by, error}` 구조화 반환,
+  값(value)은 `detail`에서 마스킹.
 
 ---
 
@@ -184,6 +206,7 @@ def register_all(mcp):             # server.py에서 1회 호출
 | Tool | 시그니처 | 반환 | 우선순위 |
 |---|---|---|---|
 | `reset_session` | `reset_session()` | `{ok, message}` | SHOULD |
+| `use_real_browser` | `use_real_browser(headless=False, channel="chrome")` | `{ok, mode, browser, profile}` | 확장 |
 
 ### 5.2 코어 (CT)
 | Tool | 시그니처 | 반환 | 우선순위 |
@@ -222,17 +245,42 @@ def register_all(mcp):             # server.py에서 1회 호출
 ### 5.3 시나리오 모드 (SM)
 | Tool | 시그니처 | 우선순위 |
 |---|---|---|
-| `run_scenario` | `run_scenario(steps, continue_on_fail=False, save_report=True, report_format="both")` | MUST |
+| `run_scenario` | `run_scenario(steps, name, description, continue_on_fail=False, save_report=True, report_format="both", screenshot_each=False)` | MUST |
+| `save_report` | `save_report(name="session", description="", report_format="all")` | 확장 |
+
+> **save_report (확장):** run_scenario 없이 임의 도구 호출만으로 진행한 흐름도 리포트로
+> 끝낼 수 있게 한다. MCP로 호출되는 액션 도구는 `testing/recorder.py`가 자동 기록(§6.1
+> 스텝)하며, `save_report`가 그 기록을 JSON/MD/HTML로 저장 후 초기화한다. 슬래시 명령
+> `/ui-test`·`/ui-login`이 마지막에 이를 호출하도록 지시한다. 내부적으로 runner는 raw
+> 함수를 호출(레지스트리 래핑 대상 아님)하므로 run_scenario는 이중 기록되지 않는다.
 
 - `steps`: JSON 배열, 각 스텝 `{action, ...args}`. action은 위 코어 tool 이름과 동일 어휘.
-- 각 스텝 결과: `{step, action, expected, actual, passed, screenshot_path, console_errors}`.
+- 각 스텝 결과 필드의 정식 정의는 **§6.1 리포트 스키마**를 따른다(`screenshot`·
+  `resolved_by`·`console_errors`/`network_errors`·`ai_reason`·`severity` 등).
 - 실패 시 자동 스크린샷 캡처(SM-02) → 리포트 첨부.
 - `continue_on_fail=False`면 첫 실패에서 중단.
 - 종료 후 리포트 저장(SM-03) — §6.
+- **지원 스텝 action**: `navigate` · `interact` · `assert` · `snapshot` · `wait` ·
+  `switch_frame` · `reset_session` · `screenshot` · `expect_dialog`. (runner 디스패치)
 - **SM-04 (SHOULD):** `report_format`에 `html`/`all`을 지원해 단일 self-contained
   HTML 리포트(스텝 표 + 스크린샷 인라인 + 콘솔/네트워크 에러)를 추가 생성한다.
   비개발 페르소나(US-03) 가독성 향상. 외부 의존성 없이 CSS 인라인(NFR 로컬 전용).
   Phase 3에서 마크다운 렌더러와 함께 구현.
+
+#### 리포트 강화 요구사항 (SM-05 ~ SM-09)
+포트폴리오/실무 가치를 위한 리포트 확장. 우선순위순으로 정리하며 Phase 3에서
+SM-01~04와 함께(또는 직후) 구현한다.
+
+| ID | 항목 | 내용 | 우선순위 |
+|---|---|---|---|
+| **SM-05** | **AI 판단 근거 + 수정 제안** | 각 스텝/실패에 Claude의 판단 사유(`ai_reason`)와 실패 시 가설·수정 제안(`ai_suggestion`)을 기록. 블랙박스 AI 검증의 핵심 차별점(공식 playwright-mcp 대비). | SHOULD |
+| **SM-06** | **스텝 캡처 + 셀렉터 투명성 + 에러 귀속** | 스텝마다 캡처(통과/실패 모두), D2 체인 중 **실제 매칭된 셀렉터 전략**(`resolved_by`) 기록, 콘솔/네트워크 에러를 전역이 아닌 **스텝 구간에 귀속**. | SHOULD |
+| **SM-07** | **회귀 비교(이전 실행 대비)** | 같은 시나리오의 직전 실행 결과와 diff("어제 통과 → 오늘 실패"). 시나리오 라이브러리의 최종 실행 메타와 연동. | COULD |
+| **SM-08** | **환경 메타 + 심각도 분류** | OS·Python·**Playwright/브라우저 버전**·뷰포트·타임스탬프 헤더. 실패를 assertion/JS에러/네트워크/타임아웃으로 분류·색상. | SHOULD |
+| **SM-09** | **a11y 발견사항** | `aria_snapshot` 부산물로 role/label 누락 등 접근성 이슈를 부수 리포트. | COULD |
+
+> 범위 관리: SM-05~09는 PRD v0.6 이후 추가되는 **신규 항목**이다. SM-02/03/04는
+> 기존 PRD 범위. 구현은 Phase 3에서 우선순위(SM-05·06·08 → 07·09)대로 진행.
 
 ### 5.4 시나리오 스텝 스키마
 ```json
@@ -273,18 +321,64 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 ---
 
-## 6. 리포트 (testing/report.py, D3 / SM-03)
+## 6. 리포트 (testing/report.py, D3 / SM-03~09)
 
-- 기본 경로 `./reports/`(서버 실행 위치), `REPORT_DIR` env로 재정의, 없으면 자동 생성.
-- 파일명 `report_YYYYMMDD_HHMMSS.json` / `.md`.
-- JSON: 시나리오 메타 + 스텝별 결과 배열 + 요약(passed/failed/total, 소요시간).
-- Markdown: 사람이 읽는 요약 — 스텝 표, 실패 스텝의 스크린샷 경로 링크,
-  콘솔/네트워크 에러 섹션.
-- HTML(SM-04, SHOULD): 단일 self-contained `.html` — 스텝 표 + 스크린샷 `<img>`
-  인라인 임베드 + 콘솔/네트워크 에러. CSS 인라인, 외부 의존성/네트워크 없음.
+- 기본 경로 **`~/ui-blackbox/reports`(홈 기준 절대경로)**, `REPORT_DIR` env로 재정의, 없으면 자동 생성.
+  > cwd 상대(`./reports`)는 MCP 서버 cwd가 예측 불가·쓰기 불가(system32 등)일 수 있어 폐기. 쓰기 실패 시 홈으로 폴백.
+- 파일명 `report_YYYYMMDD_HHMMSS.json` / `.md` / `.html`.
 - `formats` ∈ {json, md, html, both(json+md), all(json+md+html)}.
 - 스크린샷은 `reports/screenshots/`에 저장하고 md/json은 상대경로 참조,
   HTML은 base64 data URI로 임베드(단일 파일 이식성).
+
+### 6.1 리포트 데이터 스키마 (JSON)
+```jsonc
+{
+  "name": "로그인 흐름",
+  "description": "이메일/비번 입력 후 대시보드 진입 검증",   // 자연어(②)
+  "meta": {                                              // SM-08
+    "started_at": "2026-06-24T10:00:00",
+    "duration_ms": 4210,
+    "target_url": "https://example.com/login",
+    "os": "Linux", "python": "3.11.x",
+    "playwright": "1.60.x", "browser": "chromium 1.60.x",
+    "headless": true, "viewport": "1280x720",
+    "credentials_masked": true                           // 보안 배지
+  },
+  "summary": { "total": 6, "passed": 5, "failed": 1, "pass_rate": 0.83 },
+  "steps": [
+    {
+      "step": 4,
+      "action": "interact", "raw": { "type": "click", "selector": "role=button name=로그인" },
+      "selector_input": "role=button name=로그인",
+      "resolved_by": "role",            // SM-06: D2 체인 중 실제 매칭 전략
+      "expected": "클릭 성공", "actual": "클릭됨",
+      "passed": true,
+      "duration_ms": 320,
+      "screenshot": "screenshots/step04.png",   // SM-06: 통과/실패 모두
+      "console_errors": [], "network_errors": [], // SM-06: 스텝 구간 귀속
+      "severity": null,                  // SM-08: assertion|js_error|network|timeout
+      "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
+      "ai_suggestion": null              // SM-05: 실패 시 가설/수정 제안
+    }
+  ],
+  "a11y_findings": [],                   // SM-09: role/label 누락 등
+  "regression": {                        // SM-07: 직전 실행 대비
+    "previous_run": "2026-06-23T18:00:00",
+    "changed": [{ "step": 4, "from": "passed", "to": "failed" }]
+  }
+}
+```
+
+### 6.2 출력별 표현
+- **JSON**: 위 스키마 그대로(기계 판독·CI 연계용).
+- **Markdown**: 헤더 요약 + 스텝 표(셀렉터/판단근거 포함) + 실패 상세 + 콘솔/네트워크 + a11y 섹션.
+- **HTML(SM-04)**: 단일 self-contained `.html` — 통과율 헤더, 스텝 카드(캡처 인라인),
+  실패 강조·심각도 색상, AI 판단근거·수정제안, 회귀 diff, 환경 메타 푸터.
+  CSS 인라인, 스크린샷 base64, 외부 의존성/네트워크 없음.
+
+### 6.3 단계적 구현
+- 1차(Phase 3): meta(SM-08) · 스텝 캡처/셀렉터/에러귀속(SM-06) · AI 근거/제안(SM-05) · JSON/MD/HTML.
+- 2차: 회귀 비교(SM-07) · a11y 발견(SM-09).
 
 ---
 
@@ -298,6 +392,15 @@ def register_all(mcp):             # server.py에서 1회 호출
   > 여부"가 아니라 "기대 경로"다 → `os.path.exists()`로 실제 존재를 확인한다.
   > 설치된 버전 시그니처는 구현 시 코드로 재확인.
 - 설치: `pip install`(또는 `pip install -e .`) 1단계. 별도 명령 불필요.
+- **사전 제공 브라우저(`CHROMIUM_EXECUTABLE`):** 브라우저 CDN(`cdn.playwright.dev`)이
+  네트워크 정책으로 차단된 환경(예: Claude Code web)에서는 다운로드가 불가하다.
+  이때 `CONFIG.chromium_executable`(env `CHROMIUM_EXECUTABLE`, 미설정 시
+  `/opt/pw-browsers/chromium` 자동 감지)을 세션 `launch(executable_path=...)`에
+  전달해 사전 설치 바이너리를 사용한다. `ensure_chromium()`은 이 경로가 있으면
+  다운로드를 건너뛰고, 다운로드 시도가 실패해도 크래시 없이 경고만 남긴다.
+  > 검증(2026-06): preinstalled chromium **build 1194** + Playwright **1.60** 드라이버를
+  > `executable_path`로 런치 → `aria_snapshot` 포함 정상 동작 확인(빌드 버전 불일치
+  > 무방). R1 해소.
 - Claude Desktop 등록: config 한 줄 (`claude_desktop_config.example.json` 제공).
 ```json
 {
@@ -309,19 +412,28 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 ---
 
-## 8. Q1 — snapshot 출력 크기 정책 (미결, Phase 1 실측 후 확정)
+## 8. Q1 — snapshot 출력 크기 정책 (Phase 1 실측 반영, 메커니즘 확정)
 
-대형 SPA aria_snapshot(YAML) 출력이 MCP 컨텍스트 한도를 초과할 수 있음. **잠정 설계**:
-- `snapshot(mode, depth=N, focus=selector)` 파라미터 도입.
-  (`focus` 주어지면 `page.locator(focus).aria_snapshot()`로 서브트리만.)
-- **네이티브 트리밍 옵션 우선 사용(공식):** `aria_snapshot(depth=N)`로 깊이 제한,
-  `aria_snapshot(mode="ai")`로 AI 친화 포맷 — 단순 문자 절단보다 의미 보존.
-  ※ 버전 게이트: `mode`/`depth`는 **Playwright ≥ 1.59**, `boxes`는 **≥ 1.60**.
-  → pyproject 핀을 `playwright>=1.60`으로 상향(이 옵션 사용 전제).
-- `aria_snapshot(boxes=True)` 옵션은 각 요소 bounding box를 덧붙여 주며
-  공식 문서가 "AI 소비에 유용"하다고 명시 → interact 셀렉터 매칭 보조로 검토.
-- 최후 안전장치로 문자수 상한(`_MAX_CHARS`) 절단은 유지.
-- Phase 1 PoC에서 실제 토큰/문자 크기를 측정 → depth·상한 규칙 확정.
+대형 SPA aria_snapshot(YAML) 출력이 MCP 컨텍스트 한도를 초과할 수 있음.
+
+**실측 (Playwright 1.60, 합성 DOM 30 섹션 기준):**
+| 호출 | 결과 |
+|---|---|
+| `aria_snapshot()` (기본) | 2317 chars / 121 lines — 이미 간결 |
+| `aria_snapshot(depth=N)` 단독 | **무효** (depth가 무시됨) |
+| `aria_snapshot(mode="ai")` | 4502 chars — element ref 포함해 더 김 |
+| `aria_snapshot(mode="ai", depth=1)` | **684 chars / 31 lines — 대폭 축소** |
+
+**확정된 메커니즘 (`tools/snapshot.py`):**
+- 기본 `mode="a11y"` → 평문 `aria_snapshot()` (간결, Claude 이해용 기본값).
+- `depth`가 주어지면 **`mode="ai"`와 함께** 적용해야 효과가 있음 → 내부적으로
+  `aria_snapshot(mode="ai", depth=N)` 사용(element ref도 같이 와 후속 interact에 유용).
+- `focus=<css>`로 서브트리 한정.
+- 최후 안전장치로 문자수 상한 `_MAX_CHARS`(현재 20000) 절단 유지.
+- ※ `mode`/`depth`는 Playwright ≥1.59, `boxes`는 ≥1.60 — 핀 `>=1.60` 충족.
+
+**미정(네트워크 필요):** 실제 대형 SPA의 절대 크기·권장 depth 수치는 아웃바운드가
+열린 환경에서 추가 측정 후 `_MAX_CHARS`/기본 depth 기본값을 조정한다.
 
 ---
 
@@ -344,13 +456,20 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 ## 10. 구현 순서 (Phase)
 
-- **Phase 0** — 스캐폴드: pyproject, server.py, FastMCP 부팅, ensure_chromium, registry, config, 예시 config/.env, README 골격.
-- **Phase 1** — 코어 PoC(MUST): BrowserSession, listeners, navigate, snapshot. **Q1 실측 → §8 확정.**
-- **Phase 2** — 상호작용/검증(MUST): screenshot, locator 체인(D2), interact, assert_, console, network.
-- **Phase 3** — 시나리오/리포트(MUST/SHOULD): runner(continue_on_fail, 실패 스크린샷), report(JSON+MD, D3).
-- **Phase 4** — 확장(SHOULD): wait, switch_frame, expect_dialog, reset_session, HEADLESS 토글.
-- **Phase 5** — 라이브러리(SHOULD/COULD): generate_scenario, save/load/list_scenario.
-- 각 Phase: 단위 테스트(pytest) 추가, 커밋. 성공지표 측정은 Phase 3 이후 내부 베타 10페이지.
+마일스톤·완료기준(DoD)·상태의 **상세는 [`ROADMAP.md`](./ROADMAP.md)**가 단일
+출처(source of truth)다. 여기서는 개요만 둔다.
+
+| Phase | 범위 | 상태 |
+|---|---|---|
+| 0 | 스캐폴드(서버·레지스트리·세션 골격) | ✅ 완료 |
+| 1 | 코어 PoC: BrowserSession·listeners·navigate·snapshot, Q1 실측 | ✅ 완료 |
+| 2 | 상호작용/검증: screenshot·locator(D2)·interact·assert_·console·network | ✅ 완료 |
+| 3 | 시나리오/리포트: runner + report(JSON/MD/HTML, SM-03~09) | ✅ 완료 |
+| 4 | 확장: wait·switch_frame·expect_dialog·reset_session·HEADLESS | ✅ 완료 |
+| 5 | 라이브러리: generate_scenario·save/load/list_scenario | ✅ 완료 |
+| 6 | 운영 보강(PRD 외): 슬래시명령·브라우저 4모드·레코더+save_report | ✅ 완료 |
+
+각 Phase: 단위 테스트(pytest, 현재 55건) 후 커밋. 성공지표 측정은 내부 베타 10페이지(향후).
 
 ---
 
@@ -363,13 +482,19 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 ---
 
-## 12. 미해결/확인 필요
+## 12. 미해결 / 결정 사항
 
-1. **Q1 트리밍 수치** — Phase 1 실측 후 확정.
-2. **generate_scenario 분업 모델** — 서버가 페이지 구조만 주고 Claude가 steps
-   생성하는 방식으로 설계함. PRD 문구("Claude가 ... 생성해 반환")와 합치하나,
-   서버 내 LLM이 없다는 현실 반영. 구현 전 합의 확인 권장.
-3. **버퍼 클리어 정책** — navigate 누적/유지로 채택(§3.3). 이견 시 조정.
+**미해결 (추가 검토 필요)**
+1. **Q1 트리밍 수치** — Phase 1 실측 후 확정. (네이티브 `depth`/`mode="ai"` +
+   `_MAX_CHARS` 안전장치 방향은 §8에서 확정, 구체 수치만 미정.)
+
+**결정 완료**
+- **generate_scenario 분업 모델** — 서버는 페이지 구조/작성 키트를 반환하고
+  Claude가 steps 생성. sampling 지원 클라이언트에선 `ctx.session.create_message`
+  로 서버측 생성, 미지원(Claude Desktop) 시 키트 fallback. (§5.5)
+- **버퍼 클리어 정책** — navigate는 누적/유지, 명시적 초기화는 `reset_session`. (§3.3)
+- **리포트 형식·강화** — JSON/MD/HTML(SM-04) + SM-05~09 항목·스키마 확정. (§5.3·§6)
+- **a11y 스냅샷 API / sampling 가용성 / Playwright 핀(≥1.60)** — §13 검증 반영.
 
 ---
 
@@ -409,7 +534,62 @@ def register_all(mcp):             # server.py에서 1회 호출
 - `page.wait_for_selector(...)`, `page.wait_for_timeout(ms)`, `page.expect_console_message(...)` ✅
 - `BrowserType.executable_path`(기대 경로 반환, 설치 여부 ≠) — property/메서드 표기는
   버전별 상이 가능 → 구현 시 재확인 ⚠️
+- `BrowserType.connect_over_cdp(endpoint_url)` — **Chromium 전용**. `http://localhost:9222/`
+  또는 `ws://...` 허용. `Browser` 반환. 기존 컨텍스트/페이지는 `browser.contexts()[0]` ·
+  `defaultContext.pages()[0]`로 접근(구현이 이 패턴 사용). 공식 주의: "Playwright
+  프로토콜보다 fidelity 낮음", 브라우저가 Playwright 권장 인자 없이 떠 있으면 일부
+  기능이 깨질 수 있음. close()가 실제 브라우저를 닫는지는 문서 미명시 → 실측 결과
+  **disconnect만 되고 사용자 브라우저는 유지**됨(CDP 경로에서 context/browser 안 닫음).
+- `BrowserType.launch_persistent_context(user_data_dir, channel=, executable_path=,
+  headless=)` → `BrowserContext` 반환. 공식: "이 context를 닫으면 브라우저가 자동
+  종료"(우리 persistent close()와 일치) ✅. `BrowserType.launch(channel=, executable_path=,
+  args=, headless=)` ✅
+- `BrowserContext.browser()` — context가 **normal browser 밖(Android/Electron)**에서
+  생성됐을 때 None 반환(영속 컨텍스트는 Browser 반환). → `is_alive()`는 `page.is_closed()`
+  우선으로 견고화 ✅
+- `BrowserContext.add_init_script(...)` ✅ (stealth webdriver 숨김)
+- `Browser.new_context(user_agent=, locale=, timezone_id=, viewport=)` — stealth 컨텍스트
+  옵션, 실측(UA 적용)으로 확인 ✅
+- `page.once(event, handler)` · `page.remove_listener(event, handler)` · `page.is_closed()` ✅
+  (expect_dialog는 once 핸들러로 데드락 회피)
+- `page.evaluate(expr, arg)` · `locator.evaluate(expr, arg)` — arg가 JS 2번째 인자 ✅
+- `locator.click/fill/hover/select_option/press(timeout=)` · `count()` · `first` ·
+  `is_visible()` · `wait_for(state=)` ✅
+- `request.failure`(property, 실패 텍스트/None) · `request.method`(property) ✅
+- `ConsoleMessage.type`/`text`/`location`(property) — location 키는 `url`/`line`/`column`
+  (`lineNumber`/`columnNumber`는 deprecated) → `line` 우선 사용으로 정정 ✅
+- `page.screenshot(path=, full_page=)` ✅
+
+**MCP Prompts** — `@mcp.prompt(name=, description=)` 데코레이터, 문자열 인자 → 문자열
+반환이 user 메시지로 직렬화, 인자는 클라이언트에 `PromptArgument`로 노출 ✅
+(슬래시 명령 ui-test/ui-scenario/ui-login/ui-generate)
 
 > 제약: playwright.dev API 페이지는 직접 fetch가 403으로 막혀, 일부 항목은
-> GitHub 원본 마크다운 + 공식 검색 결과로 교차 확인함. 구현 중 실제 버전의
-> 시그니처를 코드로 재확인한다.
+> GitHub 원본 마크다운 + 공식 검색 결과 + **로컬 실측**으로 교차 확인함.
+
+---
+
+## 14. 보안 모델 (Security Review)
+
+PRD 보안 제약(로컬 전용·자격증명 마스킹·외부 전송 없음) 기준 점검 결과.
+
+**확인된 방어**
+- **로컬 전용:** stdio transport, 대상 URL 접근 외 아웃바운드 없음. 텔레메트리/phone-home
+  없음. sampling은 클라이언트(로컬 LLM)로만 향함.
+- **HTML 리포트 XSS 안전:** 페이지 유래 콘텐츠(콘솔/네트워크/타이틀/actual/a11y/메타)는
+  전부 `html.escape` 처리 — 악성 페이지의 `<script>`가 리포트 열람 시 실행되지 않음
+  (test_security로 회귀 고정).
+- **자격증명 마스킹:** `${VAR}`는 리포트에 **미해석 상태로 저장**되고 민감 필드는
+  `mask_step`으로 마스킹. 평문 시크릿이 리포트/로그에 노출되지 않음.
+- **명령 주입 없음:** `subprocess.run`은 리스트 인자, `shell=True` 미사용, 사용자 입력
+  미포함(브라우저 설치만).
+- **경로 traversal 차단:** 시나리오/리포트/스크린샷 파일명은 정규식 sanitize(`_SAFE`).
+
+**수용된 위험(로컬 도구 전제, 문서화)**
+- `${VAR}`는 **존재하는 모든 env 변수**를 해석한다(미존재 시 리터럴 유지). 신뢰할 수
+  없는 출처의 시나리오는 임의 env 시크릿을 페이지 폼에 주입할 수 있으므로,
+  **시나리오는 신뢰 가능한 것만 실행**한다.
+- `use_real_browser` 영구 프로필(`~/ui-blackbox/chrome-profile`)에 **로그인 쿠키가
+  디스크 저장**된다 — 공유 머신에서 주의.
+- `navigate`는 `file://`로 로컬 파일을 열 수 있다(로컬 테스트 도구 특성).
+- `BROWSER_CDP`는 localhost 디버그 포트(무인증)에 attach — 로컬 한정.

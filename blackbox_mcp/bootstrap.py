@@ -7,6 +7,7 @@ Playwright CLI. If it is already present we return immediately.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 
@@ -35,15 +36,40 @@ def _browser_installed(name: str) -> bool:
 
 
 def ensure_chromium() -> None:
-    """Ensure the configured browser binary is installed (D1)."""
+    """Ensure a usable browser binary is available (D1).
+
+    Resolution order:
+      1. An explicit/pre-provisioned executable (CONFIG.chromium_executable) —
+         used directly via executable_path, no download needed.
+      2. Playwright's bundled binary if already installed.
+      3. Otherwise attempt `playwright install`. If that fails (e.g. the browser
+         CDN is blocked by network policy), log and continue rather than crash —
+         the launch will surface a clear error if no binary is reachable.
+    """
     name = CONFIG.browser
+
+    if CONFIG.chromium_executable:
+        if os.path.exists(CONFIG.chromium_executable):
+            log.info("Using pre-provisioned browser: %s", CONFIG.chromium_executable)
+            return
+        log.warning(
+            "CHROMIUM_EXECUTABLE set but missing: %s", CONFIG.chromium_executable
+        )
+
     if _browser_installed(name):
         log.debug("Playwright %s already installed.", name)
         return
 
     log.info("Playwright %s not found — installing (first run only)...", name)
-    subprocess.run(
-        [sys.executable, "-m", "playwright", "install", name],
-        check=True,
-    )
-    log.info("Playwright %s installed.", name)
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", name],
+            check=True,
+        )
+        log.info("Playwright %s installed.", name)
+    except subprocess.CalledProcessError as exc:
+        log.warning(
+            "Could not install %s automatically (%s). If a browser is provided "
+            "externally, set CHROMIUM_EXECUTABLE to its path.",
+            name, exc,
+        )

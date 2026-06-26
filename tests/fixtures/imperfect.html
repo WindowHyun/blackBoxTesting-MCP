@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"><title>Imperfect Login</title></head>
+<body>
+  <h1 data-testid="title">로그인</h1>
+  <!-- a11y defects on purpose: no <label>, no alt -->
+  <img src="logo.png">
+  <form>
+    <input data-testid="email" type="text">
+    <input data-testid="password" type="password">
+    <button data-testid="submit" type="button">로그인</button>
+  </form>
+  <p id="status">대기 중</p>
+  <script>
+    document.querySelector('[data-testid="submit"]').addEventListener('click', () => {
+      document.getElementById('status').textContent = '로그인됨';
+    });
+  </script>
+</body>
+</html>

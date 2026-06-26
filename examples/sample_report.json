@@ -1,0 +1,192 @@
+{
+  "name": "login_demo",
+  "steps": [
+    {
+      "step": 1,
+      "action": "navigate",
+      "raw": {
+        "action": "navigate",
+        "url": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/imperfect.html",
+        "wait_until": "load"
+      },
+      "selector_input": null,
+      "resolved_by": null,
+      "expected": "페이지 도착",
+      "actual": "“Imperfect Login” · HTTP 200",
+      "passed": true,
+      "duration_ms": 25,
+      "screenshot": "screenshots/login_demo_step01.png",
+      "console_errors": [
+        {
+          "level": "error",
+          "text": "Failed to load resource: net::ERR_FILE_NOT_FOUND",
+          "location": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/logo.png:0",
+          "ts": 1782369918.8959408
+        }
+      ],
+      "network_errors": [
+        {
+          "url": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/logo.png",
+          "method": "GET",
+          "status": null,
+          "failure": "net::ERR_FILE_NOT_FOUND"
+        }
+      ],
+      "severity": null,
+      "ai_reason": "navigated to file:///home/user/blackBoxTesting-MCP/tests/fixtures/imperfect.html (status 200)",
+      "ai_suggestion": null
+    },
+    {
+      "step": 2,
+      "action": "interact",
+      "raw": {
+        "action": "interact",
+        "type": "type",
+        "selector": "testid=email",
+        "value": "qa@example.com"
+      },
+      "selector_input": "testid=email",
+      "resolved_by": "testid",
+      "expected": "type ok",
+      "actual": "typed",
+      "passed": true,
+      "duration_ms": 24,
+      "screenshot": "screenshots/login_demo_step02.png",
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "type via testid selector",
+      "ai_suggestion": null
+    },
+    {
+      "step": 3,
+      "action": "interact",
+      "raw": {
+        "action": "interact",
+        "type": "type",
+        "selector": "testid=password",
+        "value": "$***"
+      },
+      "selector_input": "testid=password",
+      "resolved_by": "testid",
+      "expected": "type ok",
+      "actual": "typed",
+      "passed": true,
+      "duration_ms": 9,
+      "screenshot": "screenshots/login_demo_step03.png",
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "type via testid selector",
+      "ai_suggestion": null
+    },
+    {
+      "step": 4,
+      "action": "interact",
+      "raw": {
+        "action": "interact",
+        "type": "click",
+        "selector": "testid=submit"
+      },
+      "selector_input": "testid=submit",
+      "resolved_by": "testid",
+      "expected": "click ok",
+      "actual": "clicked",
+      "passed": true,
+      "duration_ms": 38,
+      "screenshot": "screenshots/login_demo_step04.png",
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "click via testid selector",
+      "ai_suggestion": null
+    },
+    {
+      "step": 5,
+      "action": "assert",
+      "raw": {
+        "action": "assert",
+        "kind": "text_visible",
+        "target": "로그인됨"
+      },
+      "selector_input": "로그인됨",
+      "resolved_by": null,
+      "expected": "text_visible",
+      "actual": true,
+      "passed": true,
+      "duration_ms": 7,
+      "screenshot": "screenshots/login_demo_step05.png",
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "text_visible held",
+      "ai_suggestion": null
+    },
+    {
+      "step": 6,
+      "action": "assert",
+      "raw": {
+        "action": "assert",
+        "kind": "text_visible",
+        "target": "존재하지_않는_텍스트"
+      },
+      "selector_input": "존재하지_않는_텍스트",
+      "resolved_by": null,
+      "expected": "text_visible",
+      "actual": false,
+      "passed": false,
+      "duration_ms": 3,
+      "screenshot": "screenshots/login_demo_step06.png",
+      "console_errors": [],
+      "network_errors": [],
+      "severity": "assertion",
+      "ai_reason": "text_visible did not hold",
+      "ai_suggestion": "expected text_visible on '존재하지_않는_텍스트' — verify the target"
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "passed": 5,
+    "failed": 1,
+    "pass_rate": 0.833
+  },
+  "description": "이메일·비밀번호로 로그인하면 '로그인됨' 상태가 보여야 한다 (회귀/접근성 동시 점검)",
+  "meta": {
+    "started_at": "2026-06-25T06:45:18",
+    "os": "Linux",
+    "python": "3.11.15",
+    "playwright": "1.60.0",
+    "browser": "chromium",
+    "headless": true,
+    "executable": "/opt/pw-browsers/chromium",
+    "credentials_masked": true,
+    "duration_ms": 425
+  },
+  "a11y_findings": [
+    {
+      "type": "img-missing-alt",
+      "tag": "img",
+      "info": "logo.png"
+    },
+    {
+      "type": "control-missing-label",
+      "tag": "input",
+      "name": null
+    },
+    {
+      "type": "control-missing-label",
+      "tag": "input",
+      "name": null
+    }
+  ],
+  "regression": {
+    "previous_run": "2026-06-25T06:45:18",
+    "changed": [
+      {
+        "step": 6,
+        "from": "absent",
+        "to": "failed"
+      }
+    ]
+  }
+}

@@ -13,11 +13,11 @@
 | Phase | 목표 | 핵심 요구사항 | 상태 |
 |---|---|---|---|
 | **0** | 스캐폴드 — 서버·레지스트리·세션 골격 | BR-01, D1, 레지스트리 | ✅ **완료** |
-| **1** | 코어 PoC — 실제 브라우저로 탐색/이해 | CT-01, CT-02, BR-02 / Q1 | 🔜 **다음** |
-| **2** | 상호작용·검증 (실검증) | CT-03~07, D2 | ☐ |
-| **3** | 시나리오 실행·리포트 | SM-01~04, D3 | ☐ |
-| **4** | 확장 Tools | CT-08~10, BR-03/04 | ☐ |
-| **5** | 시나리오 라이브러리·생성 | SL-01~04 | ☐ |
+| **1** | 코어 PoC — 실제 브라우저로 탐색/이해 | CT-01, CT-02, BR-02 / Q1 | ✅ 핵심 완료 (T1.5 보류) |
+| **2** | 상호작용·검증 (실검증) | CT-03~07, D2 | ✅ 완료 |
+| **3** | 시나리오 실행·리포트(강화 포함) | SM-01~09, D3 | ✅ 완료 |
+| **4** | 확장 Tools | CT-08~10, BR-03/04 | ✅ 완료 |
+| **5** | 시나리오 라이브러리·생성 | SL-01~04 | ✅ 완료 |
 
 > 성공지표(설치 <5분 / 탐지율 80% / 허위실패 <5%) 측정은 **Phase 3 이후**
 > 내부 베타 10개 페이지 대상으로 수집한다(PRD §7).
@@ -44,7 +44,7 @@
 
 ---
 
-## Phase 1 — 코어 PoC 🔜 다음
+## Phase 1 — 코어 PoC ✅ 핵심 완료 (T1.5도 완료, dom 트리화)
 
 **목표** 실제 페이지에서 async 세션·리스너·`aria_snapshot`이 동작함을 입증하고,
 미결 **Q1(snapshot 출력 크기)**을 실측으로 닫는다. 모든 후속 Phase의 토대.
@@ -74,14 +74,16 @@
 
 ---
 
-## Phase 2 — 상호작용·검증
+## Phase 2 — 상호작용·검증 ✅ 완료
 
-**작업** `screenshot`(CT-03), `interact`(CT-04), `assert_`(CT-05),
-`get_console_logs`(CT-06), `get_network_errors`(CT-07)를 픽스처로 실검증.
-D2 셀렉터 체인(testid→role→text→css) 동작 확인.
+**완료** `screenshot`(CT-03)·`interact`(CT-04)·`assert_`(CT-05)·`get_console_logs`
+(CT-06)·`get_network_errors`(CT-07)를 `file://` 픽스처로 실검증.
+D2 셀렉터를 **async `resolve()` 실제 fallback 체인 + `resolved_by`**(SM-06 토대)로 구현.
+`selector_timeout_ms` 적용, interact 실패 구조화 반환·값 마스킹.
 
-추가: **crash-recovery 배선(NFR)** — 공통 tool 래퍼에서 `TargetClosedError` 등
-캡처 → `BrowserSession.restart()` 1회 후 재시도(§DESIGN 3.5).
+**crash-recovery(NFR)** ✅ — `is_alive()` + `get_session()` 자동 `restart()`.
+
+> 리뷰 발견·수정: assert_ multi-match strict-mode 크래시 → `count>0 && first` 로 수정.
 
 **공식 문서 근거**
 - 이미지 반환: `Image(data=bytes, format="png")` (MCP SDK)
@@ -97,7 +99,7 @@ D2 셀렉터 체인(testid→role→text→css) 동작 확인.
 
 ---
 
-## Phase 3 — 시나리오 실행·리포트
+## Phase 3 — 시나리오 실행·리포트 ✅ 완료 (SM-01~09)
 
 **작업** `run_scenario`(SM-01) 실행 엔진 — 스텝 디스패치, `continue_on_fail`,
 실패 시 자동 스크린샷(SM-02). 리포트 JSON+MD(SM-03/D3): `./reports/
@@ -106,19 +108,31 @@ report_YYYYMMDD_HHMMSS.*`, `REPORT_DIR` 재정의, `${VAR}` 마스킹.
 인라인 + 콘솔/네트워크 에러), `report_format`에 `html`/`all` 추가.
 다수 스텝 장기 실행 시 `await ctx.report_progress(i, total)`로 진행률 표시(옵션).
 
+**리포트 강화(우선순위순, DESIGN §5.3·§6)**
+- **SM-05** AI 판단 근거(`ai_reason`) + 실패 수정 제안(`ai_suggestion`) — 차별점
+- **SM-06** 스텝별 캡처(통과/실패) + 셀렉터 투명성(`resolved_by`) + 콘솔/네트워크 **스텝 귀속**
+- **SM-08** 환경 메타(OS/Python/Playwright·브라우저 버전/뷰포트) + 실패 심각도 분류
+- **SM-07** ✅ 회귀 비교(직전 실행 대비 diff, `reports/history/`)
+- **SM-09** ✅ a11y 발견사항(img-alt/label/accessible-name 감사)
+
 **DoD**
 - [ ] 성공/실패 혼합 시나리오가 정확한 per-step 결과·요약 생성
 - [ ] 실패 스텝 스크린샷이 리포트에 첨부
 - [ ] JSON+MD 리포트 파일 생성 확인
 - [ ] HTML 리포트 생성 확인(스크린샷 임베드, 외부 의존성 없음) — SM-04
+- [ ] 스텝별 캡처·`resolved_by`·에러 스텝귀속 반영 — SM-06
+- [ ] AI 판단근거/수정제안 필드 채워짐 — SM-05
+- [ ] 환경 메타·심각도 분류 표시 — SM-08
+- [ ] (2차) 회귀 diff·a11y 섹션 — SM-07/09
 - [ ] **성공지표 측정 착수** — 내부 베타 10페이지(PRD §7)
 
 ---
 
-## Phase 4 — 확장 Tools
+## Phase 4 — 확장 Tools ✅ 완료
 
-**작업** `wait`(CT-08), `switch_frame`(CT-09), `expect_dialog`(CT-10),
-`reset_session`(BR-04, 구현완료·검증), `HEADLESS` 토글(BR-03).
+**완료** `wait`(CT-08), `switch_frame`(CT-09), `expect_dialog`(CT-10, 스텁→구현),
+`reset_session`(BR-04), `HEADLESS` 토글(BR-03). test_extensions 8 + test_config 3.
+expect_dialog는 `expect_event` 데드락을 피해 `page.once("dialog")` 핸들러로 구현.
 
 **공식 문서 근거**
 - `page.wait_for_selector` / `page.wait_for_timeout(ms)` / `page.expect_event`
@@ -131,7 +145,7 @@ report_YYYYMMDD_HHMMSS.*`, `REPORT_DIR` 재정의, `${VAR}` 마스킹.
 
 ---
 
-## Phase 5 — 시나리오 라이브러리·생성
+## Phase 5 — 시나리오 라이브러리·생성 ✅ 완료
 
 **작업** `save/load/list_scenario`(SL-02~04, 저장 로직 구현완료)에 더해
 `generate_scenario`(SL-01) **작성 키트** 구현.
@@ -158,7 +172,7 @@ report_YYYYMMDD_HHMMSS.*`, `REPORT_DIR` 재정의, `${VAR}` 마스킹.
 | ID | 내용 | 해소 시점 |
 |---|---|---|
 | **Q1** | 대형 SPA aria_snapshot이 MCP 컨텍스트 한도 초과 가능 → 트리밍 수치 | Phase 1 실측 |
-| R1 | 환경별 Chromium(~150MB) 자동 설치 가능 여부 | Phase 1 착수 시 선확인 |
+| R1 | 환경별 Chromium 설치 — CDN 차단 시 다운로드 불가 | ✅ 해소: `CHROMIUM_EXECUTABLE`/사전설치(`/opt/pw-browsers`) `executable_path` 사용 (T1.1) |
 | R2 | sampling 미지원 환경에서 generate_scenario UX | Phase 5 (fallback 설계 반영됨) |
 | R3 | 브라우저 크래시 자동 재시작 < 5s (NFR) 실측 | Phase 2~3 |
 
