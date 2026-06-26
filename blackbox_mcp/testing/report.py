@@ -307,7 +307,7 @@ def _step_html(st: dict, report_dir: Path) -> str:
         errs += f'<div class="err">console: {html.escape(str(ce.get("text")))}</div>'
     for ne in st.get("network_errors", []):
         errs += (f'<div class="err">network: {html.escape(str(ne.get("url")))} '
-                 f'{ne.get("status") or ne.get("failure")}</div>')
+                 f'{html.escape(str(ne.get("status") or ne.get("failure")))}</div>')
     rb = (f'<span class="rb">{html.escape(str(st["resolved_by"]))}</span>'
           if st.get("resolved_by") else "")
     sev = (f'<span class="sev">{html.escape(str(st.get("severity")))}</span>'
