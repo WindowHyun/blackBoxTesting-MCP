@@ -156,6 +156,10 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 - 영구/ CDP 모드에서 `reset_session`은 로그인 보존을 위해 **버퍼만** 비운다.
 - CDP 연결 실패(스테일 포트) 시 경고 후 번들 launch로 폴백(세션 안 막힘).
+- **팝업/새 탭 자동 추적:** `context.on("page")`로 새 페이지를 활성 페이지로 채택
+  (target=_blank·window.open·OAuth 팝업), 닫히면 남은 페이지로 복귀.
+- **실 사이트 견고화:** navigate는 `networkidle` 미도달 시 `NAV_TIMEOUT_MS` 초과하면
+  현재 상태로 진행(`settled:false`). `IGNORE_HTTPS_ERRORS`로 스테이징 인증서 수용.
 - 검증: §13 connect_over_cdp / launch_persistent_context 실측.
 
 ---

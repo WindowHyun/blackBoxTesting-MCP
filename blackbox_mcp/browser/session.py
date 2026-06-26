@@ -51,6 +51,7 @@ class BrowserSession:
                 self._frame_selector = None
                 self.buffers.clear()
                 attach(self._page, self.buffers)
+                self._track_pages()
                 log.info("BrowserSession attached over CDP: %s", CONFIG.cdp_url)
                 return
             except Exception as exc:
@@ -96,6 +97,7 @@ class BrowserSession:
         self._frame_selector = None
         self.buffers.clear()
         attach(self._page, self.buffers)
+        self._track_pages()
 
     async def reset(self) -> None:
         """BR-04: wipe context (cookies/session/storage) + buffers, fresh page."""
@@ -163,6 +165,7 @@ class BrowserSession:
         self._persistent, self._cdp, self._frame_selector = True, False, None
         self.buffers.clear()
         attach(self._page, self.buffers)
+        self._track_pages()
         log.info("BrowserSession → real persistent browser (%s, profile=%s)", used, profile)
         return {"used": used, "profile": profile, "headless": headless, "reused": False}
 
@@ -251,6 +254,33 @@ class BrowserSession:
     def set_frame(self, selector: str | None) -> None:
         """CT-09: switch into an iframe (or back to main with None)."""
         self._frame_selector = selector
+
+    def _adopt_page(self, page) -> None:
+        """Follow a popup/new tab so a flow that opens one keeps working.
+
+        Real sites open new tabs (target=_blank, window.open, OAuth popups); the
+        active page switches to the newest one and gets event listeners attached.
+        """
+        self._page = page
+        self._frame_selector = None
+        attach(page, self.buffers)
+        page.on("close", lambda: self._on_page_closed(page))
+        log.info("Adopted new page/popup.")
+
+    def _on_page_closed(self, page) -> None:
+        """When the active popup closes (e.g. OAuth done), fall back to a still-open
+        page so the flow continues on the original tab instead of a dead page."""
+        if self._page is page and self._context is not None:
+            others = [p for p in self._context.pages if not p.is_closed()]
+            if others:
+                self._page = others[-1]
+                self._frame_selector = None
+                log.info("Active popup closed → fell back to remaining page.")
+
+    def _track_pages(self) -> None:
+        """Register popup tracking on the current context (after the first page)."""
+        if self._context is not None:
+            self._context.on("page", self._adopt_page)
 
 
 # ── module-level singleton (BR-01) ───────────────────────────────
