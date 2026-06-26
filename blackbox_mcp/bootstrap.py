@@ -28,8 +28,6 @@ def _browser_installed(name: str) -> bool:
             browser_type = getattr(p, name)
             # executable_path raises / is missing when the binary is absent.
             path = browser_type.executable_path
-            import os
-
             return bool(path) and os.path.exists(path)
     except Exception:
         return False
@@ -67,7 +65,9 @@ def ensure_chromium() -> None:
             check=True,
         )
         log.info("Playwright %s installed.", name)
-    except subprocess.CalledProcessError as exc:
+    except Exception as exc:
+        # Never let a failed auto-install crash server startup — the first
+        # browser launch will surface a clear error if no binary is reachable.
         log.warning(
             "Could not install %s automatically (%s). If a browser is provided "
             "externally, set CHROMIUM_EXECUTABLE to its path.",
