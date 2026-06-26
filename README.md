@@ -138,7 +138,7 @@ blackbox_mcp/
 ## 🔧 개발
 ```bash
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q        # 58건 (단위 + file:// 통합 + E2E)
+.venv/bin/python -m pytest -q        # 65건 (단위 + file:// 통합 + E2E)
 ```
 
 ## ⚙️ 환경변수

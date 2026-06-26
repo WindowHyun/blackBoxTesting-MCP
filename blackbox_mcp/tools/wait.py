@@ -7,11 +7,18 @@ from ._registry import tool
 
 
 @tool(description="Wait: pass ms for a fixed delay, or selector to wait until that "
-                  "element appears. Used for time-based UI (auto-play sliders, etc.).")
-async def wait(ms: int | None = None, selector: str | None = None) -> dict:
+                  "element appears (up to timeout_ms, default 10000). Used for "
+                  "time-based UI (auto-play sliders, lazy content, etc.).")
+async def wait(ms: int | None = None, selector: str | None = None,
+               timeout_ms: int = 10000) -> dict:
     session = await get_session()
     if selector is not None:
-        await locate(session.root, selector).wait_for(state="visible")
+        try:
+            await locate(session.root, selector).wait_for(
+                state="visible", timeout=timeout_ms)
+        except Exception as exc:
+            return {"ok": False, "waited": f"selector:{selector}",
+                    "error": f"not visible within {timeout_ms}ms ({type(exc).__name__})"}
         return {"ok": True, "waited": f"selector:{selector}"}
     if ms is not None:
         await session.page.wait_for_timeout(ms)

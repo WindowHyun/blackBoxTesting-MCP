@@ -9,9 +9,11 @@ from ._registry import tool
                   "('error' | 'warn' | 'all').")
 async def get_console_logs(level: str = "all") -> list[dict]:
     session = await get_session()
+    # Playwright ConsoleMessage.type uses "warning" (not "warn"); accept both.
+    want = {"warn": "warning"}.get(level, level)
     out = []
     for e in session.buffers.console:
-        if level != "all" and e.level != level:
+        if level != "all" and e.level != want:
             continue
         out.append({"level": e.level, "text": e.text, "location": e.location, "ts": e.ts})
     return out

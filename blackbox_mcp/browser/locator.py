@@ -44,6 +44,12 @@ def _looks_like_css(s: str) -> bool:
     return bool(_CSS_PUNCT.search(s)) and not any(c.isspace() for c in s)
 
 
+def _testid_selector(value: str) -> str:
+    # escape quotes/backslashes so a testid with a quote doesn't break the CSS
+    safe = value.strip().replace("\\", "\\\\").replace('"', '\\"')
+    return f'[data-testid="{safe}"]'
+
+
 def locate(root, selector: str):
     """Synchronous single-strategy resolution (explicit prefix or inference).
 
@@ -53,7 +59,7 @@ def locate(root, selector: str):
     s = selector.strip()
 
     if s.startswith("testid="):
-        return root.locator(f'[data-testid="{s[len("testid="):].strip()}"]')
+        return root.locator(_testid_selector(s[len("testid="):]))
     if s.startswith("role="):
         role, name = _parse_role(s[len("role="):])
         return root.get_by_role(role, name=name) if name else root.get_by_role(role)
@@ -79,7 +85,7 @@ async def resolve(root, selector: str):
     s = selector.strip()
 
     if s.startswith("testid="):
-        return root.locator(f'[data-testid="{s[len("testid="):].strip()}"]'), "testid"
+        return root.locator(_testid_selector(s[len("testid="):])), "testid"
     if s.startswith("role="):
         role, name = _parse_role(s[len("role="):])
         loc = root.get_by_role(role, name=name) if name else root.get_by_role(role)
@@ -94,7 +100,7 @@ async def resolve(root, selector: str):
 
     # Bare plain string: try the chain in D2 priority, pick first with a match.
     candidates = [
-        ("testid", root.locator(f'[data-testid="{s}"]')),
+        ("testid", root.locator(_testid_selector(s))),
         ("text", root.get_by_text(s)),
     ]
     for name, loc in candidates:
