@@ -52,8 +52,15 @@ def compute_regression(result: dict) -> dict:
     then records the current run as the new baseline.
     """
     name = result.get("name", "scenario")
-    hist_dir = CONFIG.report_dir / "history"
-    hist_dir.mkdir(parents=True, exist_ok=True)
+    # Use the SAME writable dir save() resolves (home fallback), not the raw
+    # CONFIG.report_dir which may be unwritable — else regression crashes the
+    # whole report save. Never let regression bookkeeping break reporting.
+    try:
+        hist_dir = ensure_dirs() / "history"
+        hist_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        result["regression"] = {"previous_run": None, "changed": []}
+        return result
     path = hist_dir / f"{_SAFE.sub('_', name)}.json"
 
     cur = [{"step": s["step"], "action": s.get("action"), "passed": s["passed"]}
@@ -78,9 +85,12 @@ def compute_regression(result: dict) -> dict:
             pass
 
     result["regression"] = {"previous_run": prev_ts, "changed": changed}
-    path.write_text(json.dumps(
-        {"ts": result.get("meta", {}).get("started_at"), "steps": cur},
-        ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        path.write_text(json.dumps(
+            {"ts": result.get("meta", {}).get("started_at"), "steps": cur},
+            ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
     return result
 
 

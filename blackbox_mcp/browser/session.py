@@ -232,9 +232,12 @@ class BrowserSession:
         we don't falsely think the session died → relaunch loop / new window.
         """
         try:
-            if self._page is not None and not self._page.is_closed():
-                return True
-            return self._browser is not None and self._browser.is_connected()
+            if self._page is None or self._page.is_closed():
+                return False
+            # Page open. If we also hold a Browser, require it connected so a
+            # real crash/disconnect is detected; a persistent context may expose
+            # no Browser (None) — then the open page is our liveness signal.
+            return self._browser is None or self._browser.is_connected()
         except Exception:
             return False
 
@@ -273,13 +276,16 @@ class BrowserSession:
         if self._page is page and self._context is not None:
             others = [p for p in self._context.pages if not p.is_closed()]
             if others:
-                self._page = others[-1]
+                # oldest remaining page = the original tab the flow came from
+                self._page = others[0]
                 self._frame_selector = None
                 log.info("Active popup closed → fell back to remaining page.")
 
     def _track_pages(self) -> None:
-        """Register popup tracking on the current context (after the first page)."""
-        if self._context is not None:
+        """Follow popups in browsers we own. NOT in CDP mode — that's the user's
+        real browser, where auto-adopting their background tabs would hijack the
+        active page."""
+        if self._context is not None and not self._cdp:
             self._context.on("page", self._adopt_page)
 
 
