@@ -16,6 +16,7 @@ from . import report, secrets
 RECORDABLE = {
     "navigate", "interact", "assert_", "screenshot", "wait",
     "switch_frame", "expect_dialog", "reset_session", "use_real_browser",
+    "dismiss_banners",
 }
 
 # Safety cap so a long-lived server can't grow the log without bound.

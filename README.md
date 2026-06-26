@@ -9,7 +9,7 @@
   <br><em>자동 생성된 리포트 — 통과율·스텝별 스크린샷·실패 원인·회귀·접근성·자격증명 마스킹</em>
 </p>
 
-Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 55건 green**
+Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 58건 green**
 
 ---
 
@@ -96,12 +96,12 @@ python -m venv .venv
 
 ---
 
-## 🧰 MCP Tools (18)
+## 🧰 MCP Tools (19)
 
 | 그룹 | Tool |
 |---|---|
 | 코어 | `navigate` · `snapshot`(a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
-| 확장 | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` |
+| 확장 | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` |
 | 시나리오·리포트 | `run_scenario` · `generate_scenario` · `save_report` |
 | 라이브러리 | `save_scenario` · `load_scenario` · `list_scenarios` |
 
@@ -138,7 +138,7 @@ blackbox_mcp/
 ## 🔧 개발
 ```bash
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q        # 55건 (단위 + file:// 통합 + E2E)
+.venv/bin/python -m pytest -q        # 58건 (단위 + file:// 통합 + E2E)
 ```
 
 ## ⚙️ 환경변수
@@ -153,8 +153,7 @@ blackbox_mcp/
 > 느릴 수 있다 — navigate는 타임아웃 시 **현재 상태로 진행**(`settled:false` 반환)하지만,
 > `DEFAULT_WAIT_UNTIL=domcontentloaded`가 더 빠르다. ② 요소가 늦게 뜨면
 > `SELECTOR_TIMEOUT_MS`를 5000~10000으로. ③ 광고·트래커의 4xx 노이즈는
-> `get_network_errors(same_origin=True)`로 같은 도메인만 본다. ④ 쿠키 동의 배너는
-> 먼저 닫도록 지시(가려진 요소 클릭은 에러로 표면화됨). ⑤ 로그인/봇월은
+> `get_network_errors(same_origin=True)`로 같은 도메인만 본다. ④ 쿠키 동의 배너는 `dismiss_banners`로 닫는다(클릭이 가려지면 자동 권유). ⑤ 로그인/봇월은
 > `use_real_browser`. ⑥ 스테이징 인증서는 `IGNORE_HTTPS_ERRORS=true`.
 > ⑦ **새 탭/팝업은 자동 추적**된다(클릭으로 새 창이 열리면 세션이 따라가고, 팝업이
 > 닫히면 원래 탭으로 복귀 — OAuth 팝업 등).

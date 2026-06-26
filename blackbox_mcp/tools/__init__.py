@@ -17,6 +17,7 @@ from . import (  # noqa: F401  (imported for side-effect registration)
     dialog,
     session,
     realbrowser,
+    overlays,
     scenario,
     savereport,
     generate,
