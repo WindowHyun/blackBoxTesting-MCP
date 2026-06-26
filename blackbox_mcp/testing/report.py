@@ -71,9 +71,12 @@ def compute_regression(result: dict) -> dict:
         try:
             prev = json.loads(path.read_text(encoding="utf-8"))
             prev_ts = prev.get("ts")
-            prev_by_step = {s["step"]: s["passed"] for s in prev.get("steps", [])}
+            # key by (step, action) so a changed action at the same index isn't
+            # mis-reported as a pass→fail regression of "the same step".
+            prev_by_key = {(s["step"], s.get("action")): s["passed"]
+                           for s in prev.get("steps", [])}
             for s in cur:
-                was = prev_by_step.get(s["step"])
+                was = prev_by_key.get((s["step"], s.get("action")))
                 if was is None:
                     changed.append({"step": s["step"], "from": "absent",
                                     "to": "passed" if s["passed"] else "failed"})
@@ -118,7 +121,8 @@ def save(result: dict, formats: str = "both") -> dict[str, str]:
 
     if want_json:
         p = report_dir / f"report_{stamp}.json"
-        p.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        p.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str),
+                     encoding="utf-8")
         written["json"] = str(p)
     if want_md:
         p = report_dir / f"report_{stamp}.md"

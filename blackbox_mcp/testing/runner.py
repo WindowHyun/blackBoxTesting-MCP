@@ -59,6 +59,17 @@ async def _dispatch(step: dict) -> dict:
         "resolved_by": None, "ai_reason": "", "ai_suggestion": None,
     }
 
+    # Clear errors for malformed steps (common with LLM-authored scenarios) —
+    # better than a bare KeyError surfaced as a generic exception.
+    _required = {"navigate": ["url"], "interact": ["selector"],
+                 "assert": ["kind", "target"], "assert_": ["kind", "target"]}
+    missing = [k for k in _required.get(action, []) if k not in step]
+    if missing:
+        out.update(actual=f"missing required field(s): {', '.join(missing)}",
+                   passed=False, ai_reason="malformed step",
+                   ai_suggestion=f"add {missing} to the '{action}' step")
+        return out
+
     if action == "navigate":
         res = await navigate(secrets.resolve(step["url"]), step.get("wait_until"))
         out.update(expected="페이지 도착",

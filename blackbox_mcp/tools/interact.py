@@ -17,6 +17,9 @@ async def interact(action: str, selector: str, value: str | None = None) -> dict
     if action not in _ACTIONS:
         return {"ok": False, "action": action, "selector": selector,
                 "detail": f"unknown action; expected one of {sorted(_ACTIONS)}"}
+    if action in ("type", "select", "press") and value is None:
+        return {"ok": False, "action": action, "selector": selector,
+                "error": f"'{action}' requires a value"}
 
     session = await get_session()
     locator, resolved_by = await resolve(session.root, selector)
