@@ -146,7 +146,15 @@ blackbox_mcp/
 `BROWSER_CHANNEL`(chrome/msedge — 실제 브라우저) · `BROWSER_CDP`(실행 중 브라우저 attach) ·
 `STEALTH`(봇오탐 완화) · `REPORT_DIR`(기본 ~/ui-blackbox/reports) ·
 `SCENARIO_DIR`(~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
-`DEFAULT_WAIT_UNTIL`(networkidle). 자세히는 `.env.example`.
+`DEFAULT_WAIT_UNTIL`(networkidle) · `NAV_TIMEOUT_MS`(30000) ·
+`IGNORE_HTTPS_ERRORS`(false). 자세히는 `.env.example`.
+
+> **실 배포 사이트 테스트 팁**: ① 광고/폴링 많은 사이트는 `networkidle`이 안 끝나
+> 느릴 수 있다 — navigate는 타임아웃 시 **현재 상태로 진행**(`settled:false` 반환)하지만,
+> `DEFAULT_WAIT_UNTIL=domcontentloaded`가 더 빠르다. ② 요소가 늦게 뜨면
+> `SELECTOR_TIMEOUT_MS`를 5000~10000으로. ③ 광고·트래커의 4xx/콘솔 에러가 리포트에
+> 섞일 수 있다(같은 도메인 위주로 보면 됨). ④ 쿠키 동의 배너는 먼저 닫도록 지시.
+> ⑤ 로그인/봇월은 `use_real_browser`. ⑥ 스테이징 인증서는 `IGNORE_HTTPS_ERRORS=true`.
 
 > **봇 탐지 안내**: 이 도구는 **자신의 UI/스테이징 테스트**에 맞춰져 있다. 네이버 등
 > 제3자 사이트는 안티봇으로 자동화를 막을 수 있고, 이를 우회한 로그인 자동화는 해당

@@ -59,10 +59,15 @@ class Config:
     report_dir: Path
     scenario_dir: Path
     # Per-step selector resolution budget (ms); the whole fallback chain must
-    # finish within the MCP 30s tool timeout.
+    # finish within the MCP 30s tool timeout. Raise for slow real sites.
     selector_timeout_ms: int
     # Default navigation wait condition.
     default_wait_until: str
+    # Navigation timeout (ms). Real sites that never reach networkidle fall back
+    # to domcontentloaded rather than hanging.
+    nav_timeout_ms: int
+    # Accept invalid TLS certs (staging with self-signed/expired certs).
+    ignore_https_errors: bool
 
     @staticmethod
     def from_env() -> "Config":
@@ -77,6 +82,8 @@ class Config:
             scenario_dir=_resolve_dir(os.getenv("SCENARIO_DIR"), "scenarios"),
             selector_timeout_ms=int(os.getenv("SELECTOR_TIMEOUT_MS", "2000")),
             default_wait_until=os.getenv("DEFAULT_WAIT_UNTIL", "networkidle"),
+            nav_timeout_ms=int(os.getenv("NAV_TIMEOUT_MS", "30000")),
+            ignore_https_errors=_as_bool(os.getenv("IGNORE_HTTPS_ERRORS"), False),
         )
 
 

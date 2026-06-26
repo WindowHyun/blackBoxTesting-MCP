@@ -75,6 +75,8 @@ class BrowserSession:
 
     async def _new_context(self) -> None:
         ctx_kwargs: dict = {}
+        if CONFIG.ignore_https_errors:
+            ctx_kwargs["ignore_https_errors"] = True
         if CONFIG.stealth:
             ctx_kwargs.update(
                 user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -133,6 +135,8 @@ class BrowserSession:
 
         self._persistent_opts = {"headless": headless, "channel": channel}
         base = {"user_data_dir": profile, "headless": headless}
+        if CONFIG.ignore_https_errors:
+            base["ignore_https_errors"] = True
 
         attempts = []
         if channel:
