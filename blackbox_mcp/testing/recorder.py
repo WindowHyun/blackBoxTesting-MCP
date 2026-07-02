@@ -23,10 +23,19 @@ RECORDABLE = {
 _MAX_STEPS = 1000
 
 _LOG: list[dict] = []
+# Monotonic step counter — unlike len(_LOG)+1 it stays unique after the cap
+# trims old entries, so regression keys and screenshot names never collide.
+_COUNTER = 0
+# Per-recording-session tag so screenshot files from different sessions don't
+# overwrite each other (older JSON/MD reports keep valid image references).
+_RUN_TAG: str | None = None
 
 
 def reset() -> None:
+    global _COUNTER, _RUN_TAG
     _LOG.clear()
+    _COUNTER = 0
+    _RUN_TAG = None
 
 
 def steps() -> list[dict]:
@@ -109,12 +118,16 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     new_console = ([c.__dict__ for c in session.buffers.console[c0:]] if session else [])
     new_network = ([n.__dict__ for n in session.buffers.network[n0:]] if session else [])
 
-    idx = len(_LOG) + 1
+    global _COUNTER, _RUN_TAG
+    _COUNTER += 1
+    idx = _COUNTER
+    if _RUN_TAG is None:
+        _RUN_TAG = f"session_{report._stamp()}"
     shot = None
     if session and not passed:
-        shot = await report.capture_step_screenshot(session, "session", idx)
+        shot = await report.capture_step_screenshot(session, _RUN_TAG, idx)
 
-    _LOG.append({
+    _LOG.append(secrets.scrub_record({
         "step": idx,
         "action": name,
         "raw": secrets.mask_step(dict(kwargs)),
@@ -132,7 +145,7 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
                       else "assertion" if name.startswith("assert") else "error")),
         "ai_reason": reason,
         "ai_suggestion": suggestion,
-    })
+    }))
 
     if len(_LOG) > _MAX_STEPS:
         del _LOG[:-_MAX_STEPS]

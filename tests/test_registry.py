@@ -35,5 +35,4 @@ def test_secret_masking():
 
     step = {"action": "interact", "selector": "testid=password", "value": "hunter2"}
     masked = mask_step(step)
-    assert masked["value"] != "hunter2"
-    assert masked["value"].startswith("h")
+    assert masked["value"] == "***"  # fully masked — no partial reveal

@@ -510,6 +510,10 @@ SM-01~04와 함께(또는 직후) 구현한다.
   `outputSchema` 자동 생성 ✅ → 반환 타입힌트 구체화 권장
 - **Context 주입:** tool에 `ctx: Context` 파라미터 → 로깅(`ctx.info/...`),
   진행률 `await ctx.report_progress(progress, total, message)` ✅
+  > 검증(2026-07, SDK 소스 `utilities/context_injection.py`): 주입 감지는 **타입
+  > 어노테이션 기반**(`find_context_parameter`) — `ctx=None`처럼 어노테이션이 없으면
+  > 주입되지 않고 일반 입력 파라미터로 스키마에 노출된다. `Context | None` 유니언도
+  > 인식됨(get_args 순회). generate_scenario를 이 방식으로 수정.
 - **Sampling:** `await ctx.session.create_message(messages=[...], max_tokens=...)`
   로 서버가 클라이언트 LLM에 생성 요청 ✅ (단 Claude Desktop 미지원)
 - **Lifespan:** `@asynccontextmanager` lifespan으로 시작/정리 — 브라우저 기동·종료

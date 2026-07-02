@@ -60,9 +60,13 @@ def ensure_chromium() -> None:
 
     log.info("Playwright %s not found — installing (first run only)...", name)
     try:
+        # stdout is the MCP JSON-RPC pipe once Claude Desktop spawns us —
+        # install progress must never reach it.
         subprocess.run(
             [sys.executable, "-m", "playwright", "install", name],
             check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         log.info("Playwright %s installed.", name)
     except Exception as exc:

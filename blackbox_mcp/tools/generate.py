@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 
+from mcp.server.fastmcp import Context
+
 from ..browser import get_session
 from ..tools.navigate import navigate
 from ._registry import tool
@@ -94,7 +96,8 @@ async def _try_sampling(ctx, description: str, kit: dict):
                   "authoring kit (interactive elements + D2-resolved selectors + step "
                   "schema + example) for composing a scenario. If the client supports "
                   "sampling, also returns generated steps.")
-async def generate_scenario(description: str, url: str, ctx=None) -> dict:
+async def generate_scenario(description: str, url: str,
+                            ctx: Context | None = None) -> dict:
     session = await get_session()
     await navigate(url)
     raw = await session.page.evaluate(_COLLECT_JS)
