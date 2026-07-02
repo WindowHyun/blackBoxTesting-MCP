@@ -7,6 +7,7 @@ cannot run inside asyncio).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from ..config import CONFIG
@@ -29,6 +30,10 @@ class BrowserSession:
         # Current iframe context for CT-09; None == main page.
         self._frame_selector: str | None = None
         self.buffers = EventBuffers()
+        # Serializes lifecycle mutations (reset / switch_to_persistent /
+        # restart) so concurrent tool calls can't tear down a context that
+        # another call is mid-way through using or launching.
+        self._op_lock = asyncio.Lock()
 
     # ── lifecycle ────────────────────────────────────────────────
     async def start(self) -> None:
@@ -101,6 +106,10 @@ class BrowserSession:
 
     async def reset(self) -> None:
         """BR-04: wipe context (cookies/session/storage) + buffers, fresh page."""
+        async with self._op_lock:
+            await self._reset_impl()
+
+    async def _reset_impl(self) -> None:
         if self._cdp or self._persistent:
             # Don't wipe a real/logged-in browser — just clear our buffers.
             self.buffers.clear()
@@ -120,6 +129,11 @@ class BrowserSession:
         Chrome (real channel preferred, falling back to the bundled binary) with a
         persistent user-data-dir so login/cookies survive across runs.
         """
+        async with self._op_lock:
+            return await self._switch_to_persistent_impl(headless, channel)
+
+    async def _switch_to_persistent_impl(self, headless: bool = False,
+                                         channel: str = "chrome") -> dict:
         from pathlib import Path
 
         profile = str(Path.home() / "ui-blackbox" / "chrome-profile")
@@ -193,29 +207,35 @@ class BrowserSession:
         re-open it (cookies on disk → still logged in) instead of dropping back to
         a fresh bundled browser.
         """
-        log.warning("BrowserSession restarting after failure.")
-        persistent = self._persistent
-        opts = self._persistent_opts or {"headless": False, "channel": "chrome"}
-        await self.close()
-        if persistent:
-            await self.switch_to_persistent(**opts)
-        else:
-            await self.start()
+        async with self._op_lock:
+            log.warning("BrowserSession restarting after failure.")
+            persistent = self._persistent
+            opts = self._persistent_opts or {"headless": False, "channel": "chrome"}
+            await self.close()
+            if persistent:
+                await self._switch_to_persistent_impl(**opts)
+            else:
+                await self.start()
 
     async def close(self) -> None:
         try:
-            if self._cdp:
-                # Detach only — the browser belongs to the user. Don't close it.
-                if self._browser is not None:
-                    await self._browser.close()  # closes CDP connection, not Chrome
-            elif self._persistent:
-                if self._context is not None:
-                    await self._context.close()  # profile on disk persists
-            else:
-                if self._context is not None:
-                    await self._context.close()
-                if self._browser is not None:
-                    await self._browser.close()
+            try:
+                if self._cdp:
+                    # Detach only — the browser belongs to the user. Don't close it.
+                    if self._browser is not None:
+                        await self._browser.close()  # closes CDP connection, not Chrome
+                elif self._persistent:
+                    if self._context is not None:
+                        await self._context.close()  # profile on disk persists
+                else:
+                    if self._context is not None:
+                        await self._context.close()
+                    if self._browser is not None:
+                        await self._browser.close()
+            except Exception as exc:
+                # A crashed/disconnected browser can make close() raise — still
+                # stop the Playwright driver below or its process leaks.
+                log.warning("Browser close failed (%s) — stopping driver anyway.", exc)
             if self._pw is not None:
                 await self._pw.stop()
         finally:
@@ -291,18 +311,30 @@ class BrowserSession:
 
 # ── module-level singleton (BR-01) ───────────────────────────────
 _SESSION: BrowserSession | None = None
+# Serializes singleton creation/recovery: without it two concurrent tool calls
+# can both see a dead/absent session and launch two browsers (one leaks) or
+# tear down each other's half-started state.
+_SESSION_LOCK = asyncio.Lock()
 
 
 async def get_session() -> BrowserSession:
     """Lazily create and start the single BrowserSession."""
     global _SESSION
-    if _SESSION is None:
-        _SESSION = BrowserSession()
-        await _SESSION.start()
-    elif not _SESSION.is_alive():
-        # Browser crashed/closed since last call — recover transparently (NFR).
-        await _SESSION.restart()
-    return _SESSION
+    async with _SESSION_LOCK:
+        if _SESSION is None:
+            session = BrowserSession()
+            try:
+                await session.start()
+            except Exception:
+                await session.close()  # stop a half-started driver
+                raise
+            # Publish only after a successful start — a failed launch must not
+            # leave a half-initialized singleton behind.
+            _SESSION = session
+        elif not _SESSION.is_alive():
+            # Browser crashed/closed since last call — recover transparently (NFR).
+            await _SESSION.restart()
+        return _SESSION
 
 
 async def close_session() -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 from ..browser import get_session
 from ..browser.locator import resolve
 from ..config import CONFIG
-from ..testing.secrets import mask_value, resolve as resolve_env
+from ..testing.secrets import mask_value, resolve as resolve_env, scrub
 from ._registry import tool
 
 _ACTIONS = {"click", "type", "hover", "select", "press"}
@@ -45,8 +45,10 @@ async def interact(action: str, selector: str, value: str | None = None) -> dict
             await locator.press(value_resolved or "", timeout=t)
             detail = f"pressed {value_shown}"
     except Exception as exc:
+        # scrub: Playwright error text can echo the awaited value (press/select)
         return {"ok": False, "action": action, "selector": selector,
-                "resolved_by": resolved_by, "error": f"{type(exc).__name__}: {exc}"}
+                "resolved_by": resolved_by,
+                "error": scrub(f"{type(exc).__name__}: {exc}")}
 
     return {"ok": True, "action": action, "selector": selector,
             "resolved_by": resolved_by, "detail": detail}

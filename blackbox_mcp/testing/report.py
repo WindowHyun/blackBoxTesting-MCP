@@ -75,15 +75,23 @@ def compute_regression(result: dict) -> dict:
             # mis-reported as a pass→fail regression of "the same step".
             prev_by_key = {(s["step"], s.get("action")): s["passed"]
                            for s in prev.get("steps", [])}
-            for s in cur:
-                was = prev_by_key.get((s["step"], s.get("action")))
-                if was is None:
-                    changed.append({"step": s["step"], "from": "absent",
-                                    "to": "passed" if s["passed"] else "failed"})
-                elif was != s["passed"]:
-                    changed.append({"step": s["step"],
-                                    "from": "passed" if was else "failed",
-                                    "to": "passed" if s["passed"] else "failed"})
+            # Zero key overlap means the baseline is an unrelated flow that
+            # happened to share the report name (ad-hoc flows all default to
+            # "session") — comparing would fabricate "absent" diffs. Skip and
+            # let this run become the new baseline.
+            overlap = any((s["step"], s.get("action")) in prev_by_key for s in cur)
+            if overlap:
+                for s in cur:
+                    was = prev_by_key.get((s["step"], s.get("action")))
+                    if was is None:
+                        changed.append({"step": s["step"], "from": "absent",
+                                        "to": "passed" if s["passed"] else "failed"})
+                    elif was != s["passed"]:
+                        changed.append({"step": s["step"],
+                                        "from": "passed" if was else "failed",
+                                        "to": "passed" if s["passed"] else "failed"})
+            else:
+                prev_ts = None
         except Exception:
             pass
 

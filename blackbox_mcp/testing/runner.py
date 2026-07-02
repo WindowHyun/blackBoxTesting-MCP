@@ -76,6 +76,10 @@ async def _dispatch(step: dict) -> dict:
                    actual=f"“{res.get('title')}” · HTTP {res.get('status')}",
                    passed=True,
                    ai_reason=f"navigated to {res.get('url')} (status {res.get('status')})")
+        missing_vars = secrets.unresolved_vars(step["url"])
+        if missing_vars:
+            out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
+                                    "the literal ${...} placeholder was used")
 
     elif action == "interact":
         res = await interact(step.get("type"), step["selector"], step.get("value"))
@@ -85,6 +89,10 @@ async def _dispatch(step: dict) -> dict:
                             if res.get("ok") else "action failed")
         if not res.get("ok"):
             out["ai_suggestion"] = "element not found or not actionable — selector may have changed"
+        missing_vars = secrets.unresolved_vars(step.get("value") or "")
+        if missing_vars:
+            out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
+                                    "the literal ${...} placeholder was typed")
 
     elif action in ("assert", "assert_"):
         res = await assert_(step["kind"], step["target"], step.get("expected"))
@@ -151,6 +159,8 @@ async def run(
     result = empty_result(name)
     result["description"] = description
     result["meta"] = _meta(session)
+    # Per-run screenshot tag so re-runs never overwrite older runs' images.
+    run_tag = f"{name}_{report._stamp()}"
 
     for idx, step in enumerate(steps, start=1):
         c0 = len(session.buffers.console)
@@ -172,9 +182,9 @@ async def run(
 
         shot = None
         if not passed or screenshot_each or fields.get("force_screenshot"):
-            shot = await report.capture_step_screenshot(session, name, idx)
+            shot = await report.capture_step_screenshot(session, run_tag, idx)
 
-        result["steps"].append({
+        result["steps"].append(secrets.scrub_record({
             "step": idx,
             "action": step.get("action"),
             "raw": secrets.mask_step(step),
@@ -190,7 +200,7 @@ async def run(
             "severity": _severity(step.get("action", ""), exc) if not passed else None,
             "ai_reason": fields.get("ai_reason", ""),
             "ai_suggestion": fields.get("ai_suggestion"),
-        })
+        }))
 
         if not passed and not continue_on_fail:
             break
