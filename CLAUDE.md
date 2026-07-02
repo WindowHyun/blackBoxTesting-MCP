@@ -32,7 +32,7 @@ python -m venv .venv
 1. **Tool 추가 = `tools/`에 파일 1개 + `tools/__init__.py`에 import 한 줄.** `server.py`는 절대 수정하지 않는다.
 2. **async 일관성** — tool/세션은 async. Playwright **async API**만 사용(sync API는 asyncio 루프에서 불가). 단 `bootstrap.ensure_chromium()`은 루프 시작 전이라 sync 허용.
 3. **공식 문서 검증** — MCP/Playwright API를 쓰기 전 공식 문서로 확인하고, 새 사실은 `DESIGN.md §13`에 기록. 추측 금지.
-4. **자격증명** — 시나리오의 `${VAR}`는 env에서 주입, 리포트엔 마스킹(`testing/secrets.py`). 평문 저장 금지.
+4. **자격증명** — 시나리오의 `${VAR}`는 env에서 주입, 리포트엔 완전 마스킹(`***`) + 해석값 scrub(`testing/secrets.py` — 파생 URL/에러 텍스트까지). 평문 저장 금지. 리포트에 닿는 새 텍스트 필드는 `scrub_record` 경유.
 5. **셀렉터 우선순위(D2)** — data-testid → role+name → text → css. `browser/locator.py` 경유.
 6. **리포트 스키마 단일 출처** — `DESIGN.md §6.1`. 스텝 필드는 거기에 맞춘다.
 7. 각 작업 후 `pytest` 통과 + 커밋. PR/병합은 명시 요청 시에만.
@@ -48,3 +48,7 @@ python -m venv .venv
 - 출력 경로는 **홈 기준 절대경로**(`~/ui-blackbox/...`). MCP 서버 cwd가 시스템 경로일 수 있어 상대경로 저장은 막힌다(`ensure_dirs` 홈 폴백).
 - recorder 래핑은 **MCP 등록 함수만** 감싼다(모듈 함수는 unwrapped) → `run_scenario` 내부 호출은 이중 기록 안 됨. 래퍼는 반환 어노테이션을 떼서 `Image` 스키마 오류를 피한다.
 - 브라우저 CDN(`cdn.playwright.dev`) 차단 환경: `CHROMIUM_EXECUTABLE`/사전설치 자동감지로 우회.
+- **stdout은 MCP JSON-RPC 파이프** — 서브프로세스/`print()`가 stdout에 쓰면 프로토콜이 깨진다(bootstrap 설치는 DEVNULL, 로깅은 stderr).
+- 세션 수명주기는 락 경유 — `get_session()` 모듈 락, `reset/switch_to_persistent/restart`는 `_op_lock`(공개 메서드가 락 획득, 본체는 `_impl` — 락 보유 중 공개 메서드 재호출 금지).
+- 콘솔/네트워크 버퍼는 1000건 캡, recorder 스텝 번호는 단조 카운터(`len(_LOG)+1` 아님).
+- FastMCP Context 주입은 **타입 어노테이션 기반** — `ctx: Context | None = None`처럼 어노테이션 필수, 없으면 스키마에 입력 파라미터로 노출된다(DESIGN §13).
