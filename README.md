@@ -12,7 +12,7 @@
   <br><em>Auto-generated report — pass rate · per-step screenshots · failure cause · regression · accessibility · credential masking</em>
 </p>
 
-Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **78 tests green**
+Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **90 tests green**
 
 ---
 
@@ -201,12 +201,12 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 
 ---
 
-## 🧰 MCP Tools (19)
+## 🧰 MCP Tools (20)
 
 | Group | Tools |
 |---|---|
 | Core | `navigate` · `snapshot` (a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
-| Extended | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` |
+| Extended | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
 | Scenario & report | `run_scenario` · `generate_scenario` · `save_report` |
 | Library | `save_scenario` · `load_scenario` · `list_scenarios` |
 
@@ -215,6 +215,31 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 > (slash commands instruct this automatically). `run_scenario` saves its own report.
 
 > **Adding a tool = 1 file in `tools/` + 1 import line.** `server.py` is never touched.
+
+---
+
+## 🖥️ CLI / CI (no MCP client needed)
+
+Scenarios you built in chat can be replayed headlessly in a pipeline — same
+runner, same reports, plus an exit code and JUnit XML:
+
+```bash
+ui-blackbox run smoke_login                     # library scenario → exit 0/1
+ui-blackbox run ./steps.json --format all       # a steps .json file
+ui-blackbox run a b c --junit results.xml       # suite + JUnit for CI
+ui-blackbox run a b c --parallel 3              # one isolated subprocess each
+ui-blackbox doctor                              # browser/dirs/config self-check
+```
+
+GitHub Actions sketch:
+```yaml
+- run: pip install . && playwright install chromium
+- run: ui-blackbox run smoke_login --junit results.xml
+- uses: actions/upload-artifact@v4
+  with: { name: ui-reports, path: ~/ui-blackbox/reports }
+```
+Exit codes: `0` all passed · `1` a step failed · `2` usage/infra error.
+In chat, the `status` tool reports version/mode/liveness for debugging.
 
 ---
 
@@ -244,7 +269,7 @@ Run playbook: [`HARNESS.md`](./HARNESS.md) · Agent context: [`CLAUDE.md`](./CLA
 ## 🔧 Development
 ```bash
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q        # 78 tests (unit + file:// integration + E2E)
+.venv/bin/python -m pytest -q        # 90 tests (unit + file:// integration + E2E)
 ```
 
 ## ⚙️ Environment variables
@@ -253,7 +278,8 @@ Run playbook: [`HARNESS.md`](./HARNESS.md) · Agent context: [`CLAUDE.md`](./CLA
 `STEALTH` (reduce bot false-positives) · `REPORT_DIR` (default ~/ui-blackbox/reports) ·
 `SCENARIO_DIR` (~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS` (2000) ·
 `DEFAULT_WAIT_UNTIL` (networkidle) · `NAV_TIMEOUT_MS` (30000) ·
-`IGNORE_HTTPS_ERRORS` (false). Details in `.env.example`.
+`IGNORE_HTTPS_ERRORS` (false) · `REPORT_RETENTION` (keep newest N runs,
+default 100, 0=unlimited). Details in `.env.example`.
 
 > **Testing live/deployed sites.** ① Ad/polling-heavy sites may never reach
 > `networkidle` — navigate proceeds on timeout (`settled:false`), and

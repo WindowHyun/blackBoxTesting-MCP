@@ -117,6 +117,34 @@ async def capture_step_screenshot(session, name: str, idx: int) -> str | None:
         return None
 
 
+_STAMP_RE = re.compile(r"(\d{8}_\d{6})")
+
+
+def _prune(report_dir: Path) -> None:
+    """Retention: keep the newest CONFIG.report_retention runs (by timestamp),
+    delete older report files and the screenshots stamped before the cutoff.
+    Never allowed to break report saving — caller wraps in try/except."""
+    keep = CONFIG.report_retention
+    if keep <= 0:
+        return
+    stamps = sorted({m.group(1) for p in report_dir.glob("report_*.*")
+                     if (m := _STAMP_RE.search(p.name))}, reverse=True)
+    if len(stamps) <= keep:
+        return
+    cutoff = stamps[keep - 1]  # oldest stamp we keep
+    for p in report_dir.glob("report_*.*"):
+        m = _STAMP_RE.search(p.name)
+        if m and m.group(1) < cutoff:
+            p.unlink(missing_ok=True)
+    shots = report_dir / "screenshots"
+    if shots.is_dir():
+        for p in shots.glob("*.png"):
+            m = _STAMP_RE.search(p.name)
+            # Unstamped legacy files are left alone (can't tell their run).
+            if m and m.group(1) < cutoff:
+                p.unlink(missing_ok=True)
+
+
 def save(result: dict, formats: str = "both") -> dict[str, str]:
     """Persist a scenario result; return written file paths by format."""
     report_dir = ensure_dirs()
@@ -141,6 +169,10 @@ def save(result: dict, formats: str = "both") -> dict[str, str]:
         p.write_text(_render_html(result, report_dir), encoding="utf-8")
         written["html"] = str(p)
 
+    try:
+        _prune(report_dir)
+    except Exception:  # retention must never break the save that just succeeded
+        pass
     return written
 
 

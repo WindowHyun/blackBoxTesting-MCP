@@ -27,6 +27,7 @@ dev = [
 
 [project.scripts]
 ui-blackbox-mcp = "blackbox_mcp.server:main"
+ui-blackbox = "blackbox_mcp.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["blackbox_mcp"]
