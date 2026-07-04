@@ -36,6 +36,9 @@ def reset() -> None:
     _LOG.clear()
     _COUNTER = 0
     _RUN_TAG = None
+    # A flow boundary is also the scrub-registry boundary: values re-register
+    # on the next resolve(), so this only bounds growth/cross-flow bleed.
+    secrets.clear_registry()
 
 
 def steps() -> list[dict]:
@@ -140,9 +143,7 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         "screenshot": shot,
         "console_errors": [e for e in new_console if e.get("level") == "error"],
         "network_errors": new_network,
-        "severity": (None if passed else
-                     ("timeout" if exc and "Timeout" in type(exc).__name__
-                      else "assertion" if name.startswith("assert") else "error")),
+        "severity": None if passed else report.classify_failure(name, exc),
         "ai_reason": reason,
         "ai_suggestion": suggestion,
     }))
@@ -157,12 +158,5 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
 
 def build_result(name: str = "session", description: str = "") -> dict:
     s = steps()
-    total = len(s)
-    passed = sum(1 for x in s if x["passed"])
-    return {
-        "name": name,
-        "description": description,
-        "steps": s,
-        "summary": {"total": total, "passed": passed, "failed": total - passed,
-                    "pass_rate": round(passed / total, 3) if total else 0.0},
-    }
+    return {"name": name, "description": description, "steps": s,
+            "summary": report.summarize(s)}

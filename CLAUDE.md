@@ -27,7 +27,7 @@ python -m venv .venv
 - `blackbox_mcp/tools/` — **MCP Tool = 파일 1개**. `_registry.py`의 `@tool`로 등록(`@prompt`=슬래시 명령은 `_prompts.py`). register_all이 액션 도구를 recorder로 래핑
 - `blackbox_mcp/browser/` — `session.py`(싱글톤 + 4 모드: 번들/채널·스텔스/영구프로필/CDP — DESIGN §3.7), `listeners.py`(콘솔/네트워크 버퍼), `locator.py`(D2 체인)
 - `blackbox_mcp/testing/` — `runner.py`(시나리오), `report.py`(JSON/MD/HTML+회귀), `recorder.py`(액션 자동 기록→save_report), `library.py`, `secrets.py`(마스킹)
-- `tests/` — 브라우저 없는 단위 + `file://` 픽스처 통합 (현재 90건)
+- `tests/` — 브라우저 없는 단위 + `file://` 픽스처 통합. 브라우저 필요 테스트는 `browser` 마커(자동 부여) — 고속 레인: `-m "not browser"`
 
 ## 불변 규칙 (반드시 지킬 것)
 1. **Tool 추가 = `tools/`에 파일 1개 + `tools/__init__.py`에 import 한 줄.** `server.py`는 절대 수정하지 않는다.

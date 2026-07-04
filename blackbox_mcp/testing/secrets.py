@@ -71,6 +71,17 @@ def unresolved_vars(value: str) -> list[str]:
             if os.getenv(m.group(1)) is None]
 
 
+def clear_registry() -> None:
+    """Drop all remembered resolved-secret values.
+
+    Called when a recording flow ends (recorder.reset) and between tests —
+    bounds per-process growth and stops scenario A's placeholders from
+    rewriting scenario B's report text. Values re-register on the next
+    resolve(), so clearing between flows never weakens scrubbing.
+    """
+    _RESOLVED_SECRETS.clear()
+
+
 def scrub(text):
     """Replace resolved secret values embedded in derived text (page URLs,
     exception messages, network entries) with their ${VAR} placeholder."""

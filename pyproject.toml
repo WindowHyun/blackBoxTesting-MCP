@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ui-blackbox-mcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "UI Blackbox Tester MCP — natural-language UI testing for Claude Desktop via Playwright"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,9 +29,15 @@ dev = [
 ui-blackbox-mcp = "blackbox_mcp.server:main"
 ui-blackbox = "blackbox_mcp.cli:main"
 
+[tool.hatch.version]
+path = "blackbox_mcp/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["blackbox_mcp"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "browser: needs a real Chromium (excluded from the fast unit lane: -m 'not browser')",
+]

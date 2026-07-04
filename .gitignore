@@ -7,6 +7,13 @@ build/
 dist/
 .venv/
 venv/
+.pytest_cache/
+
+# Credentials — the whole credential story is "put secrets in .env";
+# it must never be committable.
+.env
+.env.*
+!.env.example
 
 # Runtime output
 reports/

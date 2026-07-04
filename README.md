@@ -12,7 +12,7 @@
   <br><em>Auto-generated report — pass rate · per-step screenshots · failure cause · regression · accessibility · credential masking</em>
 </p>
 
-Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **90 tests green**
+Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **91 tests green**
 
 ---
 
@@ -269,7 +269,8 @@ Run playbook: [`HARNESS.md`](./HARNESS.md) · Agent context: [`CLAUDE.md`](./CLA
 ## 🔧 Development
 ```bash
 .venv/bin/pip install -e ".[dev]"
-.venv/bin/python -m pytest -q        # 90 tests (unit + file:// integration + E2E)
+.venv/bin/python -m pytest -q                    # full suite (unit + file:// integration + E2E)
+.venv/bin/python -m pytest -q -m "not browser"   # fast unit lane, no browser needed
 ```
 
 ## ⚙️ Environment variables
