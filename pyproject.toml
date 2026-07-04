@@ -11,10 +11,12 @@ requires-python = ">=3.11"
 authors = [{ name = "연창현" }]
 license = { text = "MIT" }
 dependencies = [
-    "mcp>=1.2.0",
+    # <2: the mcp SDK has shipped breaking changes in minor releases before;
+    # cap the major so a fresh install later still boots.
+    "mcp>=1.2.0,<2",
     # >=1.60 for aria_snapshot mode/depth (>=1.59) and boxes (>=1.60), used for
     # snapshot trimming (Q1). See DESIGN.md §8 / §13.
-    "playwright>=1.60.0",
+    "playwright>=1.60.0,<2",
 ]
 
 [project.optional-dependencies]
