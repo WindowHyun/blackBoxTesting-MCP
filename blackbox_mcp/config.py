@@ -16,6 +16,20 @@ def _as_bool(value: str | None, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _as_int(value: str | None, default: int) -> int:
+    """Tolerant int parsing: a typo like "2000ms" in the client's env block must
+    not crash the server at import (the user only sees a dead MCP server)."""
+    if value is None:
+        return default
+    try:
+        return int(value.strip())
+    except ValueError:
+        import sys
+        print(f"[blackbox-mcp] invalid int {value!r} — using {default}",
+              file=sys.stderr)
+        return default
+
+
 # Well-known location of a pre-provisioned browser in some managed/CI
 # environments (e.g. Claude Code web). Used when the matching Playwright build
 # cannot be downloaded (network policy) — we launch this binary via
@@ -80,9 +94,9 @@ class Config:
             stealth=_as_bool(os.getenv("STEALTH"), False),
             report_dir=_resolve_dir(os.getenv("REPORT_DIR"), "reports"),
             scenario_dir=_resolve_dir(os.getenv("SCENARIO_DIR"), "scenarios"),
-            selector_timeout_ms=int(os.getenv("SELECTOR_TIMEOUT_MS", "2000")),
+            selector_timeout_ms=_as_int(os.getenv("SELECTOR_TIMEOUT_MS"), 2000),
             default_wait_until=os.getenv("DEFAULT_WAIT_UNTIL", "networkidle"),
-            nav_timeout_ms=int(os.getenv("NAV_TIMEOUT_MS", "30000")),
+            nav_timeout_ms=_as_int(os.getenv("NAV_TIMEOUT_MS"), 30000),
             ignore_https_errors=_as_bool(os.getenv("IGNORE_HTTPS_ERRORS"), False),
         )
 
