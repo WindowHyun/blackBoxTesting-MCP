@@ -6,20 +6,14 @@ import json
 import xml.etree.ElementTree as ET
 
 import pytest
-from conftest import browser_available, fixture_url
+from conftest import fixture_url
 
 from blackbox_mcp import cli
 from blackbox_mcp.testing import report
 
-# CLI runs drive a real browser without the session fixture, so mark + guard
-# explicitly to keep the "unit suite passes anywhere" promise.
+# CLI runs drive a real browser without the session fixture — mark explicitly;
+# conftest globally skips browser-marked tests when no Chromium is launchable.
 pytestmark = pytest.mark.browser
-
-
-@pytest.fixture(autouse=True)
-def _require_browser():
-    if not browser_available():
-        pytest.skip("browser unavailable")
 
 
 def _steps_file(tmp_path, name, steps):

@@ -30,11 +30,22 @@ def browser_available() -> bool:
 
 
 def pytest_collection_modifyitems(items):
-    """Auto-mark browser tests: anything using the session/cdp fixtures.
-    Enables the fast unit lane: pytest -m 'not browser' (no Chromium needed)."""
+    """Auto-mark browser tests (anything using the session/cdp fixtures) and
+    skip ALL browser-marked tests when no Chromium is launchable — one global
+    guard instead of per-file ones, so the suite passes on browserless envs.
+    Fast unit lane: pytest -m 'not browser' (no Chromium needed).
+
+    NOTE: tests that drive a browser WITHOUT those fixtures (direct
+    get_session()/BrowserSession()/cli.main) must carry an explicit
+    ``pytestmark = pytest.mark.browser`` — the fixture heuristic can't see them.
+    """
+    browser_ok = browser_available()
+    skip_no_browser = pytest.mark.skip(reason="browser unavailable")
     for item in items:
         if {"session", "cdp_chrome"} & set(getattr(item, "fixturenames", ())):
             item.add_marker(pytest.mark.browser)
+        if item.get_closest_marker("browser") and not browser_ok:
+            item.add_marker(skip_no_browser)
 
 
 @pytest.fixture(autouse=True)
