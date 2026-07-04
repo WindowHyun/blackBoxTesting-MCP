@@ -82,6 +82,9 @@ class Config:
     nav_timeout_ms: int
     # Accept invalid TLS certs (staging with self-signed/expired certs).
     ignore_https_errors: bool
+    # Keep at most N report runs (per format set) in REPORT_DIR; 0 = unlimited.
+    # Prevents unbounded growth of ~/ui-blackbox/reports on long-lived setups.
+    report_retention: int
 
     @staticmethod
     def from_env() -> "Config":
@@ -98,6 +101,7 @@ class Config:
             default_wait_until=os.getenv("DEFAULT_WAIT_UNTIL", "networkidle"),
             nav_timeout_ms=_as_int(os.getenv("NAV_TIMEOUT_MS"), 30000),
             ignore_https_errors=_as_bool(os.getenv("IGNORE_HTTPS_ERRORS"), False),
+            report_retention=_as_int(os.getenv("REPORT_RETENTION"), 100),
         )
 
 

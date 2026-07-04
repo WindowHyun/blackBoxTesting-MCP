@@ -22,6 +22,7 @@ from . import (  # noqa: F401  (imported for side-effect registration)
     savereport,
     generate,
     library,
+    status,
 )
 from . import _prompts  # noqa: F401  (registers MCP prompts / slash commands)
 from ._registry import register_all

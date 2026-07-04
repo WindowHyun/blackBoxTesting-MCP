@@ -147,3 +147,43 @@ async def test_concurrent_get_session_single_instance(session):
 
     results = await asyncio.gather(*(get_session() for _ in range(5)))
     assert all(r is results[0] for r in results)
+
+
+# ── report retention: old runs pruned, newest kept ───────────────
+
+def test_report_retention_prunes_old_runs(tmp_path, monkeypatch):
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_retention=2))
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    for i, stamp in enumerate(["20200101_000001", "20200101_000002",
+                               "20200101_000003"]):
+        (tmp_path / f"report_{stamp}.json").write_text("{}", encoding="utf-8")
+        (shots / f"s_{stamp}_step01.png").write_bytes(b"")
+    minimal = {"name": "r", "steps": [],
+               "summary": {"total": 0, "passed": 0, "failed": 0, "pass_rate": 0.0}}
+    report.save(minimal, formats="json")  # new stamp becomes the newest run
+    kept = sorted(p.name for p in tmp_path.glob("report_*.json"))
+    # retention=2 → only the new save + the newest fake remain
+    assert len(kept) == 2
+    assert "report_20200101_000003.json" in kept
+    assert not (shots / "s_20200101_000001_step01.png").exists()
+    assert (shots / "s_20200101_000003_step01.png").exists()
+
+
+# ── status tool: read-only probe ─────────────────────────────────
+
+async def test_status_reports_session_state(session):
+    from blackbox_mcp.tools.status import status
+    from conftest import fixture_url
+
+    await session.page.goto(fixture_url("basic.html"))
+    out = await status()
+    assert out["session"]["started"] is True
+    assert out["session"]["alive"] is True
+    assert out["session"]["mode"] in ("bundled", "channel")
+    assert "basic.html" in out["session"]["url"]
+    assert out["config"]["browser"] == "chromium"
