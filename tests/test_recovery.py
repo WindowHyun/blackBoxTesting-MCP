@@ -1,8 +1,14 @@
 """T2.6 — browser crash auto-recovery (NFR Reliability)."""
 from __future__ import annotations
 
+import pytest
+
 from blackbox_mcp.browser import get_session
 from blackbox_mcp.browser.session import close_session
+
+# Drives a real browser via get_session() directly (no session fixture, so the
+# conftest auto-marker can't see it) — mark explicitly for the unit lane.
+pytestmark = pytest.mark.browser
 
 
 async def test_session_recovers_after_browser_crash():
