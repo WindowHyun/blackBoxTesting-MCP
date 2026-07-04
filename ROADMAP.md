@@ -167,6 +167,27 @@ expect_dialog는 `expect_event` 데드락을 피해 `page.once("dialog")` 핸들
 
 ---
 
+## Phase 6 — 실무 하드닝·CI (1.0 이후) ✅ 완료
+
+PRD 범위(Phase 0~5)를 넘어, 전체 코드베이스 감사(동시성·보안·운영)에서 나온
+문제를 닫고 팀/CI 실무 요건을 갖춘 단계. **MCP 서버 본체는 무변경** — 대화형
+블랙박스 테스트가 핵심 제품이고, 아래는 그 위에 얹은 견고화·진입점이다.
+
+- **감사 수정(치명)** — bootstrap `playwright install`의 stdout DEVNULL(MCP 파이프
+  오염 차단), 자격증명 완전 마스킹 + 파생 텍스트 scrub + 한국어/짧은토큰 감지,
+  세션 `asyncio.Lock`(이중 기동/restart 경합 제거)·죽은 브라우저에서도 드라이버
+  stop, 이벤트 버퍼 1000건 캡, recorder 단조 카운터·실행 스탬프 스크린샷,
+  회귀 zero-overlap baseline 가드, env int 관용 파싱, 의존성 메이저 상한.
+- **CLI/CI 진입점** (`ui-blackbox run/doctor`, DESIGN §7.1) — exit code + JUnit XML
+  + `--parallel`(서브프로세스 격리). CI 파이프라인 편입 가능.
+- **관측성** — `status` tool(대화) + `ui-blackbox doctor`(터미널).
+- **리포트 보존** — `REPORT_RETENTION`(DESIGN §7.2).
+
+**DoD** — ✅ pytest 90건 green(CDP/persistent/bootstrap 실패/동시성 경로 포함),
+tools 20, 서버 부팅·`doctor` 정상.
+
+---
+
 ## 미결·리스크
 
 | ID | 내용 | 해소 시점 |
@@ -174,11 +195,14 @@ expect_dialog는 `expect_event` 데드락을 피해 `page.once("dialog")` 핸들
 | **Q1** | 대형 SPA aria_snapshot이 MCP 컨텍스트 한도 초과 가능 → 트리밍 수치 | Phase 1 실측 |
 | R1 | 환경별 Chromium 설치 — CDN 차단 시 다운로드 불가 | ✅ 해소: `CHROMIUM_EXECUTABLE`/사전설치(`/opt/pw-browsers`) `executable_path` 사용 (T1.1) |
 | R2 | sampling 미지원 환경에서 generate_scenario UX | Phase 5 (fallback 설계 반영됨) |
-| R3 | 브라우저 크래시 자동 재시작 < 5s (NFR) 실측 | Phase 2~3 |
+| R3 | 브라우저 크래시 자동 재시작 < 5s (NFR) 실측 | ✅ 해소: `is_alive()`+`restart()` 모드보존, `test_recovery`·`test_modes`로 고정 |
 
 ## 범위 외 (PRD Out of Scope)
-자동 테스트 탐색(`discover_tests`) · API/백엔드 테스트 · CI/CD 통합 ·
-퍼포먼스/로드 테스트 — 본 버전 제외(1.0 이후 검토).
+자동 테스트 탐색(`discover_tests`) · API/백엔드 테스트 · 퍼포먼스/로드 테스트 —
+본 버전 제외(1.0 이후 검토).
+> **CI/CD 통합**은 PRD 원안에서 범위 외였으나, Phase 6에서 대화형 산출물을 재사용하는
+> **CLI 러너(`ui-blackbox run`, exit code+JUnit)**로 편입했다(서버 본체 무변경).
+> 진정한 멀티세션 병렬(대화별 격리 브라우저)은 여전히 프로세스 분리로 커버.
 
 ---
 
