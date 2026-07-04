@@ -22,7 +22,28 @@ _SAFE = re.compile(r"[^A-Za-z0-9_\-]")
 
 
 def _stamp() -> str:
-    return datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Microseconds make filenames collision-free when parallel CLI children
+    # finish in the same second; retention/regression only key on the
+    # second-level prefix (_STAMP_RE), which stays a lexicographic sort key.
+    return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+
+def summarize(steps: list[dict]) -> dict:
+    """The one summary shape (DESIGN §6.1) — runner and recorder both use this
+    so a schema change happens in exactly one place."""
+    total = len(steps)
+    passed = sum(1 for s in steps if s.get("passed"))
+    return {"total": total, "passed": passed, "failed": total - passed,
+            "pass_rate": round(passed / total, 3) if total else 0.0}
+
+
+def classify_failure(action: str, exc: Exception | None) -> str:
+    """Severity for a FAILED step — single implementation for runner/recorder."""
+    if exc is not None:
+        return "timeout" if "Timeout" in type(exc).__name__ else "error"
+    if action.startswith("assert"):
+        return "assertion"
+    return "error"  # failed interact/wait/dialog/etc.
 
 
 def ensure_dirs() -> Path:

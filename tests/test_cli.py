@@ -5,10 +5,21 @@ import dataclasses
 import json
 import xml.etree.ElementTree as ET
 
-from conftest import fixture_url
+import pytest
+from conftest import browser_available, fixture_url
 
 from blackbox_mcp import cli
 from blackbox_mcp.testing import report
+
+# CLI runs drive a real browser without the session fixture, so mark + guard
+# explicitly to keep the "unit suite passes anywhere" promise.
+pytestmark = pytest.mark.browser
+
+
+@pytest.fixture(autouse=True)
+def _require_browser():
+    if not browser_available():
+        pytest.skip("browser unavailable")
 
 
 def _steps_file(tmp_path, name, steps):

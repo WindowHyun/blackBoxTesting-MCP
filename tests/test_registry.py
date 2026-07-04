@@ -1,8 +1,25 @@
 """Smoke tests for the tool registry and pure helpers (no browser needed)."""
 from __future__ import annotations
 
+import subprocess
+import sys
+
+
+def test_cli_path_does_not_pull_mcp_sdk():
+    """The CI path (cli → testing.runner → action tools) advertises "no MCP
+    client needed" — importing it must not drag in the MCP SDK. Guarded by the
+    lazy imports in tools/__init__ (screenshot/generate are the mcp importers)."""
+    code = ("import blackbox_mcp.testing.runner, blackbox_mcp.cli, sys;"
+            "print(any(m == 'mcp' or m.startswith('mcp.') for m in sys.modules))")
+    out = subprocess.run([sys.executable, "-c", code],
+                         capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "False"
+
 
 def test_all_tools_registered():
+    import blackbox_mcp.tools as tools
+    tools._import_all()  # imports are lazy now (CLI must not pull the MCP SDK)
     from blackbox_mcp.tools._registry import _PENDING
 
     names = {p.name or p.fn.__name__ for p in _PENDING}
@@ -16,6 +33,8 @@ def test_all_tools_registered():
 
 
 def test_prompts_registered():
+    import blackbox_mcp.tools as tools
+    tools._import_all()
     from blackbox_mcp.tools._registry import _PENDING_PROMPTS
 
     names = {p.name or p.fn.__name__ for p in _PENDING_PROMPTS}

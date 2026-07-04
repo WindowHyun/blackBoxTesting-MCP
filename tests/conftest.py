@@ -17,6 +17,36 @@ def fixture_url(name: str) -> str:
     return (FIXTURES / name).as_uri()
 
 
+def browser_available() -> bool:
+    """True when a launchable Chromium exists (pre-provisioned or installed)."""
+    import os
+
+    from blackbox_mcp.bootstrap import _browser_installed
+    from blackbox_mcp.config import CONFIG
+
+    if CONFIG.chromium_executable and os.path.exists(CONFIG.chromium_executable):
+        return True
+    return _browser_installed(CONFIG.browser)
+
+
+def pytest_collection_modifyitems(items):
+    """Auto-mark browser tests: anything using the session/cdp fixtures.
+    Enables the fast unit lane: pytest -m 'not browser' (no Chromium needed)."""
+    for item in items:
+        if {"session", "cdp_chrome"} & set(getattr(item, "fixturenames", ())):
+            item.add_marker(pytest.mark.browser)
+
+
+@pytest.fixture(autouse=True)
+def _clean_module_globals():
+    """Reset process-global state between tests so ordering can't couple them:
+    the recorder log/counter and the resolved-secrets scrub registry."""
+    yield
+    from blackbox_mcp.testing import recorder, secrets
+    recorder.reset()
+    secrets.clear_registry()
+
+
 @pytest.fixture
 async def session():
     from blackbox_mcp.browser import get_session

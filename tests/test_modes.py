@@ -71,6 +71,7 @@ async def test_cdp_attach_and_detach_keeps_browser(cdp_chrome, monkeypatch):
     assert proc.poll() is None
 
 
+@pytest.mark.browser
 async def test_stale_cdp_falls_back_to_bundled(monkeypatch):
     monkeypatch.setattr(session_mod, "CONFIG",
                         dataclasses.replace(CONFIG, cdp_url="http://127.0.0.1:1"))
@@ -83,6 +84,7 @@ async def test_stale_cdp_falls_back_to_bundled(monkeypatch):
         await s.close()
 
 
+@pytest.mark.browser
 async def test_persistent_launch_and_idempotent_reuse():
     s = BrowserSession()
     r1 = await s.switch_to_persistent(headless=True, channel="")

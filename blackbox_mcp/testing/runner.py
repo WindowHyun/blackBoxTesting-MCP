@@ -34,20 +34,11 @@ from . import report, secrets
 
 
 def empty_result(name: str) -> dict[str, Any]:
-    return {
-        "name": name,
-        "steps": [],
-        "summary": {"total": 0, "passed": 0, "failed": 0, "pass_rate": 0.0},
-    }
+    return {"name": name, "steps": [], "summary": report.summarize([])}
 
 
-def _severity(action: str, exc: Exception | None) -> str | None:
-    """Classify a *failed* step. (Only called when passed is False.)"""
-    if exc is not None:
-        return "timeout" if "Timeout" in type(exc).__name__ else "error"
-    if action in ("assert", "assert_"):
-        return "assertion"
-    return "error"  # failed interact/wait/dialog/etc.
+# Single severity implementation lives in report.classify_failure.
+_severity = report.classify_failure
 
 
 async def _dispatch(step: dict) -> dict:
@@ -205,12 +196,7 @@ async def run(
         if not passed and not continue_on_fail:
             break
 
-    total = len(result["steps"])
-    passed_n = sum(1 for s in result["steps"] if s["passed"])
-    result["summary"] = {
-        "total": total, "passed": passed_n, "failed": total - passed_n,
-        "pass_rate": round(passed_n / total, 3) if total else 0.0,
-    }
+    result["summary"] = report.summarize(result["steps"])
     result["meta"]["duration_ms"] = int((time.monotonic() - t0) * 1000)
     result["a11y_findings"] = await _a11y_audit(session)   # SM-09
     report.compute_regression(result)                      # SM-07

@@ -65,7 +65,7 @@
         "action": "interact",
         "type": "type",
         "selector": "testid=password",
-        "value": "$***"
+        "value": "***"
       },
       "selector_input": "testid=password",
       "resolved_by": "testid",
