@@ -182,9 +182,13 @@ PRD 범위(Phase 0~5)를 넘어, 전체 코드베이스 감사(동시성·보안
   + `--parallel`(서브프로세스 격리). CI 파이프라인 편입 가능.
 - **관측성** — `status` tool(대화) + `ui-blackbox doctor`(터미널).
 - **리포트 보존** — `REPORT_RETENTION`(DESIGN §7.2).
+- **후속 견고화(post-merge 리뷰)** — 리포트↔스크린샷 `run_id` 공유(보관 실행의
+  스크린샷 유실 방지), CLI 병렬: 시그널사 error 매핑·`--timeout` 워치독·부모 1회
+  정리·인터럽트 시 자식 kill, 시나리오 예외 격리, JUnit 제어문자 sanitize,
+  `run_scenario` scrub 레지스트리 정리, `register_all` 멱등.
 
-**DoD** — ✅ pytest 90건 green(CDP/persistent/bootstrap 실패/동시성 경로 포함),
-tools 20, 서버 부팅·`doctor` 정상.
+**DoD** — ✅ pytest green(CDP/persistent/bootstrap 실패/동시성/CLI 경로 포함),
+tools 20, 서버 부팅·`doctor` 정상, GitHub Actions CI(유닛+브라우저 레인) green.
 
 ---
 
