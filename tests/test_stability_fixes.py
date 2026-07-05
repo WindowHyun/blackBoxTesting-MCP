@@ -50,6 +50,14 @@ def test_unresolved_vars_detects_missing_env(monkeypatch):
     assert secrets.unresolved_vars("x=${YES_VAR}") == []
 
 
+def test_clear_registry_empties_scrub_state(monkeypatch):
+    monkeypatch.setenv("REG_PW", "sekret42")
+    secrets.resolve("${REG_PW}")
+    assert secrets.scrub("x sekret42") == "x ${REG_PW}"  # registered
+    secrets.clear_registry()
+    assert secrets.scrub("x sekret42") == "x sekret42"    # no longer rewritten
+
+
 def test_scrub_record_cleans_network_and_console(monkeypatch):
     monkeypatch.setenv("SCRUB_PW", "topsecret99")
     secrets.resolve("${SCRUB_PW}")  # register
@@ -151,27 +159,52 @@ async def test_concurrent_get_session_single_instance(session):
 
 # ── report retention: old runs pruned, newest kept ───────────────
 
+def _seed_run(tmp_path, run_id, name="r"):
+    """Write a report + its screenshot sharing one run id (as real runs do)."""
+    shots = tmp_path / "screenshots"
+    shots.mkdir(exist_ok=True)
+    (tmp_path / f"report_{run_id}.json").write_text("{}", encoding="utf-8")
+    (shots / f"{run_id}_{name}_step01.png").write_bytes(b"")
+
+
 def test_report_retention_prunes_old_runs(tmp_path, monkeypatch):
     import dataclasses
 
     monkeypatch.setattr(report, "CONFIG",
                         dataclasses.replace(report.CONFIG, report_dir=tmp_path,
                                             report_retention=2))
+    for rid in ("20200101_000001_000000", "20200101_000002_000000",
+                "20200101_000003_000000"):
+        _seed_run(tmp_path, rid)
+    minimal = {"name": "r", "steps": [], "run_id": "20200101_000004_000000",
+               "summary": {"total": 0, "passed": 0, "failed": 0, "pass_rate": 0.0}}
+    report.save(minimal, formats="json")  # newest run
+    kept = sorted(p.name for p in tmp_path.glob("report_*.json"))
+    assert len(kept) == 2  # retention=2 → newest fake + the new save
+    assert "report_20200101_000003_000000.json" in kept
+    shots = tmp_path / "screenshots"
+    assert not (shots / "20200101_000001_000000_r_step01.png").exists()
+    assert (shots / "20200101_000003_000000_r_step01.png").exists()
+
+
+def test_retention_keeps_a_run_with_its_own_screenshots(tmp_path, monkeypatch):
+    """M1 regression: report and its screenshots share a run id, so a kept run
+    never loses its screenshots even at REPORT_RETENTION=1."""
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_retention=1))
     shots = tmp_path / "screenshots"
     shots.mkdir()
-    for i, stamp in enumerate(["20200101_000001", "20200101_000002",
-                               "20200101_000003"]):
-        (tmp_path / f"report_{stamp}.json").write_text("{}", encoding="utf-8")
-        (shots / f"s_{stamp}_step01.png").write_bytes(b"")
-    minimal = {"name": "r", "steps": [],
-               "summary": {"total": 0, "passed": 0, "failed": 0, "pass_rate": 0.0}}
-    report.save(minimal, formats="json")  # new stamp becomes the newest run
-    kept = sorted(p.name for p in tmp_path.glob("report_*.json"))
-    # retention=2 → only the new save + the newest fake remain
-    assert len(kept) == 2
-    assert "report_20200101_000003.json" in kept
-    assert not (shots / "s_20200101_000001_step01.png").exists()
-    assert (shots / "s_20200101_000003_step01.png").exists()
+    rid = "20260101_120000_500000"
+    (shots / f"{rid}_r_step01.png").write_bytes(b"")  # screenshot written first
+    result = {"name": "r", "run_id": rid, "steps": [],
+              "summary": {"total": 1, "passed": 0, "failed": 1, "pass_rate": 0.0}}
+    report.save(result, formats="json")
+    # the just-saved run's report AND its screenshot both survive
+    assert (tmp_path / f"report_{rid}.json").exists()
+    assert (shots / f"{rid}_r_step01.png").exists()
 
 
 # ── status tool: read-only probe ─────────────────────────────────

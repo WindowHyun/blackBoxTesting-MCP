@@ -26,16 +26,16 @@ _LOG: list[dict] = []
 # Monotonic step counter — unlike len(_LOG)+1 it stays unique after the cap
 # trims old entries, so regression keys and screenshot names never collide.
 _COUNTER = 0
-# Per-recording-session tag so screenshot files from different sessions don't
-# overwrite each other (older JSON/MD reports keep valid image references).
-_RUN_TAG: str | None = None
+# Per-recording-session run id, shared by this session's screenshots and (via
+# build_result → save) its report files, so retention keeps them together.
+_RUN_ID: str | None = None
 
 
 def reset() -> None:
-    global _COUNTER, _RUN_TAG
+    global _COUNTER, _RUN_ID
     _LOG.clear()
     _COUNTER = 0
-    _RUN_TAG = None
+    _RUN_ID = None
     # A flow boundary is also the scrub-registry boundary: values re-register
     # on the next resolve(), so this only bounds growth/cross-flow bleed.
     secrets.clear_registry()
@@ -121,14 +121,14 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     new_console = ([c.__dict__ for c in session.buffers.console[c0:]] if session else [])
     new_network = ([n.__dict__ for n in session.buffers.network[n0:]] if session else [])
 
-    global _COUNTER, _RUN_TAG
+    global _COUNTER, _RUN_ID
     _COUNTER += 1
     idx = _COUNTER
-    if _RUN_TAG is None:
-        _RUN_TAG = f"session_{report._stamp()}"
+    if _RUN_ID is None:
+        _RUN_ID = report.new_run_id()
     shot = None
     if session and not passed:
-        shot = await report.capture_step_screenshot(session, _RUN_TAG, idx)
+        shot = await report.capture_step_screenshot(session, f"{_RUN_ID}_session", idx)
 
     _LOG.append(secrets.scrub_record({
         "step": idx,
@@ -158,5 +158,10 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
 
 def build_result(name: str = "session", description: str = "") -> dict:
     s = steps()
-    return {"name": name, "description": description, "steps": s,
-            "summary": report.summarize(s)}
+    result = {"name": name, "description": description, "steps": s,
+              "summary": report.summarize(s)}
+    # Share the screenshots' run id with the report files so retention keeps
+    # them together. None when no screenshot was captured — save() falls back.
+    if _RUN_ID is not None:
+        result["run_id"] = _RUN_ID
+    return result

@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -44,8 +45,21 @@ def _load_steps(ref: str) -> tuple[str, list[dict]]:
     return ref, library.load(ref)
 
 
+def _errored_result(name: str, exc: Exception) -> dict:
+    """A synthetic failed result so one scenario blowing up (browser launch,
+    disk-full save…) doesn't discard the whole suite's aggregate/JUnit."""
+    return {"name": name, "meta": {},
+            "summary": {"total": 1, "passed": 0, "failed": 1, "pass_rate": 0.0},
+            "steps": [{"step": 1, "action": "run", "passed": False,
+                       "actual": f"{type(exc).__name__}: {exc}",
+                       "severity": "error", "ai_reason": "scenario raised",
+                       "ai_suggestion": str(exc)[:160], "duration_ms": 0}]}
+
+
 async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
-    """Run scenarios sequentially in one browser session; always clean up."""
+    """Run scenarios sequentially in one browser session; always clean up.
+    A scenario that raises is recorded as an errored result and the suite
+    continues — completed results and JUnit are never lost to one failure."""
     from .browser.session import close_session
     from .testing import report, runner
 
@@ -53,20 +67,34 @@ async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
     try:
         for name, steps in items:
             print(f"▶ {name} ({len(steps)} steps)")
-            res = await runner.run(steps, name=name,
-                                   continue_on_fail=args.continue_on_fail,
-                                   screenshot_each=args.screenshot_each)
-            files = report.save(res, formats=args.format)
-            s = res["summary"]
-            mark = "PASS" if s["failed"] == 0 else "FAIL"
-            print(f"  {mark} {s['passed']}/{s['total']} "
-                  f"(pass_rate {s['pass_rate']:.0%})")
-            for fmt, p in files.items():
-                print(f"  report[{fmt}]: {p}")
-            results.append(res)
+            try:
+                res = await runner.run(steps, name=name,
+                                       continue_on_fail=args.continue_on_fail,
+                                       screenshot_each=args.screenshot_each)
+                files = report.save(res, formats=args.format)
+                s = res["summary"]
+                mark = "PASS" if s["failed"] == 0 else "FAIL"
+                print(f"  {mark} {s['passed']}/{s['total']} "
+                      f"(pass_rate {s['pass_rate']:.0%})")
+                for fmt, p in files.items():
+                    print(f"  report[{fmt}]: {p}")
+                results.append(res)
+            except Exception as exc:
+                print(f"  ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
+                results.append(_errored_result(name, exc))
     finally:
         await close_session()
     return results
+
+
+# Chars illegal in XML 1.0 text (all C0 controls except tab/LF/CR).
+_XML_ILLEGAL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _xml_safe(value) -> str:
+    """Strip control chars so page-captured text (ANSI escapes, NUL) can't
+    produce XML that strict JUnit parsers reject. (ET already escapes &<>".)"""
+    return _XML_ILLEGAL.sub("", str(value))
 
 
 def _write_junit(results: list[dict], path: str) -> None:
@@ -77,28 +105,41 @@ def _write_junit(results: list[dict], path: str) -> None:
     for res in results:
         s = res["summary"]
         suite = ET.SubElement(
-            suites, "testsuite", name=res.get("name", "scenario"),
+            suites, "testsuite", name=_xml_safe(res.get("name", "scenario")),
             tests=str(s["total"]), failures=str(s["failed"]),
             time=f"{res.get('meta', {}).get('duration_ms', 0) / 1000:.3f}")
         for step in res.get("steps", []):
             case = ET.SubElement(
                 suite, "testcase",
-                name=f"step{step['step']} {step.get('action')}",
+                name=_xml_safe(f"step{step['step']} {step.get('action')}"),
                 time=f"{step.get('duration_ms', 0) / 1000:.3f}")
             if not step.get("passed"):
                 fail = ET.SubElement(case, "failure",
-                                     message=str(step.get("actual") or "failed"))
-                fail.text = (f"severity={step.get('severity')}\n"
-                             f"reason={step.get('ai_reason')}\n"
-                             f"suggestion={step.get('ai_suggestion')}")
+                                     message=_xml_safe(step.get("actual") or "failed"))
+                fail.text = _xml_safe(f"severity={step.get('severity')}\n"
+                                      f"reason={step.get('ai_reason')}\n"
+                                      f"suggestion={step.get('ai_suggestion')}")
     ET.ElementTree(suites).write(path, encoding="unicode", xml_declaration=True)
     print(f"  junit: {path}")
 
 
+def _norm_exit(code: int) -> int:
+    """Map a child process return code to our exit taxonomy. A signal death
+    (negative code, e.g. OOM-killed browser = -9) or any unexpected value is an
+    ERROR, never a silent PASS."""
+    return code if code in (EXIT_OK, EXIT_FAILED, EXIT_ERROR) else EXIT_ERROR
+
+
 def _run_parallel(refs: list[str], args) -> int:
     """Fan out one subprocess per scenario (each gets its own browser/session
-    singleton — no shared-state refactor needed). Concurrency-capped."""
-    import subprocess
+    singleton — no shared-state refactor needed). Concurrency-capped.
+
+    Children run with retention disabled (REPORT_RETENTION=0) so siblings can't
+    race-delete each other's reports; the parent prunes once at the end."""
+    import os
+
+    child_env = {**os.environ, "REPORT_RETENTION": "0"}
+    procs: dict[str, object] = {}
 
     async def _go() -> list[int]:
         sem = asyncio.Semaphore(args.parallel)
@@ -111,15 +152,49 @@ def _run_parallel(refs: list[str], args) -> int:
                     cmd.append("--continue-on-fail")
                 if args.screenshot_each:
                     cmd.append("--screenshot-each")
-                proc = await asyncio.create_subprocess_exec(*cmd)
-                return await proc.wait()
+                proc = await asyncio.create_subprocess_exec(*cmd, env=child_env)
+                procs[ref] = proc
+                try:
+                    return await asyncio.wait_for(proc.wait(), timeout=args.timeout)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    print(f"error: '{ref}' exceeded {args.timeout}s — killed",
+                          file=sys.stderr)
+                    return EXIT_ERROR
 
-        return list(await asyncio.gather(*(one(r) for r in refs)))
+        try:
+            return list(await asyncio.gather(*(one(r) for r in refs)))
+        finally:
+            # KeyboardInterrupt/cancel: don't orphan child browsers.
+            for p in procs.values():
+                if p.returncode is None:
+                    p.kill()
 
-    codes = asyncio.run(_go())
-    worst = max(codes, default=EXIT_OK)
-    print(f"parallel done: {codes.count(EXIT_OK)}/{len(codes)} passed")
-    return worst
+    try:
+        codes = [_norm_exit(c) for c in asyncio.run(_go())]
+    except KeyboardInterrupt:
+        for p in procs.values():
+            if getattr(p, "returncode", 0) is None:
+                p.kill()
+        print("interrupted", file=sys.stderr)
+        return EXIT_ERROR
+
+    _parent_prune()
+    passed = codes.count(EXIT_OK)
+    print(f"parallel done: {passed}/{len(codes)} passed")
+    if any(c == EXIT_ERROR for c in codes):
+        return EXIT_ERROR
+    return EXIT_OK if passed == len(codes) else EXIT_FAILED
+
+
+def _parent_prune() -> None:
+    """Apply retention once, after all parallel children have finished."""
+    try:
+        from .testing.report import _prune, ensure_dirs
+        _prune(ensure_dirs())
+    except Exception:
+        pass
 
 
 def _cmd_run(args) -> int:
@@ -210,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="also write a JUnit XML report (sequential runs only)")
     run_p.add_argument("--parallel", type=int, default=1, metavar="N",
                        help="run N scenarios concurrently (one subprocess each)")
+    run_p.add_argument("--timeout", type=float, default=600.0, metavar="SEC",
+                       help="per-scenario watchdog for --parallel (default 600s)")
     run_p.set_defaults(func=_cmd_run)
 
     doc_p = sub.add_parser("doctor", help="check browser/dirs/config health")
