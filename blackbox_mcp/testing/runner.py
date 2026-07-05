@@ -150,8 +150,12 @@ async def run(
     result = empty_result(name)
     result["description"] = description
     result["meta"] = _meta(session)
-    # Per-run screenshot tag so re-runs never overwrite older runs' images.
-    run_tag = f"{name}_{report._stamp()}"
+    # One run id shared by this run's screenshots AND its report files (below,
+    # via result["run_id"]) so retention keeps/deletes them together. Id leads
+    # the screenshot tag so _STAMP_RE extracts it, not a digit in `name`.
+    run_id = report.new_run_id()
+    result["run_id"] = run_id
+    run_tag = f"{run_id}_{name}"
 
     for idx, step in enumerate(steps, start=1):
         c0 = len(session.buffers.console)
@@ -200,6 +204,9 @@ async def run(
     result["meta"]["duration_ms"] = int((time.monotonic() - t0) * 1000)
     result["a11y_findings"] = await _a11y_audit(session)   # SM-09
     report.compute_regression(result)                      # SM-07
+    # Records are already scrubbed at append time, so the run's resolved secrets
+    # can be dropped now — bounds growth and stops cross-scenario over-scrub (L1).
+    secrets.clear_registry()
     return result
 
 

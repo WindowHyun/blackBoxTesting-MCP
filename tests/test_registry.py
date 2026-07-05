@@ -32,6 +32,21 @@ def test_all_tools_registered():
     assert expected <= names
 
 
+def test_register_all_is_idempotent():
+    """Calling register_all twice must not double-register (FastMCP rejects
+    duplicate names)."""
+    import blackbox_mcp.tools as tools
+    import blackbox_mcp.tools._registry as reg
+    from mcp.server.fastmcp import FastMCP
+
+    tools._import_all()          # populate _PENDING
+    reg._REGISTERED = False       # simulate a fresh process
+    m = FastMCP("x")
+    n1 = reg.register_all(m)
+    n2 = reg.register_all(m)      # no-op — would raise on duplicate binding otherwise
+    assert n1 == n2 > 0
+
+
 def test_prompts_registered():
     import blackbox_mcp.tools as tools
     tools._import_all()

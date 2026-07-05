@@ -12,7 +12,7 @@
   <br><em>Auto-generated report — pass rate · per-step screenshots · failure cause · regression · accessibility · credential masking</em>
 </p>
 
-Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **91 tests green**
+Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **97 tests green**
 
 ---
 
@@ -228,6 +228,7 @@ ui-blackbox run smoke_login                     # library scenario → exit 0/1
 ui-blackbox run ./steps.json --format all       # a steps .json file
 ui-blackbox run a b c --junit results.xml       # suite + JUnit for CI
 ui-blackbox run a b c --parallel 3              # one isolated subprocess each
+ui-blackbox run a b c --parallel 3 --timeout 300  # per-scenario watchdog (sec)
 ui-blackbox doctor                              # browser/dirs/config self-check
 ```
 

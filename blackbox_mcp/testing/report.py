@@ -22,10 +22,16 @@ _SAFE = re.compile(r"[^A-Za-z0-9_\-]")
 
 
 def _stamp() -> str:
-    # Microseconds make filenames collision-free when parallel CLI children
-    # finish in the same second; retention/regression only key on the
-    # second-level prefix (_STAMP_RE), which stays a lexicographic sort key.
+    # Microseconds keep run ids collision-free even when parallel CLI children
+    # start in the same wall-clock second.
     return datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+
+
+def new_run_id() -> str:
+    """A per-run id. The SAME id names this run's report files AND its
+    screenshots, so retention (which correlates the two by id) keeps or
+    deletes them together — see _prune."""
+    return _stamp()
 
 
 def summarize(steps: list[dict]) -> dict:
@@ -126,11 +132,15 @@ def compute_regression(result: dict) -> dict:
     return result
 
 
-async def capture_step_screenshot(session, name: str, idx: int) -> str | None:
-    """Capture the current page to reports/screenshots and return a rel path."""
+async def capture_step_screenshot(session, run_tag: str, idx: int) -> str | None:
+    """Capture the current page to reports/screenshots and return a rel path.
+
+    ``run_tag`` is ``{run_id}_{name}`` — the run id leads so _STAMP_RE always
+    extracts THIS run's id (not a digit that happens to be in the name), which
+    is what lets retention keep a report and its screenshots together."""
     try:
         base = ensure_dirs()
-        safe = _SAFE.sub("_", name)
+        safe = _SAFE.sub("_", run_tag)
         rel = Path("screenshots") / f"{safe}_step{idx:02d}.png"
         await session.page.screenshot(path=str(base / rel))
         return str(rel)
@@ -138,38 +148,49 @@ async def capture_step_screenshot(session, name: str, idx: int) -> str | None:
         return None
 
 
-_STAMP_RE = re.compile(r"(\d{8}_\d{6})")
+# Run id = date_time_micros. Anchored at the start of a report filename
+# (report_<id>) or a screenshot filename (<id>_name_step..), so the match is
+# always this run's id. Microseconds included → parallel runs never collide.
+_STAMP_RE = re.compile(r"^(?:report_)?(\d{8}_\d{6}_\d{6})")
+# Legacy fallback: pre-microsecond files stamped to the second only.
+_STAMP_RE_LEGACY = re.compile(r"(\d{8}_\d{6})")
+
+
+def _run_id_of(name: str) -> str | None:
+    m = _STAMP_RE.match(name) or _STAMP_RE_LEGACY.search(name)
+    return m.group(1) if m else None
 
 
 def _prune(report_dir: Path) -> None:
-    """Retention: keep the newest CONFIG.report_retention runs (by timestamp),
-    delete older report files and the screenshots stamped before the cutoff.
-    Never allowed to break report saving — caller wraps in try/except."""
+    """Retention: keep the newest CONFIG.report_retention runs, deleting older
+    report files AND the screenshots that share those runs' ids. Report files
+    and screenshots carry the SAME run id (see new_run_id), so a kept run keeps
+    its screenshots. Never allowed to break report saving — caller try/excepts."""
     keep = CONFIG.report_retention
     if keep <= 0:
         return
-    stamps = sorted({m.group(1) for p in report_dir.glob("report_*.*")
-                     if (m := _STAMP_RE.search(p.name))}, reverse=True)
-    if len(stamps) <= keep:
+    ids = sorted({rid for p in report_dir.glob("report_*.*")
+                  if (rid := _run_id_of(p.name))}, reverse=True)
+    if len(ids) <= keep:
         return
-    cutoff = stamps[keep - 1]  # oldest stamp we keep
+    doomed = set(ids[keep:])  # everything older than the newest `keep` runs
     for p in report_dir.glob("report_*.*"):
-        m = _STAMP_RE.search(p.name)
-        if m and m.group(1) < cutoff:
+        if _run_id_of(p.name) in doomed:
             p.unlink(missing_ok=True)
     shots = report_dir / "screenshots"
     if shots.is_dir():
         for p in shots.glob("*.png"):
-            m = _STAMP_RE.search(p.name)
-            # Unstamped legacy files are left alone (can't tell their run).
-            if m and m.group(1) < cutoff:
+            # Unstamped legacy files (no id) are left alone.
+            if _run_id_of(p.name) in doomed:
                 p.unlink(missing_ok=True)
 
 
 def save(result: dict, formats: str = "both") -> dict[str, str]:
     """Persist a scenario result; return written file paths by format."""
     report_dir = ensure_dirs()
-    stamp = _stamp()
+    # Reuse the run id the screenshots were stamped with, so retention keeps
+    # report + screenshots together. Falls back for callers that didn't set it.
+    stamp = result.get("run_id") or new_run_id()
     written: dict[str, str] = {}
 
     want_json = formats in ("json", "both", "all")

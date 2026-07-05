@@ -70,11 +70,19 @@ def _with_recorder(name: str, fn: Callable) -> Callable:
     return wrapper
 
 
+_REGISTERED = False
+
+
 def register_all(mcp) -> int:
     """Register every pending tool and prompt onto the FastMCP instance.
 
-    Returns the number of tools registered.
+    Idempotent: a second call is a no-op instead of double-registering every
+    tool (which FastMCP rejects as duplicate names). Returns the tool count.
     """
+    global _REGISTERED
+    if _REGISTERED:
+        return len(_PENDING)
+    _REGISTERED = True
     for pending in _PENDING:
         kwargs = {}
         if pending.name:
