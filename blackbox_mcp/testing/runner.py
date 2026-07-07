@@ -44,7 +44,6 @@ _severity = report.classify_failure
 async def _dispatch(step: dict) -> dict:
     """Execute a single step; return partial result fields (no I/O on buffers)."""
     action = step.get("action", "")
-    selector_input = step.get("selector") or step.get("target")
     out: dict[str, Any] = {
         "expected": None, "actual": None, "passed": False,
         "resolved_by": None, "ai_reason": "", "ai_suggestion": None,
@@ -63,10 +62,24 @@ async def _dispatch(step: dict) -> dict:
 
     if action == "navigate":
         res = await navigate(secrets.resolve(step["url"]), step.get("wait_until"))
-        out.update(expected="페이지 도착",
-                   actual=f"“{res.get('title')}” · HTTP {res.get('status')}",
-                   passed=True,
-                   ai_reason=f"navigated to {res.get('url')} (status {res.get('status')})")
+        status = res.get("status")
+        expect = step.get("expect_status")  # opt-in: assert an exact status
+        if expect is not None:
+            ok = status == expect
+            reason = f"expected HTTP {expect}, got {status}"
+            suggestion = None if ok else f"server returned {status}, not {expect}"
+        else:
+            # status is None on file:// or when the settle timed out (no response
+            # object) — treat as reachable. A real 4xx/5xx is a failed load.
+            ok = status is None or status < 400
+            reason = f"navigated to {res.get('url')} (status {status})"
+            suggestion = None if ok else (f"navigation returned HTTP {status} — server "
+                                          "error or missing page (set expect_status to allow)")
+        out.update(expected=(f"HTTP {expect}" if expect is not None else "도착 (2xx/3xx)"),
+                   actual=f"“{res.get('title')}” · HTTP {status}",
+                   passed=ok, ai_reason=reason, ai_suggestion=suggestion)
+        if not res.get("settled"):
+            out["ai_reason"] += " · load not settled (proceeded on timeout)"
         missing_vars = secrets.unresolved_vars(step["url"])
         if missing_vars:
             out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
@@ -240,7 +253,6 @@ async def _a11y_audit(session) -> list[dict]:
 
 def _meta(session) -> dict[str, Any]:
     import platform
-    import sys
     from importlib.metadata import PackageNotFoundError, version
 
     try:

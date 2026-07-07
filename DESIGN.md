@@ -186,10 +186,14 @@ def register_all(mcp):             # server.py에서 1회 호출
 
 해석 규칙 (구현 반영):
 - 접두사 명시(`testid=`, `role=`, `text=`, `css=`)가 있으면 그 방식으로 단일 해석.
-- 접두사 없는 **CSS형 문자열**(`. # [ ] >` 포함 + 공백 없음)은 CSS로 해석.
-  (공백 가드로 "Welcome." 같은 문장이 CSS로 오인되지 않음.)
-- 접두사 없는 **평문**은 D2 순서로 실제 fallback: `[data-testid="s"]` → 가시 텍스트
-  중 **count>0 인 첫 전략**을 채택(없으면 텍스트로 귀결해 에러 메시지가 자연스럽게).
+- 접두사 없는 **CSS형 문자열**은 CSS로 해석하되, **명확한 구조 신호에서만**
+  판단한다(2026-07 수정): `#`·`[`·`]`·`>` 또는 **선행 `.`**(`. btn`). 중간 점이 있는
+  단어(`example.com`, `v1.2`)는 **가시 텍스트로 취급** — 과거엔 이런 텍스트가 CSS로
+  둔갑해 실사이트에서 오타겟팅됐다. 공백 가드는 유지.
+- 접두사 없는 **평문**은 **D2 전체 순서**로 실제 fallback(2026-07 수정: role 티어 복원):
+  `[data-testid="s"]` → **role+name**(흔한 인터랙티브 role을 접근성 이름 `s`로 시도:
+  button/link/textbox/checkbox/… ) → 가시 텍스트, **count>0 인 첫 전략** 채택(없으면
+  텍스트로 귀결해 에러가 자연스럽게). 과거엔 role 티어(D2 우선순위 2위)를 건너뛰었다.
 - 액션 timeout은 `CONFIG.selector_timeout_ms`(기본 2000) 적용 → 없는 요소에서
   30초 대기 없이 빠르게 실패.
 
@@ -240,6 +244,11 @@ API:
 세부:
 - **navigate (CT-01):** `wait_until` ∈ {load, domcontentloaded, networkidle, commit}.
   리스너 미부착이면 부착. status는 main response status.
+  > **판정(2026-07 QA 리뷰 반영):** 시나리오 스텝에서 navigate의 통과 여부는
+  > **상태코드 기반**이다 — `status >= 400`이면 **실패**(과거엔 무조건 통과라 500/404가
+  > green이 되는 신뢰 구멍이었다). `status is None`(file:// 또는 settle 타임아웃으로
+  > response 객체 없음)은 도달로 간주해 통과. 스텝에 `expect_status: <int>`를 주면
+  > 그 코드와 정확히 일치할 때만 통과(에러 페이지를 의도적으로 검증하는 용도).
 - **snapshot (CT-02):** `a11y`=**`page.locator("body").aria_snapshot()`** 의
   YAML 트리(권장 API). `page.accessibility.snapshot()`는 deprecated이므로
   사용하지 않는다. `dom`=태그/role/text 위주 간략 트리. **Q1 트리밍은 §8 참조.**

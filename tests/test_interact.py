@@ -19,10 +19,20 @@ async def test_type_and_click_flow(session):
 
 
 async def test_chain_resolves_bare_text(session):
-    await session.page.set_content("<button>다음</button>")
-    r = await interact("click", "다음")        # no prefix -> chain -> text
+    # non-interactive element → no role match → falls through to visible text
+    await session.page.set_content("<p>안내 문구</p>")
+    r = await interact("click", "안내 문구")   # no prefix -> chain -> text
     assert r["ok"] is True
     assert r["resolved_by"] == "text"
+
+
+async def test_chain_resolves_role_for_widget(session):
+    # a widget with an accessible name resolves via role+name (D2 priority #2),
+    # which used to be skipped for bare strings.
+    await session.page.set_content("<button>다음</button>")
+    r = await interact("click", "다음")
+    assert r["ok"] is True
+    assert r["resolved_by"] == "role=button"
 
 
 async def test_chain_prefers_testid(session):

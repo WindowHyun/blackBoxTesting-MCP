@@ -34,3 +34,65 @@ async def test_navigate_resets_frame_context(session):
     session.set_frame("#some-frame")
     await navigate(fixture_url("basic.html"), wait_until="load")
     assert session._frame_selector is None
+
+
+# ── navigate status-code verdict (QA blocker fix) ────────────────
+import http.server
+import threading
+
+import pytest
+
+
+class _StatusHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            code = int(self.path.strip("/") or "200")
+        except ValueError:
+            code = 200
+        self.send_response(code)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"<h1>x</h1>")
+
+    def log_message(self, *a):  # silence
+        pass
+
+
+@pytest.fixture
+def http_server():
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _StatusHandler)
+    port = srv.server_address[1]
+    t = threading.Thread(target=srv.serve_forever, daemon=True)
+    t.start()
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        srv.shutdown()
+
+
+async def test_navigate_500_is_a_failure(session, http_server):
+    from blackbox_mcp.testing import runner
+    res = await runner.run([{"action": "navigate", "url": f"{http_server}/500"}],
+                           name="nav_500")
+    step = res["steps"][0]
+    assert step["passed"] is False        # was silently True before the fix
+    assert step["severity"] == "error"
+
+
+async def test_navigate_404_fails_unless_expected(session, http_server):
+    from blackbox_mcp.testing import runner
+    r1 = await runner.run([{"action": "navigate", "url": f"{http_server}/404"}],
+                          name="nav_404a")
+    assert r1["steps"][0]["passed"] is False
+    # opt-in: a scenario that WANTS a 404 passes
+    r2 = await runner.run(
+        [{"action": "navigate", "url": f"{http_server}/404", "expect_status": 404}],
+        name="nav_404b")
+    assert r2["steps"][0]["passed"] is True
+
+
+async def test_navigate_200_passes(session, http_server):
+    from blackbox_mcp.testing import runner
+    res = await runner.run([{"action": "navigate", "url": f"{http_server}/200"}],
+                           name="nav_200")
+    assert res["steps"][0]["passed"] is True

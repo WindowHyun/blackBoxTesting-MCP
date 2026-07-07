@@ -12,7 +12,7 @@
   <br><em>Auto-generated report — pass rate · per-step screenshots · failure cause · regression · accessibility · credential masking</em>
 </p>
 
-Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **97 tests green**
+Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **104 tests green**
 
 ---
 
@@ -241,6 +241,15 @@ GitHub Actions sketch:
 ```
 Exit codes: `0` all passed · `1` a step failed · `2` usage/infra error.
 In chat, the `status` tool reports version/mode/liveness for debugging.
+
+**Good to know:**
+- `navigate` **fails on HTTP ≥ 400** (a 500/404 is not a green step). Add
+  `"expect_status": 404` to a step to assert an error page on purpose.
+- Failure `reason`/`suggestion` in a CLI report are **rule-based hints**; in
+  chat, Claude (the host LLM) enriches them with real analysis.
+- The server is **single-tenant** — one browser/session per process. True
+  parallelism is via `--parallel` (one subprocess per scenario), not a shared
+  server.
 
 ---
 

@@ -12,7 +12,7 @@
   <br><em>자동 생성된 리포트 — 통과율·스텝별 스크린샷·실패 원인·회귀·접근성·자격증명 마스킹</em>
 </p>
 
-Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 97건 green**
+Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **테스트 104건 green**
 
 ---
 
@@ -239,6 +239,14 @@ GitHub Actions 예시:
 ```
 exit code: `0` 전부 통과 · `1` 스텝 실패 · `2` 사용법/인프라 오류.
 대화에서는 `status` tool이 버전·모드·생존 여부를 알려줘 진단에 쓴다.
+
+**알아두면 좋은 점:**
+- `navigate`는 **HTTP ≥ 400에서 실패**한다(500/404는 green이 아님). 에러 페이지를
+  의도적으로 검증하려면 스텝에 `"expect_status": 404`를 준다.
+- CLI 리포트의 실패 `원인`/`제안`은 **규칙 기반 힌트**다 — 대화형에선 Claude(호스트
+  LLM)가 실제 분석으로 보강한다.
+- 서버는 **단일 테넌트**(프로세스당 브라우저/세션 1개). 진짜 병렬은 `--parallel`
+  (시나리오당 서브프로세스)로만, 공유 서버는 아니다.
 
 ---
 

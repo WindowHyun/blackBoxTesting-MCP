@@ -23,6 +23,8 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 
 [project.scripts]
@@ -41,3 +43,19 @@ testpaths = ["tests"]
 markers = [
     "browser: needs a real Chromium (excluded from the fast unit lane: -m 'not browser')",
 ]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# Pragmatic starter set: pyflakes (F) + a slice of pycodestyle (E). Kept lean
+# so the gate flags real problems (unused imports/names) without churn.
+select = ["F", "E9"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Type-aware without being maximalist — catches obvious mistakes; not strict.
+check_untyped_defs = false
+warn_unused_ignores = true

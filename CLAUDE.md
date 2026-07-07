@@ -56,3 +56,8 @@ python -m venv .venv
 - 리포트↔스크린샷은 **동일 `run_id` 공유**(`result["run_id"]`, `save()`가 파일명에 재사용) → 리테인션이 run 단위로 함께 보관/삭제(DESIGN §7.2). 스크린샷 태그는 `{run_id}_{name}` — id를 앞에 둬 `_STAMP_RE`가 name의 숫자에 오염되지 않는다.
 - `register_all`은 멱등(중복 등록 방지 가드). scrub 레지스트리(`secrets._RESOLVED_SECRETS`)는 flow 경계(`recorder.reset`·`runner.run` 종료)에서 clear — 레코드는 append 시점에 이미 스크럽됨.
 - CLI `--parallel` 자식은 `REPORT_RETENTION=0`(부모가 1회 정리), 시그널사는 error, `--timeout` 워치독. stdout이 MCP 파이프가 아니라 print 자유(서버와 달리).
+- navigate 판정은 **상태코드 기반**(`status>=400` 실패, `None`=file://·타임아웃은 통과, 스텝 `expect_status`로 정확 일치 검증). runner·recorder 양쪽 동일.
+- D2 bare-string 체인은 testid→**role+name(흔한 role 순회)**→text. CSS 추론은 `# [ ] >` 또는 선행 `.`만(중간 점 단어=텍스트). `resolved_by`는 `role=button`처럼 구체 표기.
+- `ai_reason`/`ai_suggestion`은 러너에선 **규칙 기반**(리포트 각주로 명시) — 대화형(Claude)에선 호스트 LLM이 보강. 필드명은 스키마(DESIGN §6.1)라 유지.
+- 서버는 **단일 테넌트**(프로세스당 세션 1개·전역 recorder). 병렬은 CLI 프로세스 분리로만. 공유 서버는 스코프 밖(아키텍처 재작업 필요).
+- 린트 게이트: `ruff check blackbox_mcp`는 CI 차단, `mypy`는 비차단(Playwright 옵셔널-init 패턴 미정리).
