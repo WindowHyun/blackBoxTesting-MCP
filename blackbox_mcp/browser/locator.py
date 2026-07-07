@@ -22,9 +22,16 @@ from __future__ import annotations
 
 import re
 
-# CSS-looking: contains selector punctuation AND no whitespace (sentences with a
-# trailing '.' shouldn't be mistaken for CSS).
-_CSS_PUNCT = re.compile(r"[.#\[\]>]")
+# CSS only on UNAMBIGUOUS structural signals: an id (#), attribute ([..]), a
+# combinator (>), or a leading class dot (.btn). A dotted word like a domain
+# (example.com) or version (v1.2) is visible text, NOT a CSS selector — coercing
+# it to CSS made bare text silently mis-target on real pages.
+_CSS_STRONG = re.compile(r"[#\[\]>]|^\.")
+
+# Common interactive roles tried (by accessible name) for a bare string — this
+# is D2 priority #2 (role+name), which used to be skipped in the bare path.
+_COMMON_ROLES = ("button", "link", "textbox", "checkbox", "radio",
+                 "combobox", "tab", "menuitem", "option", "heading")
 
 
 def _parse_role(rest: str) -> tuple[str, str | None]:
@@ -41,7 +48,7 @@ def _parse_role(rest: str) -> tuple[str, str | None]:
 
 
 def _looks_like_css(s: str) -> bool:
-    return bool(_CSS_PUNCT.search(s)) and not any(c.isspace() for c in s)
+    return bool(_CSS_STRONG.search(s)) and not any(c.isspace() for c in s)
 
 
 def _testid_selector(value: str) -> str:
@@ -78,9 +85,9 @@ async def resolve(root, selector: str):
 
     Explicit prefixes (testid=/role=/text=/css=) pick that strategy directly.
     A bare, CSS-looking string is treated as CSS. A bare plain string tries the
-    D2 order — data-testid → visible text — and returns the first strategy that
-    matches at least one element (falling back to text so errors are sensible).
-    ``resolved_by`` records which strategy won (feeds SM-06 report transparency).
+    full D2 order — data-testid → role+name → visible text — and returns the
+    first strategy that matches at least one element (falling back to text so
+    errors are sensible). ``resolved_by`` records which strategy won (SM-06).
     """
     s = selector.strip()
 
@@ -99,10 +106,11 @@ async def resolve(root, selector: str):
         return root.locator(s), "css"
 
     # Bare plain string: try the chain in D2 priority, pick first with a match.
-    candidates = [
-        ("testid", root.locator(_testid_selector(s))),
-        ("text", root.get_by_text(s)),
-    ]
+    #   1) data-testid  2) role+name (common interactive roles)  3) visible text
+    candidates = [("testid", root.locator(_testid_selector(s)))]
+    for r in _COMMON_ROLES:
+        candidates.append((f"role={r}", root.get_by_role(r, name=s)))
+    candidates.append(("text", root.get_by_text(s)))
     for name, loc in candidates:
         try:
             if await loc.count() > 0:

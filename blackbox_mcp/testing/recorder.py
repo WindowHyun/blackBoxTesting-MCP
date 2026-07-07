@@ -53,8 +53,13 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
 
     if name == "navigate":
         r = result or {}
-        return ("페이지 도착", f"“{r.get('title')}” · HTTP {r.get('status')}", True,
-                None, f"navigated to {r.get('url')}", None)
+        status = r.get("status")
+        # None on file:// or a settle-timeout (no response) — reachable; a real
+        # 4xx/5xx is a failed load, not a pass.
+        ok = status is None or status < 400
+        return ("도착 (2xx/3xx)", f"“{r.get('title')}” · HTTP {status}", ok, None,
+                f"navigated to {r.get('url')} (status {status})",
+                None if ok else f"HTTP {status} — server error or missing page")
     if name == "interact":
         r = result or {}
         ok = bool(r.get("ok"))

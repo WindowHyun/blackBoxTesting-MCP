@@ -6,9 +6,29 @@ on:
   pull_request:
 
 jobs:
-  # Fast lane: no browser download — unit tests only (-m "not browser").
-  unit:
+  # Lint gate (was missing despite shipping py.typed). ruff blocks; mypy runs
+  # informationally — the codebase's Playwright optional-init pattern isn't
+  # strict-clean yet, so type errors are surfaced but don't fail the build.
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check blackbox_mcp
+      - run: mypy blackbox_mcp || true
+
+  # Fast lane: no browser download — unit tests only (-m "not browser").
+  # Matrix covers Windows/macOS since Claude Desktop is a cross-platform client.
+  unit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
