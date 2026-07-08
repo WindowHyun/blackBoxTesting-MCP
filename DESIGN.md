@@ -101,9 +101,22 @@ def register_all(mcp):             # server.py에서 1회 호출
 - **동시 호출 안전(2026-07 감사 반영):** `get_session()`은 모듈 `asyncio.Lock`으로
   직렬화 — 동시 tool 호출이 이중 기동/이중 restart를 일으키지 않는다. 싱글톤은
   `start()` 성공 후에만 공개되고, 실패 시 반쯤 뜬 드라이버를 정리한다.
-  `reset`/`switch_to_persistent`/`restart`는 인스턴스 락(`_op_lock`)으로 직렬화
-  (본체는 `_impl`로 분리해 재진입 데드락 회피). `close()`는 브라우저가 이미 죽어
-  close가 raise해도 Playwright 드라이버를 반드시 stop한다(고아 프로세스 방지).
+  `reset`/`switch_to_persistent`/`restart`/`close`는 인스턴스 락(`_op_lock`)으로
+  직렬화(본체는 `_impl`로 분리해 재진입 데드락 회피 — `restart`는 `_close_impl`
+  호출). `close_session()`은 `_SESSION_LOCK`을 잡아 종료가 동시 생성/복구와
+  경합하지 않는다(락 순서는 항상 `_SESSION_LOCK` → `_op_lock`). `close()`는
+  브라우저가 이미 죽어 close가 raise해도 Playwright 드라이버를 반드시 stop한다
+  (고아 프로세스 방지). `_teardown_current`(드라이버 유지 전환용)는 각 close를
+  **독립적으로** 시도 — context.close 실패가 browser.close를 건너뛰어 Chromium을
+  고아화하지 않는다.
+- **런치 폴백 체인(2026-07):** `start()`는 `_launch_attempts()` 순서(channel →
+  존재 확인된 chromium 실행 파일 → 번들 기본)로 시도 — stale `CHROMIUM_EXECUTABLE`
+  이나 미설치 channel이 모든 런치를 영구 실패시키지 않는다. 실행 파일 경로는
+  `BROWSER=chromium`일 때만 적용(chromium 바이너리를 firefox에 넘기지 않음).
+- **페이지 추적:** 활성 페이지가 될 수 있는 모든 페이지(최초 페이지·persistent 첫
+  페이지·adopt된 팝업·close-폴백 대상)는 `_watch_page`로 리스너+close 핸들러를
+  받는다(페이지당 1회 멱등 — attach 중복 버퍼링 방지). 원본 탭이 닫혀도 살아있는
+  페이지로 폴백해 불필요한 전체 restart를 피한다.
 - **시작/정리는 FastMCP `lifespan`으로 관리(공식 권장):** `@asynccontextmanager`
   로 서버 기동 시 세션을 준비하고 `finally`에서 `close()`로 브라우저를 정리한다.
   지연 초기화(`get_session()`)와 병행하되, 종료 시 리소스 릭이 없도록 lifespan
@@ -189,11 +202,19 @@ def register_all(mcp):             # server.py에서 1회 호출
 - 접두사 없는 **CSS형 문자열**은 CSS로 해석하되, **명확한 구조 신호에서만**
   판단한다(2026-07 수정): `#`·`[`·`]`·`>` 또는 **선행 `.`**(`. btn`). 중간 점이 있는
   단어(`example.com`, `v1.2`)는 **가시 텍스트로 취급** — 과거엔 이런 텍스트가 CSS로
-  둔갑해 실사이트에서 오타겟팅됐다. 공백 가드는 유지.
+  둔갑해 실사이트에서 오타겟팅됐다.
+- **공백 포함 구조 신호**(`#form input`, `div > a`)의 처리(2026-07 2차 감사):
+  `locate()`(단일 해석 — element_visible/count/wait 등 셀렉터 문맥)는 **CSS로
+  해석**한다. `resolve()`(bare-string 체인)는 CSS를 **count 프로브되는 첫 후보**로
+  시도하고 매칭 없으면 체인을 계속 — `Home > Products` 같은 가시 텍스트는 CSS로
+  0건이라 텍스트 티어로 자연 귀결된다. 과거엔 공백 가드가 이런 셀렉터를 조용히
+  텍스트로 재해석해 모듈 docstring과 모순됐다.
 - 접두사 없는 **평문**은 **D2 전체 순서**로 실제 fallback(2026-07 수정: role 티어 복원):
   `[data-testid="s"]` → **role+name**(흔한 인터랙티브 role을 접근성 이름 `s`로 시도:
   button/link/textbox/checkbox/… ) → 가시 텍스트, **count>0 인 첫 전략** 채택(없으면
   텍스트로 귀결해 에러가 자연스럽게). 과거엔 role 티어(D2 우선순위 2위)를 건너뛰었다.
+  `role=` 파싱은 `name=` 접두사 없는 나머지도 접근성 이름으로 받는다
+  (`role=button submit` → button + "submit" — 통짜 role 오류 대신).
 - 액션 timeout은 `CONFIG.selector_timeout_ms`(기본 2000) 적용 → 없는 요소에서
   30초 대기 없이 빠르게 실패.
 
@@ -428,6 +449,9 @@ SM-01~04와 함께(또는 직후) 구현한다.
   `/opt/pw-browsers/chromium` 자동 감지)을 세션 `launch(executable_path=...)`에
   전달해 사전 설치 바이너리를 사용한다. `ensure_chromium()`은 이 경로가 있으면
   다운로드를 건너뛰고, 다운로드 시도가 실패해도 크래시 없이 경고만 남긴다.
+  세션 `start()`도 같은 약속을 지킨다(2026-07 2차 감사): 경로가 stale이면
+  `os.path.exists` 검사로 건너뛰고 번들로 폴백 — env 오타가 모든 런치를
+  영구 실패시키지 않는다(§3.1 런치 폴백 체인).
   설치 서브프로세스의 stdout/stderr는 `DEVNULL` — stdout은 MCP JSON-RPC 파이프라
   진행률 출력이 프로토콜을 오염시키면 안 된다(§14).
   > 검증(2026-06): preinstalled chromium **build 1194** + Playwright **1.60** 드라이버를

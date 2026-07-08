@@ -50,14 +50,17 @@ python -m venv .venv
 - recorder 래핑은 **MCP 등록 함수만** 감싼다(모듈 함수는 unwrapped) → `run_scenario` 내부 호출은 이중 기록 안 됨. 래퍼는 반환 어노테이션을 떼서 `Image` 스키마 오류를 피한다.
 - 브라우저 CDN(`cdn.playwright.dev`) 차단 환경: `CHROMIUM_EXECUTABLE`/사전설치 자동감지로 우회.
 - **stdout은 MCP JSON-RPC 파이프** — 서브프로세스/`print()`가 stdout에 쓰면 프로토콜이 깨진다(bootstrap 설치는 DEVNULL, 로깅은 stderr).
-- 세션 수명주기는 락 경유 — `get_session()` 모듈 락, `reset/switch_to_persistent/restart`는 `_op_lock`(공개 메서드가 락 획득, 본체는 `_impl` — 락 보유 중 공개 메서드 재호출 금지).
+- 세션 수명주기는 락 경유 — `get_session()`·`close_session()`은 모듈 락, `reset/switch_to_persistent/restart/close`는 `_op_lock`(공개 메서드가 락 획득, 본체는 `_impl` — 락 보유 중 공개 메서드 재호출 금지, `restart`는 `_close_impl` 사용). 락 순서는 `_SESSION_LOCK` → `_op_lock`.
+- `start()`는 런치 폴백 체인(channel → 존재하는 chromium 실행 파일 → 번들) — stale `CHROMIUM_EXECUTABLE`/미설치 channel이 런치를 영구 실패시키지 않는다. 실행 파일은 `BROWSER=chromium`일 때만 적용.
+- 활성 페이지가 될 수 있는 모든 페이지는 `_watch_page` 경유(리스너+close 폴백 핸들러, 페이지당 1회 멱등) — 세션 코드에서 `attach()`를 직접 호출하지 말 것(이중 버퍼링).
 - 콘솔/네트워크 버퍼는 1000건 캡, recorder 스텝 번호는 단조 카운터(`len(_LOG)+1` 아님).
 - FastMCP Context 주입은 **타입 어노테이션 기반** — `ctx: Context | None = None`처럼 어노테이션 필수, 없으면 스키마에 입력 파라미터로 노출된다(DESIGN §13).
 - 리포트↔스크린샷은 **동일 `run_id` 공유**(`result["run_id"]`, `save()`가 파일명에 재사용) → 리테인션이 run 단위로 함께 보관/삭제(DESIGN §7.2). 스크린샷 태그는 `{run_id}_{name}` — id를 앞에 둬 `_STAMP_RE`가 name의 숫자에 오염되지 않는다.
 - `register_all`은 멱등(중복 등록 방지 가드). scrub 레지스트리(`secrets._RESOLVED_SECRETS`)는 flow 경계(`recorder.reset`·`runner.run` 종료)에서 clear — 레코드는 append 시점에 이미 스크럽됨.
 - CLI `--parallel` 자식은 `REPORT_RETENTION=0`(부모가 1회 정리), 시그널사는 error, `--timeout` 워치독. stdout이 MCP 파이프가 아니라 print 자유(서버와 달리).
 - navigate 판정은 **상태코드 기반**(`status>=400` 실패, `None`=file://·타임아웃은 통과, 스텝 `expect_status`로 정확 일치 검증). runner·recorder 양쪽 동일.
-- D2 bare-string 체인은 testid→**role+name(흔한 role 순회)**→text. CSS 추론은 `# [ ] >` 또는 선행 `.`만(중간 점 단어=텍스트). `resolved_by`는 `role=button`처럼 구체 표기.
+- D2 bare-string 체인은 testid→**role+name(흔한 role 순회)**→text — 단, 공백 포함 CSS 신호(`#form input`, `div > a`)는 CSS 프로브가 선행. CSS 추론은 `# [ ] >` 또는 선행 `.`만(중간 점 단어=텍스트); `locate()`(셀렉터 문맥)는 공백 있어도 구조 신호면 CSS. `resolved_by`는 `role=button`처럼 구체 표기.
+- `secrets.scrub`은 긴 값부터 치환(부분문자열 secret 잔여 노출 방지). HTML 리포트 스크린샷 임베드는 report_dir 하위 경로만.
 - `ai_reason`/`ai_suggestion`은 러너에선 **규칙 기반**(리포트 각주로 명시) — 대화형(Claude)에선 호스트 LLM이 보강. 필드명은 스키마(DESIGN §6.1)라 유지.
 - 서버는 **단일 테넌트**(프로세스당 세션 1개·전역 recorder). 병렬은 CLI 프로세스 분리로만. 공유 서버는 스코프 밖(아키텍처 재작업 필요).
 - 린트 게이트: `ruff check blackbox_mcp`는 CI 차단, `mypy`는 비차단(Playwright 옵셔널-init 패턴 미정리).
