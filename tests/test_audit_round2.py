@@ -251,6 +251,30 @@ async def test_count_spaced_css_counts_css_population(session):
     assert r["passed"] is True and r["actual"] == 2
 
 
+async def test_wait_survives_popup_close_mid_poll(session):
+    """The active popup closing while wait() polls raises a transient
+    TargetClosedError; the session falls back to the surviving page, so a
+    single occurrence must not abort the wait (round-5 finding)."""
+    import asyncio
+
+    from blackbox_mcp.tools.wait import wait
+
+    await session.page.set_content(
+        "<div id='done'>done</div>"
+        "<button id='b' onclick=\"window.open('about:blank')\">open</button>")
+    original = session.page
+    await session.page.click("#b")
+    await original.wait_for_timeout(300)
+    popup = session.page
+    assert popup is not original
+
+    close_task = asyncio.create_task(popup.close())  # in flight during polls
+    r = await wait(selector="#done", timeout_ms=5000)
+    await close_task
+    assert r["ok"] is True  # found on the fallback (original) page
+    assert session.page is original
+
+
 async def test_wait_fails_fast_on_deterministic_selector_error(session):
     """An invalid explicit CSS selector fails identically every poll — wait
     must report the real error immediately, not spin to the deadline and

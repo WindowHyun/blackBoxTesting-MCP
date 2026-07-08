@@ -222,8 +222,11 @@ def register_all(mcp):             # server.py에서 1회 호출
     호출 시점 1회 resolve는 모든 티어가 0건 → 텍스트 폴백에 고착된다. 마감까지
     체인을 재프로브해 요소가 나타나는 시점의 올바른 티어를 잡는다(가시 기준).
     단일 결정 전략(접두사·무공백 CSS, `is_single_strategy`)의 프로브 예외는
-    **즉시 실패**(파싱 오류는 재시도로 낫지 않음 — 마감까지 돌며 가짜
-    TimeoutError로 보고하지 않는다); bare 체인의 일시 오류만 재시도.
+    **연속 2회 동일 오류일 때만** 조기 실패 — 파싱 오류는 매 폴 동일하게
+    반복되지만(빠른 실패 유지), 팝업 닫힘의 일시적 TargetClosed는 다음 폴에서
+    root가 살아있는 페이지로 교체돼 반복되지 않으므로 1회 발생으로 wait를
+    중단하면 안 된다(2026-07 5차 검증). 폴 간 대기는 `asyncio.sleep`(닫힌
+    페이지의 `wait_for_timeout`이 자체 raise하지 않게).
 - 접두사 없는 **평문**은 **D2 전체 순서**로 실제 fallback(2026-07 수정: role 티어 복원):
   `[data-testid="s"]` → **role+name**(흔한 인터랙티브 role을 접근성 이름 `s`로 시도:
   button/link/textbox/checkbox/… ) → 가시 텍스트, **count>0 인 첫 전략** 채택(없으면
