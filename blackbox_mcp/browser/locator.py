@@ -13,7 +13,11 @@ strategy, otherwise it is inferred:
     role=button name=로그인   -> get_by_role("button", name="로그인")
     text=다음                 -> get_by_text("다음")
     css=.btn.primary         -> CSS
-    .btn / #id / div > a     -> inferred CSS (contains . # [ > etc.)
+    .btn / #id / div>a       -> inferred CSS (structural signal, no whitespace)
+    #form input / div > a    -> CSS signal with whitespace: locate() treats it
+                                as CSS; resolve() tries CSS first, then the
+                                bare-string chain (so text like "A > B" still
+                                resolves as text when it matches nothing as CSS)
     로그인                    -> inferred role/text
 
 Returns a Playwright Locator scoped to ``root`` (page or frame locator).
@@ -35,16 +39,23 @@ _COMMON_ROLES = ("button", "link", "textbox", "checkbox", "radio",
 
 
 def _parse_role(rest: str) -> tuple[str, str | None]:
-    """Parse 'button name=로그인' -> ('button', '로그인')."""
-    m = re.match(r"\s*(\S+)\s*(?:name=(.+))?$", rest)
-    if not m:
-        return rest.strip(), None
-    role = m.group(1)
-    name = m.group(2).strip() if m.group(2) else None
+    """Parse 'button name=로그인' -> ('button', '로그인').
+
+    A remainder without the name= prefix is still treated as the accessible
+    name ('button submit' -> ('button', 'submit')) rather than degrading the
+    whole string into a bogus role that Playwright rejects with a type error.
+    """
+    parts = rest.strip().split(None, 1)
+    if not parts:
+        return "", None
+    role, name = parts[0], None
+    if len(parts) == 2:
+        tail = parts[1].strip()
+        name = tail[len("name="):].strip() if tail.startswith("name=") else tail
     # Allow quoted names.
     if name and len(name) >= 2 and name[0] == name[-1] and name[0] in "\"'":
         name = name[1:-1]
-    return role, name
+    return role, name or None
 
 
 def _looks_like_css(s: str) -> bool:
@@ -75,7 +86,10 @@ def locate(root, selector: str):
     if s.startswith("css="):
         return root.locator(s[len("css="):].strip())
 
-    if _looks_like_css(s):
+    # locate() takes *selectors* (element_visible/count targets, wait) — a
+    # structural signal means CSS even with whitespace ("#form input",
+    # "div > a"); free text belongs in text_visible / text= instead.
+    if _CSS_STRONG.search(s):
         return root.locator(s)
     return root.get_by_text(s)
 
@@ -106,8 +120,14 @@ async def resolve(root, selector: str):
         return root.locator(s), "css"
 
     # Bare plain string: try the chain in D2 priority, pick first with a match.
+    #   0) CSS, when the string carries a structural signal but has whitespace
+    #      ("#form input", "div > a") — count-probed, so visible text that
+    #      merely contains '>' still falls through to the text tier
     #   1) data-testid  2) role+name (common interactive roles)  3) visible text
-    candidates = [("testid", root.locator(_testid_selector(s)))]
+    candidates = []
+    if _CSS_STRONG.search(s):
+        candidates.append(("css", root.locator(s)))
+    candidates.append(("testid", root.locator(_testid_selector(s))))
     for r in _COMMON_ROLES:
         candidates.append((f"role={r}", root.get_by_role(r, name=s)))
     candidates.append(("text", root.get_by_text(s)))

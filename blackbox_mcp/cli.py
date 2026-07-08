@@ -139,7 +139,9 @@ def _run_parallel(refs: list[str], args) -> int:
     import os
 
     child_env = {**os.environ, "REPORT_RETENTION": "0"}
-    procs: dict[str, object] = {}
+    # A list, not a ref-keyed dict: the same scenario passed twice must not
+    # shadow its sibling's process and dodge the kill-on-interrupt cleanup.
+    procs: list = []
 
     async def _go() -> list[int]:
         sem = asyncio.Semaphore(args.parallel)
@@ -153,7 +155,7 @@ def _run_parallel(refs: list[str], args) -> int:
                 if args.screenshot_each:
                     cmd.append("--screenshot-each")
                 proc = await asyncio.create_subprocess_exec(*cmd, env=child_env)
-                procs[ref] = proc
+                procs.append(proc)
                 try:
                     return await asyncio.wait_for(proc.wait(), timeout=args.timeout)
                 except asyncio.TimeoutError:
@@ -167,14 +169,14 @@ def _run_parallel(refs: list[str], args) -> int:
             return list(await asyncio.gather(*(one(r) for r in refs)))
         finally:
             # KeyboardInterrupt/cancel: don't orphan child browsers.
-            for p in procs.values():
+            for p in procs:
                 if p.returncode is None:
                     p.kill()
 
     try:
         codes = [_norm_exit(c) for c in asyncio.run(_go())]
     except KeyboardInterrupt:
-        for p in procs.values():
+        for p in procs:
             if getattr(p, "returncode", 0) is None:
                 p.kill()
         print("interrupted", file=sys.stderr)

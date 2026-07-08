@@ -238,9 +238,9 @@ def _render_markdown(result: dict) -> str:
     for st in result.get("steps", []):
         res = "✅" if st["passed"] else "❌"
         lines.append(
-            f"| {st['step']} | {st.get('action')} | {st.get('resolved_by') or ''} "
-            f"| {_short(st.get('expected'))} | {_short(st.get('actual'))} | {res} "
-            f"| {st.get('severity') or ''} |"
+            f"| {st['step']} | {_cell(st.get('action'))} | {_cell(st.get('resolved_by') or '')} "
+            f"| {_cell(_short(st.get('expected')))} | {_cell(_short(st.get('actual')))} | {res} "
+            f"| {_cell(st.get('severity') or '')} |"
         )
     # failure details
     fails = [st for st in result.get("steps", []) if not st["passed"]]
@@ -278,6 +278,11 @@ def _render_markdown(result: dict) -> str:
 def _short(v, n: int = 40) -> str:
     s = str(v).replace("\n", " ")
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _cell(v) -> str:
+    """Escape '|' so page-captured text can't break the Markdown table row."""
+    return str(v).replace("|", "\\|")
 
 
 # ── HTML (self-contained, mint theme to match the PRD) ────────────
@@ -386,7 +391,7 @@ def _step_html(st: dict, report_dir: Path) -> str:
     ok = st["passed"]
     thumb = ""
     if st.get("screenshot"):
-        data = _b64(report_dir / st["screenshot"])
+        data = _b64(report_dir / st["screenshot"], report_dir)
         if data:
             uri = f"data:image/png;base64,{data}"
             thumb = f'<a href="{uri}" target="_blank"><img class="thumb" src="{uri}"></a>'
@@ -440,8 +445,12 @@ def _extras_html(result: dict) -> str:
     return out
 
 
-def _b64(path: Path) -> str | None:
+def _b64(path: Path, base: Path) -> str | None:
+    """Embed only files under the report dir — a step record's screenshot field
+    is data, not a license to inline arbitrary local files into the HTML."""
     try:
+        if not path.resolve().is_relative_to(base.resolve()):
+            return None
         return base64.b64encode(path.read_bytes()).decode("ascii")
     except Exception:
         return None
