@@ -10,7 +10,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 
 from ..browser import session as session_mod
-from ..config import CONFIG
+from ..config import CONFIG, effective_browser
 from ._registry import tool
 
 
@@ -26,7 +26,8 @@ async def status() -> dict:
         "version": ver,
         "python": sys.version.split()[0],
         "config": {
-            "browser": CONFIG.browser,
+            # 유효 설정: BROWSER 오타(chrome 등)는 chromium으로 보정된 값
+            "browser": effective_browser(CONFIG.browser),
             "headless": CONFIG.headless,
             "channel": CONFIG.browser_channel,
             "cdp_url": CONFIG.cdp_url,

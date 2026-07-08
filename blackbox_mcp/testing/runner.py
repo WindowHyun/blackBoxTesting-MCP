@@ -21,7 +21,7 @@ from datetime import datetime
 from typing import Any
 
 from ..browser import get_session
-from ..config import CONFIG
+from ..config import CONFIG, effective_browser
 from ..tools.assertion import assert_
 from ..tools.dialog import expect_dialog
 from ..tools.frame import switch_frame
@@ -264,7 +264,7 @@ def _meta(session) -> dict[str, Any]:
         "os": platform.system(),
         "python": platform.python_version(),
         "playwright": pw,
-        "browser": CONFIG.browser,
+        "browser": effective_browser(CONFIG.browser),  # what actually ran, not the raw env
         "headless": CONFIG.headless,
         "executable": CONFIG.chromium_executable or "bundled",
         "credentials_masked": True,

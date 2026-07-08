@@ -206,11 +206,19 @@ def register_all(mcp):             # server.py에서 1회 호출
 - **공백 포함 구조 신호**(`#form input`, `div > a`)의 처리(2026-07 2차 감사):
   `resolve()`(bare-string 체인)는 CSS를 **count 프로브되는 첫 후보**로 시도하고
   매칭 없으면 체인을 계속 — `Home > Products`·`Order #123` 같은 가시 텍스트는
-  CSS로 0건이라 텍스트 티어로 자연 귀결된다. `assert_`(element_visible/count)와
-  `wait`도 이 체인을 쓴다(요소가 아직 없으면 최종 폴백이 텍스트 — 기존 bare-string
-  동작과 동일 티어라 "나타날 때까지 대기"가 유지됨). **`locate()`(sync, 프로브
-  불가)는 보수적으로 유지**: 공백 포함 문자열은 구조 문자가 있어도 텍스트로
-  취급(`[필수] 약관` 같은 실제 텍스트를 CSS로 오해하지 않기 위함).
+  CSS로 0건이라 텍스트 티어로 자연 귀결된다. **`locate()`(sync, 프로브 불가)는
+  보수적으로 유지**: 공백 포함 문자열은 구조 문자가 있어도 텍스트로 취급.
+- **도구별 체인 사용(2026-07 3차 검증 반영):**
+  - `assert_ element_visible`: `resolve(visible_only=True)` — 티어 프로브가
+    `filter(visible=True)` 기준이라, 단언 텍스트와 같은 값의 **숨은** testid
+    (스켈레톤/템플릿 노드)가 티어를 선점해 뒤 티어의 가시 매치를 가리지 않는다.
+    판정도 "가시 매치 존재"(첫 매치의 가시성이 아니라).
+  - `assert_ count`: 모집단이 판정을 좌우하므로 **평문 bare 문자열은 텍스트
+    매치를 센다**(원래 의미론 — testid 충돌이 모집단을 1↔3으로 바꾸지 않게).
+    셀렉터형(접두사·구조 신호, `is_selector_like`)만 resolve 체인.
+  - `wait(selector=)`: **폴링 재해석**(100ms) — wait의 본질은 "아직 없는" 요소라
+    호출 시점 1회 resolve는 모든 티어가 0건 → 텍스트 폴백에 고착된다. 마감까지
+    체인을 재프로브해 요소가 나타나는 시점의 올바른 티어를 잡는다(가시 기준).
 - 접두사 없는 **평문**은 **D2 전체 순서**로 실제 fallback(2026-07 수정: role 티어 복원):
   `[data-testid="s"]` → **role+name**(흔한 인터랙티브 role을 접근성 이름 `s`로 시도:
   button/link/textbox/checkbox/… ) → 가시 텍스트, **count>0 인 첫 전략** 채택(없으면

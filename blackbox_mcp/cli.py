@@ -233,7 +233,7 @@ def _cmd_run(args) -> int:
 def _cmd_doctor(args) -> int:  # noqa: ARG001
     """Self-check: browser resolvable + output dirs writable + config echo."""
     from .bootstrap import _browser_installed
-    from .config import CONFIG
+    from .config import CONFIG, effective_browser
     from .testing.report import ensure_dirs
 
     ok = True
@@ -247,10 +247,15 @@ def _cmd_doctor(args) -> int:  # noqa: ARG001
         print(f"  browser: CHROMIUM_EXECUTABLE={CONFIG.chromium_executable} "
               f"{'✓' if exists else '✗ MISSING'}")
     else:
-        installed = _browser_installed(CONFIG.browser)
+        # Probe the browser the session will actually launch (BROWSER=chrome
+        # coerces to chromium) — probing the raw value fails a CI gate that
+        # would in fact run fine.
+        name = effective_browser(CONFIG.browser)
+        installed = _browser_installed(name)
         ok &= installed
-        print(f"  browser: playwright {CONFIG.browser} "
-              f"{'✓ installed' if installed else '✗ not installed (run: playwright install chromium)'}")
+        coerced = f" (BROWSER={CONFIG.browser} → {name})" if name != CONFIG.browser else ""
+        print(f"  browser: playwright {name}{coerced} "
+              f"{'✓ installed' if installed else f'✗ not installed (run: playwright install {name})'}")
 
     try:
         d = ensure_dirs()

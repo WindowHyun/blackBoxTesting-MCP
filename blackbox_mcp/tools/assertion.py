@@ -5,7 +5,7 @@ Exposed to MCP as the tool name 'assert_' (assert is a Python keyword).
 from __future__ import annotations
 
 from ..browser import get_session
-from ..browser.locator import resolve
+from ..browser.locator import is_selector_like, resolve
 from ._registry import tool
 
 _KINDS = {"text_visible", "element_visible", "url_is", "url_contains", "count"}
@@ -31,10 +31,12 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
         actual = await loc.count() > 0 and await loc.first.is_visible()
         passed = bool(actual)
     elif kind == "element_visible":
-        # Full D2 chain (count-probed): "#form input" resolves as CSS while
-        # visible text like "Order #123" still lands on the text tier.
-        loc, _ = await resolve(root, target)
-        actual = await loc.count() > 0 and await loc.first.is_visible()
+        # Full D2 chain, probed for VISIBLE matches: "#form input" resolves as
+        # CSS, visible text like "Order #123" lands on the text tier, and a
+        # hidden testid that shares the asserted text can't win a tier and
+        # shadow the visible match behind it.
+        loc, _ = await resolve(root, target, visible_only=True)
+        actual = await loc.filter(visible=True).count() > 0
         passed = bool(actual)
     elif kind == "url_is":
         actual = session.page.url
@@ -43,7 +45,14 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
         actual = session.page.url
         passed = target in actual
     elif kind == "count":
-        loc, _ = await resolve(root, target)
+        # count's verdict depends on WHICH population is counted, so the D2
+        # first-match tier is only safe for unambiguous selectors. A bare
+        # plain string counts text matches (original semantics) — a testid
+        # that collides with the text must not silently switch the population.
+        if is_selector_like(target):
+            loc, _ = await resolve(root, target)
+        else:
+            loc = root.get_by_text(target)
         actual = await loc.count()
         try:
             passed = expected is not None and actual == int(expected)

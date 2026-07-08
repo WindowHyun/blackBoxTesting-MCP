@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 
-from .config import CONFIG
+from .config import CONFIG, effective_browser
 
 log = logging.getLogger(__name__)
 
@@ -43,8 +43,15 @@ def ensure_chromium() -> None:
       3. Otherwise attempt `playwright install`. If that fails (e.g. the browser
          CDN is blocked by network policy), log and continue rather than crash —
          the launch will surface a clear error if no binary is reachable.
+
+    The install target is the COERCED browser name (config.effective_browser):
+    BROWSER=chrome coerces to chromium at launch, so installing the raw value
+    here would install the wrong thing (`playwright install chrome` = system
+    Chrome channel) and leave the session's actual fallback target missing.
     """
-    name = CONFIG.browser
+    name = effective_browser(CONFIG.browser)
+    if name != CONFIG.browser:
+        log.warning("unknown BROWSER=%r — treating as chromium.", CONFIG.browser)
 
     if CONFIG.chromium_executable:
         if os.path.exists(CONFIG.chromium_executable):

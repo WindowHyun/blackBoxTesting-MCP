@@ -107,3 +107,19 @@ class Config:
 
 # Singleton config, loaded once at import.
 CONFIG = Config.from_env()
+
+_BROWSER_TYPES = ("chromium", "firefox", "webkit")
+
+
+def effective_browser(raw: str | None = None) -> str:
+    """The browser name coerced to a real Playwright browser type.
+
+    An unknown value (BROWSER=chrome is a plausible misconfig for "use real
+    Chrome") falls back to chromium. Single source for session launch,
+    bootstrap install target, doctor, and report metadata — keying different
+    layers off the raw value made bootstrap install one thing and start()
+    launch another. Callers pass their module-local CONFIG.browser so tests
+    that monkeypatch a module's CONFIG see consistent coercion.
+    """
+    raw = CONFIG.browser if raw is None else raw
+    return raw if raw in _BROWSER_TYPES else "chromium"

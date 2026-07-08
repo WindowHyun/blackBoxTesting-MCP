@@ -184,6 +184,51 @@ async def test_start_with_unknown_browser_value(monkeypatch):
         await s.close()
 
 
+# ── round 3 (verify-agent findings on the round-2 fixes) ──────────
+def test_effective_browser_coerces_unknown():
+    from blackbox_mcp.config import effective_browser
+    assert effective_browser("chrome") == "chromium"
+    assert effective_browser("firefox") == "firefox"
+    assert effective_browser("chromium") == "chromium"
+
+
+async def test_wait_for_late_spaced_css(session):
+    """wait's element usually does NOT exist at call time — a one-shot resolve
+    would lock onto the text fallback and never see '#results .row' appear."""
+    from blackbox_mcp.tools.wait import wait
+
+    await session.page.set_content(
+        "<div id='results'></div><script>setTimeout(() => {"
+        "document.getElementById('results').innerHTML ="
+        "'<div class=\\'row\\'>r1</div>';}, 300)</script>")
+    r = await wait(selector="#results .row", timeout_ms=3000)
+    assert r["ok"] is True
+
+
+async def test_element_visible_not_shadowed_by_hidden_testid(session):
+    """A hidden node whose data-testid equals the asserted text (skeleton/
+    template) must not win the testid tier and hide the visible text match."""
+    from blackbox_mcp.tools.assertion import assert_
+
+    await session.page.set_content(
+        "<div data-testid='cart' style='display:none'></div>"
+        "<a href='#'>cart</a>")
+    r = await assert_("element_visible", "cart")
+    assert r["passed"] is True
+
+
+async def test_count_bare_text_population_not_switched_by_testid(session):
+    """count on a bare plain string counts TEXT matches — a colliding testid
+    must not silently switch the counted population (1 vs 3)."""
+    from blackbox_mcp.tools.assertion import assert_
+
+    await session.page.set_content(
+        "<div data-testid='Item'></div>"
+        "<p>Item</p><p>Item</p><p>Item</p>")
+    r = await assert_("count", "Item", expected="3")
+    assert r["passed"] is True and r["actual"] == 3
+
+
 # ── role parsing degrades gracefully ──────────────────────────────
 def test_parse_role_variants():
     assert _parse_role("button name=로그인") == ("button", "로그인")

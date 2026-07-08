@@ -63,6 +63,15 @@ def _looks_like_css(s: str) -> bool:
     return bool(_CSS_STRONG.search(s)) and not any(c.isspace() for c in s)
 
 
+def is_selector_like(s: str) -> bool:
+    """True when the string is unambiguously a *selector* (explicit prefix or a
+    structural CSS signal) rather than possibly-visible text. Callers whose
+    semantics differ for text vs selectors (e.g. assert count) branch on this."""
+    s = s.strip()
+    return (s.startswith(("testid=", "role=", "text=", "css="))
+            or bool(_CSS_STRONG.search(s)))
+
+
 def _testid_selector(value: str) -> str:
     # escape quotes/backslashes so a testid with a quote doesn't break the CSS
     safe = value.strip().replace("\\", "\\\\").replace('"', '\\"')
@@ -96,7 +105,7 @@ def locate(root, selector: str):
     return root.get_by_text(s)
 
 
-async def resolve(root, selector: str):
+async def resolve(root, selector: str, *, visible_only: bool = False):
     """Resolve ``selector`` to ``(locator, resolved_by)`` using the D2 chain.
 
     Explicit prefixes (testid=/role=/text=/css=) pick that strategy directly.
@@ -104,6 +113,12 @@ async def resolve(root, selector: str):
     full D2 order — data-testid → role+name → visible text — and returns the
     first strategy that matches at least one element (falling back to text so
     errors are sensible). ``resolved_by`` records which strategy won (SM-06).
+
+    ``visible_only=True`` makes the bare-string chain probe with
+    ``filter(visible=True)`` — a *hidden* element (skeleton/template node whose
+    data-testid happens to equal the asserted text) must not win a tier and
+    shadow a visible match in a later tier. The returned locator is unfiltered;
+    callers that need only visible matches apply their own filter.
     """
     s = selector.strip()
 
@@ -135,7 +150,8 @@ async def resolve(root, selector: str):
     candidates.append(("text", root.get_by_text(s)))
     for name, loc in candidates:
         try:
-            if await loc.count() > 0:
+            probe = loc.filter(visible=True) if visible_only else loc
+            if await probe.count() > 0:
                 return loc, name
         except Exception:
             continue

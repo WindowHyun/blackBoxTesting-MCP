@@ -11,19 +11,10 @@ import asyncio
 import logging
 import os
 
-from ..config import CONFIG
+from ..config import CONFIG, effective_browser
 from .listeners import EventBuffers, attach
 
 log = logging.getLogger(__name__)
-
-
-_BROWSER_TYPES = ("chromium", "firefox", "webkit")
-
-
-def _effective_browser() -> str:
-    """CONFIG.browser coerced to a real Playwright browser type. An unknown
-    value (BROWSER=chrome is a plausible misconfig) falls back to chromium."""
-    return CONFIG.browser if CONFIG.browser in _BROWSER_TYPES else "chromium"
 
 
 def _launch_attempts() -> list[dict]:
@@ -40,7 +31,7 @@ def _launch_attempts() -> list[dict]:
     attempts: list[dict] = []
     if CONFIG.browser_channel:
         attempts.append({"channel": CONFIG.browser_channel})
-    if (CONFIG.chromium_executable and _effective_browser() == "chromium"
+    if (CONFIG.chromium_executable and effective_browser(CONFIG.browser) == "chromium"
             and os.path.exists(CONFIG.chromium_executable)):
         attempts.append({"executable_path": CONFIG.chromium_executable})
     attempts.append({})  # bundled default
@@ -105,7 +96,7 @@ class BrowserSession:
                 log.warning("CDP connect to %s failed (%s) — launching a normal "
                             "browser instead.", CONFIG.cdp_url, exc)
 
-        browser_name = _effective_browser()
+        browser_name = effective_browser(CONFIG.browser)
         if browser_name != CONFIG.browser:
             log.warning("unknown BROWSER=%r — using chromium.", CONFIG.browser)
         browser_type = getattr(self._pw, browser_name)
