@@ -17,20 +17,30 @@ from .listeners import EventBuffers, attach
 log = logging.getLogger(__name__)
 
 
+_BROWSER_TYPES = ("chromium", "firefox", "webkit")
+
+
+def _effective_browser() -> str:
+    """CONFIG.browser coerced to a real Playwright browser type. An unknown
+    value (BROWSER=chrome is a plausible misconfig) falls back to chromium."""
+    return CONFIG.browser if CONFIG.browser in _BROWSER_TYPES else "chromium"
+
+
 def _launch_attempts() -> list[dict]:
     """Launch-kwarg variants tried in order (mirrors _switch_to_persistent_impl):
     channel → explicit executable → bundled default.
 
-    The explicit executable is only usable for chromium (it IS a chromium
-    binary — handing it to firefox/webkit would launch the wrong browser) and
-    only when the path actually exists: a stale CHROMIUM_EXECUTABLE must fall
-    through to the bundled browser bootstrap may have installed, not brick
-    every launch.
+    The explicit executable is only usable when the EFFECTIVE browser is
+    chromium (it IS a chromium binary — handing it to firefox/webkit would
+    launch the wrong browser; keying off the coerced name, not the raw env,
+    keeps BROWSER=chrome from skipping a working binary) and only when the
+    path actually exists: a stale CHROMIUM_EXECUTABLE must fall through to
+    the bundled browser bootstrap may have installed, not brick every launch.
     """
     attempts: list[dict] = []
     if CONFIG.browser_channel:
         attempts.append({"channel": CONFIG.browser_channel})
-    if (CONFIG.chromium_executable and CONFIG.browser == "chromium"
+    if (CONFIG.chromium_executable and _effective_browser() == "chromium"
             and os.path.exists(CONFIG.chromium_executable)):
         attempts.append({"executable_path": CONFIG.chromium_executable})
     attempts.append({})  # bundled default
@@ -95,10 +105,10 @@ class BrowserSession:
                 log.warning("CDP connect to %s failed (%s) — launching a normal "
                             "browser instead.", CONFIG.cdp_url, exc)
 
-        browser_type = getattr(self._pw, CONFIG.browser, None)
-        if browser_type is None:
+        browser_name = _effective_browser()
+        if browser_name != CONFIG.browser:
             log.warning("unknown BROWSER=%r — using chromium.", CONFIG.browser)
-            browser_type = self._pw.chromium
+        browser_type = getattr(self._pw, browser_name)
         launch_kwargs = {"headless": CONFIG.headless}
         if CONFIG.stealth:
             launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]

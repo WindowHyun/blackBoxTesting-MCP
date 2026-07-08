@@ -14,10 +14,11 @@ strategy, otherwise it is inferred:
     text=다음                 -> get_by_text("다음")
     css=.btn.primary         -> CSS
     .btn / #id / div>a       -> inferred CSS (structural signal, no whitespace)
-    #form input / div > a    -> CSS signal with whitespace: locate() treats it
-                                as CSS; resolve() tries CSS first, then the
-                                bare-string chain (so text like "A > B" still
-                                resolves as text when it matches nothing as CSS)
+    #form input / div > a    -> CSS signal with whitespace: resolve() probes it
+                                as CSS first, then the bare-string chain — so
+                                text like "Order #123" or "A > B" still lands
+                                on the text tier when it matches nothing as CSS.
+                                locate() (sync, can't probe) treats it as text.
     로그인                    -> inferred role/text
 
 Returns a Playwright Locator scoped to ``root`` (page or frame locator).
@@ -86,10 +87,11 @@ def locate(root, selector: str):
     if s.startswith("css="):
         return root.locator(s[len("css="):].strip())
 
-    # locate() takes *selectors* (element_visible/count targets, wait) — a
-    # structural signal means CSS even with whitespace ("#form input",
-    # "div > a"); free text belongs in text_visible / text= instead.
-    if _CSS_STRONG.search(s):
+    # Sync path can't count-probe, so stay conservative: a structural signal
+    # WITH whitespace is ambiguous ("#form input" is CSS, but "[필수] 약관" or
+    # "Order #123" is visible text) — treat as text, like before. Async callers
+    # that need the disambiguation use resolve(), which probes CSS first.
+    if _looks_like_css(s):
         return root.locator(s)
     return root.get_by_text(s)
 

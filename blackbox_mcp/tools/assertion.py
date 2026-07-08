@@ -5,7 +5,7 @@ Exposed to MCP as the tool name 'assert_' (assert is a Python keyword).
 from __future__ import annotations
 
 from ..browser import get_session
-from ..browser.locator import locate
+from ..browser.locator import resolve
 from ._registry import tool
 
 _KINDS = {"text_visible", "element_visible", "url_is", "url_contains", "count"}
@@ -31,7 +31,9 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
         actual = await loc.count() > 0 and await loc.first.is_visible()
         passed = bool(actual)
     elif kind == "element_visible":
-        loc = locate(root, target)
+        # Full D2 chain (count-probed): "#form input" resolves as CSS while
+        # visible text like "Order #123" still lands on the text tier.
+        loc, _ = await resolve(root, target)
         actual = await loc.count() > 0 and await loc.first.is_visible()
         passed = bool(actual)
     elif kind == "url_is":
@@ -41,7 +43,8 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
         actual = session.page.url
         passed = target in actual
     elif kind == "count":
-        actual = await locate(root, target).count()
+        loc, _ = await resolve(root, target)
+        actual = await loc.count()
         try:
             passed = expected is not None and actual == int(expected)
         except (TypeError, ValueError):

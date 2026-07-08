@@ -204,11 +204,13 @@ def register_all(mcp):             # server.py에서 1회 호출
   단어(`example.com`, `v1.2`)는 **가시 텍스트로 취급** — 과거엔 이런 텍스트가 CSS로
   둔갑해 실사이트에서 오타겟팅됐다.
 - **공백 포함 구조 신호**(`#form input`, `div > a`)의 처리(2026-07 2차 감사):
-  `locate()`(단일 해석 — element_visible/count/wait 등 셀렉터 문맥)는 **CSS로
-  해석**한다. `resolve()`(bare-string 체인)는 CSS를 **count 프로브되는 첫 후보**로
-  시도하고 매칭 없으면 체인을 계속 — `Home > Products` 같은 가시 텍스트는 CSS로
-  0건이라 텍스트 티어로 자연 귀결된다. 과거엔 공백 가드가 이런 셀렉터를 조용히
-  텍스트로 재해석해 모듈 docstring과 모순됐다.
+  `resolve()`(bare-string 체인)는 CSS를 **count 프로브되는 첫 후보**로 시도하고
+  매칭 없으면 체인을 계속 — `Home > Products`·`Order #123` 같은 가시 텍스트는
+  CSS로 0건이라 텍스트 티어로 자연 귀결된다. `assert_`(element_visible/count)와
+  `wait`도 이 체인을 쓴다(요소가 아직 없으면 최종 폴백이 텍스트 — 기존 bare-string
+  동작과 동일 티어라 "나타날 때까지 대기"가 유지됨). **`locate()`(sync, 프로브
+  불가)는 보수적으로 유지**: 공백 포함 문자열은 구조 문자가 있어도 텍스트로
+  취급(`[필수] 약관` 같은 실제 텍스트를 CSS로 오해하지 않기 위함).
 - 접두사 없는 **평문**은 **D2 전체 순서**로 실제 fallback(2026-07 수정: role 티어 복원):
   `[data-testid="s"]` → **role+name**(흔한 인터랙티브 role을 접근성 이름 `s`로 시도:
   button/link/textbox/checkbox/… ) → 가시 텍스트, **count>0 인 첫 전략** 채택(없으면

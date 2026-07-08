@@ -40,6 +40,17 @@ def test_launch_attempts_order_channel_first(monkeypatch):
     assert attempts[-1] == {}  # bundled is always the last resort
 
 
+def test_launch_attempts_keeps_executable_for_unknown_browser(monkeypatch, tmp_path):
+    """BROWSER=chrome coerces to chromium — the executable gate must key off
+    the coerced name, not the raw env, or a working binary gets skipped."""
+    exe = tmp_path / "chrome-bin"
+    exe.write_text("")
+    monkeypatch.setattr(session_mod, "CONFIG", dataclasses.replace(
+        CONFIG, browser="chrome", browser_channel=None,
+        chromium_executable=str(exe)))
+    assert {"executable_path": str(exe)} in _launch_attempts()
+
+
 # ── launch fallback end-to-end: bogus channel must not brick start ──
 @pytest.mark.browser
 async def test_start_falls_back_past_missing_channel(monkeypatch):
@@ -119,12 +130,58 @@ async def test_resolve_spaced_css_falls_through_to_text():
     assert by == "text"
 
 
-def test_locate_treats_spaced_structural_selector_as_css():
+def test_locate_stays_conservative_on_spaced_strings():
+    """locate() is sync (no count probe): a structural char inside spaced text
+    ("Order #123", "[필수] 약관") must stay text — only the async resolve()
+    chain disambiguates spaced CSS like '#form input'."""
     root = _FakeRoot({})
-    locate(root, "#form input")
-    assert root.calls == [("locator", "#form input")]
-    locate(root, "div > a")
-    assert ("locator", "div > a") in root.calls
+    locate(root, "Order #123 confirmed")
+    assert root.calls == [("text", "Order #123 confirmed")]
+    root = _FakeRoot({})
+    locate(root, ".btn")  # unambiguous structural signal → CSS
+    assert root.calls == [("locator", ".btn")]
+
+
+# ── assert/wait ride the count-probed chain (verify-agent regression) ──
+async def test_assert_element_visible_text_with_structural_chars(session):
+    """Visible text containing # / [ ] / > must still assert visible, while a
+    spaced CSS selector resolves as CSS — both through the same chain."""
+    from blackbox_mcp.tools.assertion import assert_
+
+    await session.page.set_content(
+        "<form><input></form>"
+        "<p>Order #123 confirmed</p><p>[필수] 이용약관 동의</p><p>Home > Products</p>")
+    for target in ("form > input", "Order #123 confirmed",
+                   "[필수] 이용약관 동의", "Home > Products"):
+        r = await assert_("element_visible", target)
+        assert r["passed"] is True, target
+    r = await assert_("count", "form > input", expected="1")
+    assert r["passed"] is True and r["actual"] == 1
+
+
+async def test_wait_for_late_text_with_structural_chars(session):
+    from blackbox_mcp.tools.wait import wait
+
+    await session.page.set_content(
+        "<div id='d'></div><script>setTimeout(() => {"
+        "document.getElementById('d').textContent = 'Order #9 done';}, 200)"
+        "</script>")
+    r = await wait(selector="Order #9 done", timeout_ms=3000)
+    assert r["ok"] is True
+
+
+@pytest.mark.browser
+async def test_start_with_unknown_browser_value(monkeypatch):
+    """BROWSER=chrome (misconfig) must coerce to chromium AND still be able to
+    use the configured/preinstalled executable."""
+    monkeypatch.setattr(session_mod, "CONFIG", dataclasses.replace(
+        CONFIG, browser="chrome", browser_channel=None, cdp_url=None))
+    s = BrowserSession()
+    await s.start()
+    try:
+        assert s.is_alive()
+    finally:
+        await s.close()
 
 
 # ── role parsing degrades gracefully ──────────────────────────────

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from ..browser import get_session
-from ..browser.locator import locate
+from ..browser.locator import resolve
 from ._registry import tool
 
 
@@ -14,8 +14,11 @@ async def wait(ms: int | None = None, selector: str | None = None,
     session = await get_session()
     if selector is not None:
         try:
-            await locate(session.root, selector).wait_for(
-                state="visible", timeout=timeout_ms)
+            # D2 chain with count probe; when nothing matches YET, resolve()
+            # falls back to the text tier — same tier locate() used to pick
+            # for bare strings, so waiting for not-yet-present text still works.
+            loc, _ = await resolve(session.root, selector)
+            await loc.wait_for(state="visible", timeout=timeout_ms)
         except Exception as exc:
             return {"ok": False, "waited": f"selector:{selector}",
                     "error": f"not visible within {timeout_ms}ms ({type(exc).__name__})"}
