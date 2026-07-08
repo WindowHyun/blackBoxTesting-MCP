@@ -63,13 +63,16 @@ def _looks_like_css(s: str) -> bool:
     return bool(_CSS_STRONG.search(s)) and not any(c.isspace() for c in s)
 
 
-def is_selector_like(s: str) -> bool:
-    """True when the string is unambiguously a *selector* (explicit prefix or a
-    structural CSS signal) rather than possibly-visible text. Callers whose
-    semantics differ for text vs selectors (e.g. assert count) branch on this."""
+_PREFIXES = ("testid=", "role=", "text=", "css=")
+
+
+def is_single_strategy(s: str) -> bool:
+    """True when the string maps to exactly ONE deterministic strategy (explicit
+    prefix, or unambiguous whitespace-free CSS) — no fallback chain involved.
+    Callers use this to fail fast on deterministic errors (a CSS parse error
+    won't heal by retrying) while bare-chain strings keep their fallbacks."""
     s = s.strip()
-    return (s.startswith(("testid=", "role=", "text=", "css="))
-            or bool(_CSS_STRONG.search(s)))
+    return s.startswith(_PREFIXES) or _looks_like_css(s)
 
 
 def _testid_selector(value: str) -> str:
@@ -155,5 +158,31 @@ async def resolve(root, selector: str, *, visible_only: bool = False):
                 return loc, name
         except Exception:
             continue
+    return root.get_by_text(s), "text"
+
+
+async def resolve_count_population(root, selector):
+    """Pick the population an ``assert count`` counts: ``(locator, strategy)``.
+
+    Counting is verdict-critical in a way single-element resolution isn't —
+    the D2 first-match tier silently CHANGES what gets counted when a testid
+    or role name collides with visible text (1 matching testid shadows 3 text
+    matches). So:
+      - explicit prefix / unambiguous CSS → that strategy (deterministic);
+      - spaced structural string → CSS if it matches anything, else text
+        ("#results .row" counts rows; "[필수] 약관" is invalid CSS → text);
+      - plain string → text matches (the original population semantics).
+    testid/role tiers are deliberately NOT probed here.
+    """
+    s = selector.strip()
+    if s.startswith(_PREFIXES) or _looks_like_css(s):
+        return await resolve(root, s)
+    if _CSS_STRONG.search(s):
+        loc = root.locator(s)
+        try:
+            if await loc.count() > 0:
+                return loc, "css"
+        except Exception:
+            pass  # invalid CSS (bracketed/`#`-bearing text) → count as text
     return root.get_by_text(s), "text"
 

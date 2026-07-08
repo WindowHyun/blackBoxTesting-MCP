@@ -5,7 +5,7 @@ Exposed to MCP as the tool name 'assert_' (assert is a Python keyword).
 from __future__ import annotations
 
 from ..browser import get_session
-from ..browser.locator import is_selector_like, resolve
+from ..browser.locator import resolve, resolve_count_population
 from ._registry import tool
 
 _KINDS = {"text_visible", "element_visible", "url_is", "url_contains", "count"}
@@ -45,14 +45,11 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
         actual = session.page.url
         passed = target in actual
     elif kind == "count":
-        # count's verdict depends on WHICH population is counted, so the D2
-        # first-match tier is only safe for unambiguous selectors. A bare
-        # plain string counts text matches (original semantics) — a testid
-        # that collides with the text must not silently switch the population.
-        if is_selector_like(target):
-            loc, _ = await resolve(root, target)
-        else:
-            loc = root.get_by_text(target)
+        # count's verdict depends on WHICH population is counted — see
+        # resolve_count_population: selectors count their strategy, everything
+        # else counts text matches, and a colliding testid/role name never
+        # silently switches the population.
+        loc, _ = await resolve_count_population(root, target)
         actual = await loc.count()
         try:
             passed = expected is not None and actual == int(expected)

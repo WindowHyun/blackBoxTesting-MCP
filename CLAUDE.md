@@ -60,7 +60,7 @@ python -m venv .venv
 - CLI `--parallel` 자식은 `REPORT_RETENTION=0`(부모가 1회 정리), 시그널사는 error, `--timeout` 워치독. stdout이 MCP 파이프가 아니라 print 자유(서버와 달리).
 - navigate 판정은 **상태코드 기반**(`status>=400` 실패, `None`=file://·타임아웃은 통과, 스텝 `expect_status`로 정확 일치 검증). runner·recorder 양쪽 동일.
 - D2 bare-string 체인은 testid→**role+name(흔한 role 순회)**→text — 단, 공백 포함 CSS 신호(`#form input`, `div > a`)는 CSS 프로브가 선행(0건이면 체인 계속 → `Order #123` 같은 텍스트는 텍스트 티어). CSS 즉시 확정은 `# [ ] >` 또는 선행 `.` **이고 공백 없음**일 때만. `locate()`(sync)는 보수적 — 공백 있으면 텍스트. `resolved_by`는 `role=button`처럼 구체 표기.
-- 도구별 체인(DESIGN §4): element_visible은 `resolve(visible_only=True)`(숨은 testid가 가시 매치를 가리지 않게), count는 평문이면 **텍스트 모집단**(`is_selector_like`만 체인), wait는 **폴링 재해석**(1회 resolve는 텍스트 폴백 고착 — 아직 없는 요소를 위한 도구라서).
+- 도구별 체인(DESIGN §4): element_visible은 `resolve(visible_only=True)`(숨은 testid가 가시 매치를 가리지 않게), count는 `resolve_count_population`(testid/role 티어 배제 — 공백 구조 문자열은 CSS 매치 있으면 CSS·없으면 텍스트), wait는 **폴링 재해석** + 단일 결정 전략 프로브 오류는 즉시 실패(`is_single_strategy`).
 - `BROWSER` 오타(chrome 등)는 `config.effective_browser()`로 chromium 보정 — 세션 런치·bootstrap 설치 대상·doctor·리포트 meta가 **같은 보정값**을 쓴다(호출부는 모듈 로컬 `CONFIG.browser`를 인자로 전달).
 - `secrets.scrub`은 긴 값부터 치환(부분문자열 secret 잔여 노출 방지). HTML 리포트 스크린샷 임베드는 report_dir 하위 경로만.
 - `ai_reason`/`ai_suggestion`은 러너에선 **규칙 기반**(리포트 각주로 명시) — 대화형(Claude)에선 호스트 LLM이 보강. 필드명은 스키마(DESIGN §6.1)라 유지.

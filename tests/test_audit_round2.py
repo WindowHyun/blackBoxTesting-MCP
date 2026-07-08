@@ -229,6 +229,43 @@ async def test_count_bare_text_population_not_switched_by_testid(session):
     assert r["passed"] is True and r["actual"] == 3
 
 
+# ── round 4 ────────────────────────────────────────────────────────
+async def test_count_structural_char_text_counts_text(session):
+    """'[필수] 약관' carries structural chars but is invalid CSS → the count
+    population must be text matches, not a colliding role/testid tier."""
+    from blackbox_mcp.tools.assertion import assert_
+
+    await session.page.set_content(
+        "<input type='checkbox' aria-label='[필수] 약관 동의'>"
+        "<p>[필수] 약관 A</p><p>[필수] 약관 B</p>")
+    r = await assert_("count", "[필수] 약관", expected="2")
+    assert r["passed"] is True and r["actual"] == 2
+
+
+async def test_count_spaced_css_counts_css_population(session):
+    from blackbox_mcp.tools.assertion import assert_
+
+    await session.page.set_content(
+        "<div id='results'><div class='row'>a</div><div class='row'>b</div></div>")
+    r = await assert_("count", "#results .row", expected="2")
+    assert r["passed"] is True and r["actual"] == 2
+
+
+async def test_wait_fails_fast_on_deterministic_selector_error(session):
+    """An invalid explicit CSS selector fails identically every poll — wait
+    must report the real error immediately, not spin to the deadline and
+    call it a timeout."""
+    import time as _time
+
+    from blackbox_mcp.tools.wait import wait
+
+    await session.page.set_content("<div></div>")
+    t0 = _time.monotonic()
+    r = await wait(selector="css=div:::bad", timeout_ms=5000)
+    assert r["ok"] is False and "selector failed" in r["error"]
+    assert _time.monotonic() - t0 < 2  # did not burn the 5s deadline
+
+
 # ── role parsing degrades gracefully ──────────────────────────────
 def test_parse_role_variants():
     assert _parse_role("button name=로그인") == ("button", "로그인")
