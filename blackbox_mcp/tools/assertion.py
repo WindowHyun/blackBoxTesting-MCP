@@ -26,9 +26,12 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
     actual: object = None
 
     if kind == "text_visible":
+        # "visible somewhere": a VISIBLE match must exist. filter(visible=True)
+        # (not .first.is_visible()) so a hidden first match doesn't mask a
+        # visible later one — and so this agrees with element_visible on the
+        # same page instead of contradicting it.
         loc = root.get_by_text(target)
-        # "visible somewhere": tolerate multiple matches (no strict-mode throw).
-        actual = await loc.count() > 0 and await loc.first.is_visible()
+        actual = await loc.filter(visible=True).count() > 0
         passed = bool(actual)
     elif kind == "element_visible":
         # Full D2 chain, probed for VISIBLE matches: "#form input" resolves as
