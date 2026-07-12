@@ -162,6 +162,8 @@ HEADLESS 토글** `[BR-03]` ✅
 - **E4 액션 레코더 + save_report** — 임의 도구 흐름도 리포트로 종료. register_all이
   액션 도구를 래핑(스키마 보존), run_scenario는 이중 기록 안 됨.
 - **E5 환경 우회** — 브라우저 CDN 차단 시 `CHROMIUM_EXECUTABLE`/사전설치 자동감지.
+- **E6 배너 처리**(`overlays.py`) — `dismiss_banners`로 GDPR/쿠키/동의 오버레이를
+  닫아 클릭 인터셉트("intercepts pointer events") 회피(실사이트 하드닝).
 
 ---
 

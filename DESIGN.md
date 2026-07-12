@@ -53,6 +53,7 @@ blackbox_mcp/
     session.py(reset_session) · realbrowser.py(use_real_browser)
     scenario.py(run_scenario) · savereport.py(save_report)
     generate.py(generate_scenario) · library.py(save/load/list_scenario)
+    overlays.py(dismiss_banners) # 실사이트 쿠키/동의 배너 닫기(클릭 인터셉트 회피)
     status.py(status)      # 읽기 전용 상태 프로브(버전·모드·생존·버퍼·설정)
 
 # 출력 경로(절대, 기본 ~/ui-blackbox/ — MCP cwd가 불가측·쓰기불가일 수 있어 홈 기준):
@@ -260,11 +261,17 @@ API:
 |---|---|---|---|
 | `reset_session` | `reset_session()` | `{ok, message}` | SHOULD |
 | `use_real_browser` | `use_real_browser(headless=False, channel="chrome")` | `{ok, mode, browser, profile}` | 확장 |
+| `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...]}` | 확장 |
 | `status` | `status()` | `{version, config, session:{mode,alive,url,버퍼}}` | 확장(관측) |
 
 > **status (관측성):** 세션을 **새로 만들지 않는** 읽기 전용 프로브(`_SESSION`을 직접
 > 조회). 버전·모드(번들/채널/persistent/CDP)·생존·현재 URL·버퍼 크기·유효 설정을
 > 반환해, 사용자 환경 디버깅을 Claude Desktop 로그 없이 대화에서 끝낸다.
+>
+> **dismiss_banners (실사이트 하드닝):** GDPR/쿠키/동의 오버레이가 클릭을 가로채는
+> ("intercepts pointer events") 실사이트용 — 흔한 수락/닫기 라벨(KO/EN)을 role로
+> 순회하며 **보이는 첫 항목**을 클릭(짧은 per-try 타임아웃, 매치 없어도 무에러).
+> 최대 3개까지만 눌러 무관 컨트롤 오클릭을 방지. navigate 후 클릭이 막히면 호출.
 
 ### 5.2 코어 (CT)
 | Tool | 시그니처 | 반환 | 우선순위 |
@@ -479,10 +486,13 @@ SM-01~04와 함께(또는 직후) 구현한다.
 ```json
 {
   "mcpServers": {
-    "ui-blackbox": { "command": "python", "args": ["-m", "blackbox_mcp.server"] }
+    "ui-blackbox": { "command": "/abs/path/.venv/bin/python", "args": ["-m", "blackbox_mcp.server"] }
   }
 }
 ```
+> `command`는 **venv의 절대경로 인터프리터**여야 한다 — 시스템 `python`은 PyJWT
+> RECORD 충돌로 설치가 깨진다(CLAUDE.md). 정식 예시는
+> `claude_desktop_config.example.json`.
 
 ### 7.1 CLI / CI 진입점 (`blackbox_mcp/cli.py`, `ui-blackbox` 스크립트)
 

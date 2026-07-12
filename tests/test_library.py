@@ -49,6 +49,13 @@ async def test_load_missing(scenario_dir):
     assert r["ok"] is False
 
 
+async def test_load_corrupt_json_returns_error_not_crash(scenario_dir):
+    # a half-written / hand-edited scenario file must not crash the tool
+    (scenario_dir / "broken.json").write_text("{ not valid json ", encoding="utf-8")
+    r = await load_scenario("broken")
+    assert r["ok"] is False and "corrupted" in r["error"]
+
+
 async def test_loaded_scenario_runs(session, scenario_dir):
     steps = [
         {"action": "navigate", "url": fixture_url("basic.html"), "wait_until": "load"},
@@ -58,6 +65,25 @@ async def test_loaded_scenario_runs(session, scenario_dir):
     loaded = (await load_scenario("fixture_flow"))["steps"]
     res = await runner.run(loaded, name="fixture_flow")
     assert res["summary"]["failed"] == 0
+
+
+# ── SL-01 _suggest_selector role mapping (unit, no browser) ───────
+def test_suggest_selector_input_types_map_to_correct_role():
+    from blackbox_mcp.tools.generate import _suggest_selector
+    # a submit input is role=button, NOT textbox (was mislabeled → step failed)
+    assert _suggest_selector(
+        {"tag": "input", "type": "submit", "name": "Submit"}) == "role=button name=Submit"
+    assert _suggest_selector(
+        {"tag": "input", "type": "checkbox", "name": "agree"}) == "role=checkbox name=agree"
+    assert _suggest_selector(
+        {"tag": "input", "type": "email", "name": "email"}) == "role=textbox name=email"
+    # explicit role attribute wins over type inference
+    assert _suggest_selector(
+        {"tag": "input", "type": "text", "role": "combobox", "name": "city"}
+    ) == "role=combobox name=city"
+    # testid always wins
+    assert _suggest_selector(
+        {"tag": "input", "type": "submit", "testid": "go", "name": "Go"}) == "testid=go"
 
 
 # ── SL-01 generate_scenario kit ───────────────────────────────────

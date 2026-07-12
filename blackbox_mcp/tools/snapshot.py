@@ -56,7 +56,9 @@ async def snapshot(mode: str = "a11y", focus: str | None = None,
                    depth: int | None = None) -> str:
     session = await get_session()
     root = session.root
-    target = root.locator(focus) if focus else root.locator("body")
+    # .first: a focus that matches several nodes (e.g. "section") would trip
+    # Playwright strict mode on aria_snapshot/evaluate and crash the tool.
+    target = (root.locator(focus).first if focus else root.locator("body"))
 
     if mode == "dom":
         text = await target.evaluate(_DOM_OUTLINE_JS, 200)

@@ -5,7 +5,6 @@ import asyncio
 import json
 import subprocess
 
-import pytest
 
 from blackbox_mcp.browser.listeners import ConsoleEntry, EventBuffers, _MAX_EVENTS
 from blackbox_mcp.testing import recorder, report, secrets

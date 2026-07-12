@@ -1,12 +1,10 @@
 """Regression guards for code-review fixes."""
 from __future__ import annotations
 
-from conftest import fixture_url
 
 from blackbox_mcp.tools.console import get_console_logs
 from blackbox_mcp.tools.interact import interact
 from blackbox_mcp.tools.wait import wait
-from blackbox_mcp.tools.navigate import navigate
 from blackbox_mcp.browser.locator import _testid_selector
 from blackbox_mcp.testing import runner
 
