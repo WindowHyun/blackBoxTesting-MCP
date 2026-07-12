@@ -19,6 +19,14 @@ def _path(name: str):
     return CONFIG.scenario_dir / f"{safe}.json"
 
 
+def _stored_name(path) -> str | None:
+    """The original name recorded inside a scenario file (None if unreadable)."""
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("name")
+    except Exception:
+        return None
+
+
 def exists(name: str) -> bool:
     return _path(name).exists()
 
@@ -26,6 +34,16 @@ def exists(name: str) -> bool:
 def save(name: str, steps: list[dict], overwrite: bool = False) -> str:
     path = _path(name)
     if path.exists() and not overwrite:
+        owner = _stored_name(path)
+        if owner and owner != name.strip():
+            # Distinct logical names sanitize to the same file (e.g.
+            # "checkout/happy" and "checkout happy" → checkout_happy.json).
+            # Surface the collision instead of a misleading "already exists"
+            # that names the wrong scenario — or, with overwrite, clobbering it.
+            raise FileExistsError(
+                f"Scenario name '{name}' maps to the same file as existing "
+                f"'{owner}' (names are sanitized to [A-Za-z0-9_-가-힣]). Pick a "
+                f"distinct name, or pass overwrite=True to replace '{owner}'.")
         raise FileExistsError(f"Scenario '{name}' already exists. Pass overwrite=True.")
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"name": name, "steps": steps, "saved_at": datetime.now().isoformat()}
