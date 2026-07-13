@@ -26,6 +26,7 @@ _TOOL_MODULES = (
     "session",
     "realbrowser",
     "overlays",
+    "state",
     "scenario",
     "savereport",
     "generate",

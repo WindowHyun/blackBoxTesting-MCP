@@ -127,8 +127,12 @@ class BrowserSession:
             CONFIG.browser, used, CONFIG.headless, CONFIG.stealth,
         )
 
-    async def _new_context(self) -> None:
+    async def _new_context(self, storage_state: str | None = None) -> None:
         ctx_kwargs: dict = {}
+        if storage_state is not None:
+            # Restore cookies/localStorage exported by save_state — auth reuse
+            # without a persistent profile (works headless/CI).
+            ctx_kwargs["storage_state"] = storage_state
         if CONFIG.ignore_https_errors:
             ctx_kwargs["ignore_https_errors"] = True
         if CONFIG.stealth:
@@ -156,6 +160,25 @@ class BrowserSession:
         """BR-04: wipe context (cookies/session/storage) + buffers, fresh page."""
         async with self._op_lock:
             await self._reset_impl()
+
+    async def load_storage_state(self, path: str) -> None:
+        """Replace the context with a fresh one seeded from a storage-state file
+        (cookies + localStorage exported by ``save_state``).
+
+        Only for browsers we own contexts in (bundled/channel): a CDP-attached
+        or persistent-profile browser keeps its own auth — recreating its
+        context would detach/lose the user's real session.
+        """
+        async with self._op_lock:
+            if self._cdp or self._persistent:
+                raise RuntimeError(
+                    "load_state only applies to the bundled/channel browser — "
+                    "real-browser modes (CDP/persistent profile) keep their own "
+                    "login state.")
+            if self._context is not None:
+                await self._context.close()
+            await self._new_context(storage_state=path)
+            log.info("BrowserSession context reloaded from storage state.")
 
     async def _reset_impl(self) -> None:
         if self._cdp or self._persistent:

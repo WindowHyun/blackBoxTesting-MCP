@@ -29,6 +29,7 @@ from ..tools.interact import interact
 from ..tools.navigate import navigate
 from ..tools.session import reset_session
 from ..tools.snapshot import snapshot
+from ..tools.state import load_state, save_state
 from ..tools.wait import wait
 from . import report, secrets
 
@@ -125,6 +126,16 @@ async def _dispatch(step: dict) -> dict:
         res = await reset_session()
         out.update(expected="reset", actual=res.get("message"), passed=bool(res.get("ok")),
                    ai_reason="session reset")
+
+    elif action in ("save_state", "load_state"):
+        fn = save_state if action == "save_state" else load_state
+        res = await fn(step.get("name", "default"))
+        ok = bool(res.get("ok"))
+        out.update(expected=action, actual=res.get("path") or res.get("error"),
+                   passed=ok, ai_reason=f"{action} {'ok' if ok else 'failed'}")
+        if not ok:
+            out["ai_suggestion"] = ("save_state로 먼저 저장했는지, 실 브라우저 모드가 "
+                                    "아닌지 확인 (load_state는 번들/채널 전용)")
 
     elif action == "screenshot":
         # the actual capture happens in run() (it owns name/idx); flag it.
