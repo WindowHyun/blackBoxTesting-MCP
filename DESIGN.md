@@ -54,6 +54,8 @@ blackbox_mcp/
     scenario.py(run_scenario) · savereport.py(save_report)
     generate.py(generate_scenario) · library.py(save/load/list_scenario)
     overlays.py(dismiss_banners) # 실사이트 쿠키/동의 배너 닫기(클릭 인터셉트 회피)
+    state.py(save/load/list_states) # 로그인 상태 파일 재사용(headless/CI·역할 전환)
+    mock.py(mock_route/unmock_route) # 네트워크 모킹(불안정 외부 API 결정화)
     status.py(status)      # 읽기 전용 상태 프로브(버전·모드·생존·버퍼·설정)
 
 # 출력 경로(절대, 기본 ~/ui-blackbox/ — MCP cwd가 불가측·쓰기불가일 수 있어 홈 기준):
@@ -262,6 +264,11 @@ API:
 | `reset_session` | `reset_session()` | `{ok, message}` | SHOULD |
 | `use_real_browser` | `use_real_browser(headless=False, channel="chrome")` | `{ok, mode, browser, profile}` | 확장 |
 | `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...]}` | 확장 |
+| `save_state` | `save_state(name="default")` | `{ok, name, path}` | 확장 |
+| `load_state` | `load_state(name="default")` | `{ok, name, path}` | 확장 |
+| `list_states` | `list_states()` | `[{name, saved_at}]` | 확장 |
+| `mock_route` | `mock_route(pattern, body="", status=200, content_type=...)` | `{ok, pattern, active}` | 확장 |
+| `unmock_route` | `unmock_route(pattern=None)` | `{ok, active}` | 확장 |
 | `status` | `status()` | `{version, config, session:{mode,alive,url,버퍼}}` | 확장(관측) |
 
 > **status (관측성):** 세션을 **새로 만들지 않는** 읽기 전용 프로브(`_SESSION`을 직접
@@ -272,6 +279,23 @@ API:
 > ("intercepts pointer events") 실사이트용 — 흔한 수락/닫기 라벨(KO/EN)을 role로
 > 순회하며 **보이는 첫 항목**을 클릭(짧은 per-try 타임아웃, 매치 없어도 무에러).
 > 최대 3개까지만 눌러 무관 컨트롤 오클릭을 방지. navigate 후 클릭이 막히면 호출.
+>
+> **save_state / load_state (로그인 재사용, 2026-07):** 현재 컨텍스트의 쿠키+
+> localStorage를 `~/ui-blackbox/state/{name}.json`(POSIX 0600)으로 내보내고,
+> 나중에 새 컨텍스트를 그 파일로 시드한다 — 영구 프로필과 달리 **headless/CI에서
+> 동작**하고, 역할별(state 파일별) 전환으로 guest/member/admin 비교를 단일 테넌트
+> 그대로 해결한다. load는 번들/채널 전용(CDP·persistent는 자체 로그인 유지라 거부,
+> `RuntimeError`→tool이 `{ok:False}`). 검증(1.61): `context.storage_state(path=)`
+> ↔ `new_context(storage_state=)` 라운드트립은 쿠키+**http(s) 오리진**
+> localStorage를 복원하며, **file:// localStorage는 캡처되지 않는다**(§13).
+> 시나리오 스텝 `save_state`/`load_state`(name)로도 사용.
+>
+> **mock_route / unmock_route (네트워크 모킹, 2026-07):** 글롭 패턴 매칭 요청을
+> 현재 컨텍스트에서 가로채 로컬 fulfill(무네트워크) — 불안정/미구현 외부 API를
+> 결정화한다. `status=500`+navigate `expect_status`로 에러 페이지 처리를
+> 오프라인 검증 가능. 활성 패턴은 **컨텍스트 객체에 부착**해 추적(컨텍스트 스왑
+> 시 자연 소멸 — reset/load_state 후 재장착 필요, 도구 설명에 명시). 시나리오
+> 스텝 `mock_route`/`unmock_route`로도 사용.
 
 ### 5.2 코어 (CT)
 | Tool | 시그니처 | 반환 | 우선순위 |
@@ -435,7 +459,9 @@ SM-01~04와 함께(또는 직후) 구현한다.
   "regression": {                        // SM-07: 직전 실행 대비
     "previous_run": "2026-06-23T18:00:00",
     "changed": [{ "step": 4, "from": "passed", "to": "failed" }]
-  }
+  },
+  "trace": "…/reports/traces/<run_id>_<name>.zip"  // trace_on_failure로 실행이
+                                         // 실패했을 때만 존재(§7.1) — 통과 런은 폐기
 }
 ```
 > **회귀 baseline 가드(2026-07):** 직전 실행과 `(step, action)` 키가 하나도 겹치지
@@ -505,6 +531,11 @@ SM-01~04와 함께(또는 직후) 구현한다.
   `2`(사용법·인프라 오류) → CI 게이팅.
 - `--junit PATH` — 시나리오당 `testsuite`, 스텝당 `testcase`의 **JUnit XML**(GitHub
   Actions/Jenkins 네이티브 파싱). `--continue-on-fail`, `--screenshot-each`, `--format`.
+- `--trace-on-failure` — Playwright 트레이싱을 켠 채 실행하고 **실패한 실행만**
+  `reports/traces/{run_id}_{name}.zip`을 남긴다(통과 런은 stop 시 폐기 — 아티팩트
+  무한 축적 방지). `playwright show-trace`로 열람. run_id가 파일명을 선도해
+  리테인션이 스크린샷과 동일하게 run 단위로 정리(§7.2). 병렬 자식에도 전파.
+  MCP `run_scenario(trace_on_failure=True)`로도 동일 동작.
 - `--parallel N` — 시나리오당 **서브프로세스 1개**로 격리 실행(각자 자기 세션 싱글톤을
   가지므로 공유 상태 리팩토링 불필요). 동시성은 N으로 제한. **견고화(2026-07 리뷰):**
   자식은 `REPORT_RETENTION=0`으로 돌고 부모가 종료 후 1회 정리(형제 간 리포트 삭제
@@ -681,10 +712,19 @@ SM-01~04와 함께(또는 직후) 구현한다.
 - `ConsoleMessage.type`/`text`/`location`(property) — location 키는 `url`/`line`/`column`
   (`lineNumber`/`columnNumber`는 deprecated) → `line` 우선 사용으로 정정 ✅
 - `page.screenshot(path=, full_page=)` ✅
+- `BrowserContext.storage_state(path=)` ↔ `Browser.new_context(storage_state=)` —
+  시그니처 인스펙션+실측(1.61): 쿠키와 **http(s) 오리진 localStorage** 라운드트립 ✅.
+  **file:// 오리진 localStorage는 캡처되지 않음**(origins 빈 배열, 실측) → state
+  테스트는 route로 만든 가짜 http 오리진 사용 ⚠️
+- `BrowserContext.tracing.start(screenshots=, snapshots=)` · `stop(path=)` —
+  path 없이 stop하면 trace **폐기**(통과 런 아티팩트 미축적에 활용) ✅
+- `BrowserContext.route(url, handler)` · `unroute(url)` · `unroute_all(behavior=)` ·
+  `Route.fulfill(status=, body=, content_type=, json=, headers=)` — 시그니처
+  인스펙션+실측(모킹 도큐먼트 네비게이션·fetch) ✅
 
 **MCP Prompts** — `@mcp.prompt(name=, description=)` 데코레이터, 문자열 인자 → 문자열
 반환이 user 메시지로 직렬화, 인자는 클라이언트에 `PromptArgument`로 노출 ✅
-(슬래시 명령 ui-test/ui-scenario/ui-login/ui-generate)
+(슬래시 명령 ui-test/ui-scenario/ui-login/ui-generate/ui-sync)
 
 > 제약: playwright.dev API 페이지는 직접 fetch가 403으로 막혀, 일부 항목은
 > GitHub 원본 마크다운 + 공식 검색 결과 + **로컬 실측**으로 교차 확인함.

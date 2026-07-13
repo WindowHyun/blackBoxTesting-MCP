@@ -190,6 +190,7 @@ the request.
 | `/ui-scenario` | description, url | Build → run → report (all formats) |
 | `/ui-login` | task, url | **Switch to real Chrome (persistent login)** then test a site that needs auth |
 | `/ui-generate` | description, url, name | Analyze a page → generate & save a reusable scenario |
+| `/ui-sync` | name, url | Change detection: diff a saved scenario against the current page, update & re-run |
 
 Example: `/ui-test` → `open example.com, click the login button, take a screenshot`
 
@@ -201,13 +202,15 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 
 ---
 
-## 🧰 MCP Tools (20)
+## 🧰 MCP Tools (25)
 
 | Group | Tools |
 |---|---|
 | Core | `navigate` · `snapshot` (a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
 | Extended | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
-| Scenario & report | `run_scenario` · `generate_scenario` · `save_report` |
+| Auth state | `save_state` · `load_state` · `list_states` — export login (cookies+localStorage) once, reuse headless/in CI, swap roles |
+| Network mock | `mock_route` · `unmock_route` — deterministic offline responses for flaky/unbuilt APIs |
+| Scenario & report | `run_scenario` (incl. `trace_on_failure`) · `generate_scenario` · `save_report` |
 | Library | `save_scenario` · `load_scenario` · `list_scenarios` |
 
 > **Every test flow ends with a report.** Ad-hoc tool calls (navigate/interact/assert…)
@@ -229,6 +232,7 @@ ui-blackbox run ./steps.json --format all       # a steps .json file
 ui-blackbox run a b c --junit results.xml       # suite + JUnit for CI
 ui-blackbox run a b c --parallel 3              # one isolated subprocess each
 ui-blackbox run a b c --parallel 3 --timeout 300  # per-scenario watchdog (sec)
+ui-blackbox run smoke --trace-on-failure        # keep a Playwright trace.zip only on failure
 ui-blackbox doctor                              # browser/dirs/config self-check
 ```
 
