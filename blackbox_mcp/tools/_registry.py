@@ -64,7 +64,8 @@ def _with_recorder(name: str, fn: Callable) -> Callable:
     # Preserve input params for FastMCP's schema, but drop the return annotation:
     # some tools return Image, which pydantic can't schema-ify through a wrapper.
     sig = inspect.signature(fn)
-    wrapper.__signature__ = sig.replace(return_annotation=inspect.Signature.empty)
+    wrapper.__signature__ = (  # type: ignore[attr-defined]
+        sig.replace(return_annotation=inspect.Signature.empty))
     wrapper.__annotations__ = {k: v for k, v in getattr(fn, "__annotations__", {}).items()
                                if k != "return"}
     return wrapper

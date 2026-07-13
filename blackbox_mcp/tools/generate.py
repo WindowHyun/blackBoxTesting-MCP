@@ -66,7 +66,7 @@ _STEP_SCHEMA = {
 def _suggest_selector(el: dict) -> str:
     if el.get("testid"):
         return f"testid={el['testid']}"
-    role = el.get("role") or _TAG_ROLE.get(el.get("tag"))
+    role = el.get("role") or _TAG_ROLE.get(el.get("tag") or "")
     if el.get("tag") == "input" and not el.get("role"):
         # Derive from type; unknown/hidden types keep textbox as a sane default.
         role = _INPUT_TYPE_ROLE.get((el.get("type") or "").lower(), "textbox")

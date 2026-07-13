@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from typing import Any
 
 from ..config import CONFIG, effective_browser
 from .listeners import EventBuffers, attach
@@ -42,10 +43,13 @@ class BrowserSession:
     """Owns the Playwright lifecycle and the current page/frame context."""
 
     def __init__(self) -> None:
-        self._pw = None
-        self._browser = None
-        self._context = None
-        self._page = None
+        # Playwright objects, populated by start() (optional-init pattern —
+        # typed Any so mypy doesn't pin them to None; liveness is guarded at
+        # runtime by is_alive()/the page property, not the type system).
+        self._pw: Any = None
+        self._browser: Any = None
+        self._context: Any = None
+        self._page: Any = None
         self._cdp = False          # attached to a user-owned browser via CDP
         self._persistent = False   # launched a real browser with a saved profile
         self._persistent_opts: dict | None = None
@@ -100,7 +104,7 @@ class BrowserSession:
         if browser_name != CONFIG.browser:
             log.warning("unknown BROWSER=%r — using chromium.", CONFIG.browser)
         browser_type = getattr(self._pw, browser_name)
-        launch_kwargs = {"headless": CONFIG.headless}
+        launch_kwargs: dict = {"headless": CONFIG.headless}
         if CONFIG.stealth:
             launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
 

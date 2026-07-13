@@ -24,7 +24,9 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
-    "mypy>=1.11",
+    # <2: mypy is a BLOCKING CI gate — cap the major so a future mypy release
+    # can't fail CI on an unrelated PR.
+    "mypy>=1.11,<2",
 ]
 
 [project.scripts]

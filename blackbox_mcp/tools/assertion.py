@@ -45,8 +45,9 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
         actual = session.page.url
         passed = actual == target
     elif kind == "url_contains":
-        actual = session.page.url
-        passed = target in actual
+        url = session.page.url
+        actual = url
+        passed = target in url
     elif kind == "count":
         # count's verdict depends on WHICH population is counted — see
         # resolve_count_population: selectors count their strategy, everything
