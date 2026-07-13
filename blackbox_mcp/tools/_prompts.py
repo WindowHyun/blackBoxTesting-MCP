@@ -16,7 +16,7 @@ _ONLY = ("**ui-blackbox MCP 서버의 도구만** 사용해. 다른 브라우저
          "사용 가능한 도구: navigate · snapshot · screenshot · interact · assert_ · "
          "get_console_logs · get_network_errors · wait · switch_frame · "
          "expect_dialog · reset_session · use_real_browser · dismiss_banners · "
-         "save_state · load_state · list_states · "
+         "save_state · load_state · list_states · mock_route · unmock_route · "
          "run_scenario · save_report · generate_scenario · save_scenario · "
          "load_scenario · list_scenarios · status.")
 
@@ -31,7 +31,10 @@ _MATRIX = (
     "- 게스트/회원 등 역할 비교 → 역할별 `save_state` 해두고 `reset_session`+"
     "`load_state`로 전환하며 같은 흐름 반복\n"
     "- 요소가 늦게 나타남/타이밍 이슈 → `wait(selector=...)`(고정 ms 지연보다 우선)\n"
-    "- 에러 페이지 자체를 검증 → navigate 스텝에 `expect_status`\n"
+    "- 외부 API가 불안정/미구현이라 flaky → `mock_route`로 해당 요청만 로컬 응답 대체 "
+    "(reset 후엔 다시 걸 것)\n"
+    "- 에러 페이지 자체를 검증 → navigate 스텝에 `expect_status` "
+    "(mock_route status=500과 조합하면 오프라인 검증 가능)\n"
     "- 원인 불명 실패 → `status`로 세션 상태 확인 + `get_console_logs`/"
     "`get_network_errors`로 증거 수집\n"
     "- 페이지 구조를 모름 → `snapshot`(트리) 또는 `generate_scenario`(작성 키트)")

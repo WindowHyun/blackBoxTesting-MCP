@@ -27,6 +27,7 @@ _TOOL_MODULES = (
     "realbrowser",
     "overlays",
     "state",
+    "mock",
     "scenario",
     "savereport",
     "generate",

@@ -27,6 +27,7 @@ from ..tools.dialog import expect_dialog
 from ..tools.frame import switch_frame
 from ..tools.interact import interact
 from ..tools.navigate import navigate
+from ..tools.mock import mock_route, unmock_route
 from ..tools.session import reset_session
 from ..tools.snapshot import snapshot
 from ..tools.state import load_state, save_state
@@ -136,6 +137,24 @@ async def _dispatch(step: dict) -> dict:
         if not ok:
             out["ai_suggestion"] = ("save_state로 먼저 저장했는지, 실 브라우저 모드가 "
                                     "아닌지 확인 (load_state는 번들/채널 전용)")
+
+    elif action == "mock_route":
+        if "pattern" not in step:
+            out.update(actual="missing required field(s): pattern", passed=False,
+                       ai_reason="malformed step",
+                       ai_suggestion="add 'pattern' to the mock_route step")
+        else:
+            res = await mock_route(step["pattern"], body=step.get("body", ""),
+                                   status=step.get("status", 200),
+                                   content_type=step.get("content_type",
+                                                         "application/json"))
+            out.update(expected="mock armed", actual=res.get("pattern") or res.get("error"),
+                       passed=bool(res.get("ok")), ai_reason="network mock armed")
+
+    elif action == "unmock_route":
+        res = await unmock_route(step.get("pattern"))
+        out.update(expected="mock removed", actual=f"active={res.get('active')}",
+                   passed=bool(res.get("ok")), ai_reason="network mock removed")
 
     elif action == "screenshot":
         # the actual capture happens in run() (it owns name/idx); flag it.
