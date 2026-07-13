@@ -167,6 +167,7 @@ async def run(
     description: str = "",
     continue_on_fail: bool = False,
     screenshot_each: bool = False,
+    trace_on_failure: bool = False,
 ) -> dict[str, Any]:
     """Execute steps and return a structured result (DESIGN §6.1)."""
     session = await get_session()
@@ -180,6 +181,18 @@ async def run(
     run_id = report.new_run_id()
     result["run_id"] = run_id
     run_tag = f"{run_id}_{name}"
+
+    # Playwright tracing: armed up front, kept only if the run fails —
+    # trace.zip (DOM/network/console timeline, `playwright show-trace`) is far
+    # richer failure evidence than a screenshot. Best-effort: tracing must
+    # never break the run (e.g. a reset_session step swaps the context and
+    # orphans the recorder — stop() then just fails quietly).
+    tracing = trace_on_failure
+    if tracing:
+        try:
+            await session._context.tracing.start(screenshots=True, snapshots=True)
+        except Exception:
+            tracing = False
 
     for idx, step in enumerate(steps, start=1):
         c0 = len(session.buffers.console)
@@ -226,6 +239,11 @@ async def run(
 
     result["summary"] = report.summarize(result["steps"])
     result["meta"]["duration_ms"] = int((time.monotonic() - t0) * 1000)
+
+    if tracing:
+        result["trace"] = await _stop_tracing(
+            session, failed=result["summary"]["failed"] > 0, run_tag=run_tag)
+
     result["a11y_findings"] = await _a11y_audit(session)   # SM-09
     report.compute_regression(result)                      # SM-07
     # Records are already scrubbed at append time, so the run's resolved secrets
@@ -252,6 +270,24 @@ _A11Y_JS = """
   return out.slice(0, 50);
 }
 """
+
+
+async def _stop_tracing(session, *, failed: bool, run_tag: str) -> str | None:
+    """Stop tracing; keep the trace zip only for FAILED runs (stop() without a
+    path discards — green runs shouldn't accumulate multi-MB artifacts). The
+    filename carries the run id (leading, like screenshots) so retention
+    keeps/deletes it with the rest of the run."""
+    try:
+        if not failed:
+            await session._context.tracing.stop()
+            return None
+        base = report.ensure_dirs() / "traces"
+        base.mkdir(parents=True, exist_ok=True)
+        path = base / f"{report._SAFE.sub('_', run_tag)}.zip"
+        await session._context.tracing.stop(path=str(path))
+        return str(path)
+    except Exception:
+        return None  # context swapped mid-run (reset_session) etc.
 
 
 async def _a11y_audit(session) -> list[dict]:

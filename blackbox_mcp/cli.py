@@ -70,7 +70,10 @@ async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
             try:
                 res = await runner.run(steps, name=name,
                                        continue_on_fail=args.continue_on_fail,
-                                       screenshot_each=args.screenshot_each)
+                                       screenshot_each=args.screenshot_each,
+                                       trace_on_failure=args.trace_on_failure)
+                if res.get("trace"):
+                    print(f"  trace: {res['trace']}  (playwright show-trace로 열기)")
                 files = report.save(res, formats=args.format)
                 s = res["summary"]
                 mark = "PASS" if s["failed"] == 0 else "FAIL"
@@ -154,6 +157,8 @@ def _run_parallel(refs: list[str], args) -> int:
                     cmd.append("--continue-on-fail")
                 if args.screenshot_each:
                     cmd.append("--screenshot-each")
+                if args.trace_on_failure:
+                    cmd.append("--trace-on-failure")
                 proc = await asyncio.create_subprocess_exec(*cmd, env=child_env)
                 procs.append(proc)
                 try:
@@ -288,6 +293,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="keep executing steps after a failure")
     run_p.add_argument("--screenshot-each", action="store_true",
                        help="screenshot every step, not just failures")
+    run_p.add_argument("--trace-on-failure", action="store_true",
+                       help="record a Playwright trace; keep the .zip only if "
+                            "the scenario fails (open with: playwright show-trace)")
     run_p.add_argument("--junit", metavar="PATH",
                        help="also write a JUnit XML report (sequential runs only)")
     run_p.add_argument("--parallel", type=int, default=1, metavar="N",

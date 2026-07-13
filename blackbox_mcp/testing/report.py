@@ -183,6 +183,13 @@ def _prune(report_dir: Path) -> None:
             # Unstamped legacy files (no id) are left alone.
             if _run_id_of(p.name) in doomed:
                 p.unlink(missing_ok=True)
+    traces = report_dir / "traces"
+    if traces.is_dir():
+        for p in traces.glob("*.zip"):
+            # Failure traces share the run id (runner._stop_tracing) — pruned
+            # with their run like screenshots.
+            if _run_id_of(p.name) in doomed:
+                p.unlink(missing_ok=True)
 
 
 def save(result: dict, formats: str = "both") -> dict[str, str]:
