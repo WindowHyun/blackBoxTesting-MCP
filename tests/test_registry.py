@@ -53,7 +53,27 @@ def test_prompts_registered():
     from blackbox_mcp.tools._registry import _PENDING_PROMPTS
 
     names = {p.name or p.fn.__name__ for p in _PENDING_PROMPTS}
-    assert {"ui-test", "ui-scenario", "ui-generate"} <= names
+    assert {"ui-test", "ui-scenario", "ui-generate", "ui-login", "ui-sync"} <= names
+
+
+def test_prompt_primers_reference_real_tools():
+    """The tool list & decision matrix inside the primers must only name tools
+    that actually exist — a renamed tool must not leave stale prompt text."""
+    import re
+
+    import blackbox_mcp.tools as tools
+    tools._import_all()
+    from blackbox_mcp.tools import _prompts
+    from blackbox_mcp.tools._registry import _PENDING
+
+    real = {p.name or p.fn.__name__ for p in _PENDING}
+    text = _prompts._ONLY + _prompts._MATRIX
+    named = set(re.findall(r"`([a-z_]+)`", text)) | {
+        t.strip() for t in re.findall(r"[:·] ([a-z_ ·]+)", _prompts._ONLY)
+        for t in t.split("·")}
+    step_fields = {"expect_status"}  # scenario step field, not a tool
+    unknown = {n for n in named if n and " " not in n} - real - step_fields
+    assert not unknown, f"prompts reference nonexistent tools: {unknown}"
 
 
 def test_locator_prefix_parsing():
