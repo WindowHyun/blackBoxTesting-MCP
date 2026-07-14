@@ -53,6 +53,9 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
 
     if name == "navigate":
         r = result or {}
+        if r.get("error"):  # navigation error (DNS/refused/invalid URL)
+            return ("도착 (2xx/3xx)", r.get("error"), False, None,
+                    "navigation failed", "URL 오타·DNS·연결 거부 여부 확인")
         status = r.get("status")
         # None on file:// or a settle-timeout (no response) — reachable; a real
         # 4xx/5xx is a failed load, not a pass.

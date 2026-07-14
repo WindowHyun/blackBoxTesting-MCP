@@ -33,5 +33,7 @@ async def test_login_flow_end_to_end(session):
     assert img.data[:8] == b"\x89PNG\r\n\x1a\n"
 
     # fixture intentionally logs a console error and loads a missing image
-    assert any("fixture console error" in e["text"] for e in await get_console_logs("error"))
-    assert any("does-not-exist.png" in e["url"] for e in await get_network_errors())
+    assert any("fixture console error" in e["text"]
+               for e in (await get_console_logs("error"))["logs"])
+    assert any("does-not-exist.png" in e["url"]
+               for e in (await get_network_errors())["errors"])

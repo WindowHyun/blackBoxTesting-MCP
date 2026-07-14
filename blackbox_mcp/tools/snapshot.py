@@ -15,6 +15,8 @@ Use ``focus`` to scope to a subtree when a page is large.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from ..browser import get_session
 from ._registry import tool
 
@@ -51,8 +53,9 @@ _DOM_OUTLINE_JS = """
 
 @tool(description="Return a textual snapshot of the page. mode='a11y' yields the "
                   "ARIA (accessibility) tree as YAML; mode='dom' a brief outline. "
-                  "focus=<css> scopes to a subtree; depth=<n> trims deep trees.")
-async def snapshot(mode: str = "a11y", focus: str | None = None,
+                  "focus=<css> scopes to a subtree; depth=<n> trims deep trees "
+                  "(depth engages the ref-carrying AI snapshot).")
+async def snapshot(mode: Literal["a11y", "dom"] = "a11y", focus: str | None = None,
                    depth: int | None = None) -> str:
     session = await get_session()
     root = session.root

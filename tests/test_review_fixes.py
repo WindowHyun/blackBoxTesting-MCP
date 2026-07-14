@@ -13,7 +13,7 @@ from blackbox_mcp.testing import runner
 async def test_console_warn_level_matches_warning(session):
     await session.page.set_content("<script>console.warn('heads up')</script>")
     await session.page.wait_for_timeout(100)
-    warns = await get_console_logs(level="warn")
+    warns = (await get_console_logs(level="warn"))["logs"]
     assert any("heads up" in w["text"] for w in warns)
 
 

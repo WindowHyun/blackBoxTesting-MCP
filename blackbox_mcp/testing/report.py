@@ -222,8 +222,21 @@ def _prune(report_dir: Path) -> None:
                 p.unlink(missing_ok=True)
 
 
+VALID_FORMATS = ("json", "md", "html", "both", "all")
+
+
 def save(result: dict, formats: str = "both") -> dict[str, str]:
-    """Persist a scenario result; return written file paths by format."""
+    """Persist a scenario result; return written file paths by format.
+
+    Raises ValueError on an unknown ``formats`` — silently writing zero files
+    used to make save_report return ok:true while wiping the recorder, so an
+    unrecognized value ('pdf', 'JSON', 'markdown') discarded every recorded
+    step. Callers surface this as a tool error instead."""
+    fmt = (formats or "").strip().lower()
+    if fmt not in VALID_FORMATS:
+        raise ValueError(
+            f"unknown report_format {formats!r}; expected one of {list(VALID_FORMATS)}")
+    formats = fmt
     report_dir = ensure_dirs()
     # Reuse the run id the screenshots were stamped with, so retention keeps
     # report + screenshots together. Falls back for callers that didn't set it.

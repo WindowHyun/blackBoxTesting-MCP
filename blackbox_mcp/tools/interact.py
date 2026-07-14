@@ -1,6 +1,8 @@
 """CT-04: interact — click/type/hover/select/press via the D2 selector chain."""
 from __future__ import annotations
 
+from typing import Literal
+
 from ..browser import get_session
 from ..browser.locator import resolve
 from ..config import CONFIG
@@ -8,12 +10,13 @@ from ..testing.secrets import mask_value, resolve as resolve_env, scrub
 from ._registry import tool
 
 _ACTIONS = {"click", "type", "hover", "select", "press"}
+Action = Literal["click", "type", "hover", "select", "press"]
 
 
 @tool(description="Perform a UI action: action ∈ click|type|hover|select|press. "
                   "selector uses the priority chain testid= / role= / text= / css=. "
                   "value is required for type/select/press.")
-async def interact(action: str, selector: str, value: str | None = None) -> dict:
+async def interact(action: Action, selector: str, value: str | None = None) -> dict:
     if action not in _ACTIONS:
         return {"ok": False, "action": action, "selector": selector,
                 "detail": f"unknown action; expected one of {sorted(_ACTIONS)}"}

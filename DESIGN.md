@@ -300,13 +300,13 @@ API:
 ### 5.2 코어 (CT)
 | Tool | 시그니처 | 반환 | 우선순위 |
 |---|---|---|---|
-| `navigate` | `navigate(url, wait_until="networkidle")` | `{title, url, status}` | MUST |
+| `navigate` | `navigate(url, wait_until?)` | `{ok, status, title, url, settled, error}` | MUST |
 | `snapshot` | `snapshot(mode="a11y")` | 텍스트(a11y 트리 or 간략 DOM) | MUST |
 | `screenshot` | `screenshot(full_page=False)` | image content | MUST |
 | `interact` | `interact(action, selector, value=None)` | `{ok, action, selector, detail}` | MUST |
 | `assert_` | `assert_(kind, target, expected=None)` | `{passed, kind, target, expected, actual}` | MUST |
-| `get_console_logs` | `get_console_logs(level="all")` | `[{level,text,location,ts}]` | MUST |
-| `get_network_errors` | `get_network_errors()` | `[{url,status/failure,method}]` | MUST |
+| `get_console_logs` | `get_console_logs(level="all", limit=200)` | `{logs, total, returned, truncated, dropped}` | MUST |
+| `get_network_errors` | `get_network_errors(same_origin=False, limit=200)` | `{errors, total, returned, truncated, dropped}` | MUST |
 | `wait` | `wait(ms=None, selector=None)` | `{ok, waited}` | SHOULD |
 | `switch_frame` | `switch_frame(selector=None)` | `{ok, context}` | SHOULD |
 | `expect_dialog` | `expect_dialog(action, expected_text=None)` | `{passed, dialog_type, message}` | SHOULD |

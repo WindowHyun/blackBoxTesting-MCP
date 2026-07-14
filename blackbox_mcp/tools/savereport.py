@@ -6,6 +6,8 @@ flow starts fresh.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from ..browser import get_session
 from ..testing import recorder, report, runner
 from ._registry import tool
@@ -15,7 +17,8 @@ from ._registry import tool
                   "모든 테스트 작업의 마지막에 호출해 결과를 남긴다. report_format ∈ "
                   "json|md|html|both|all. 저장 후 기록은 초기화된다.")
 async def save_report(name: str = "session", description: str = "",
-                      report_format: str = "all") -> dict:
+                      report_format: Literal["json", "md", "html", "both", "all"] = "all"
+                      ) -> dict:
     result = recorder.build_result(name=name, description=description)
     if result["summary"]["total"] == 0:
         return {"ok": False, "message": "기록된 동작이 없습니다. 먼저 도구로 작업을 수행하세요."}

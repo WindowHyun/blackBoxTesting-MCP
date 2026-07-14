@@ -39,20 +39,29 @@ _MAX_EVENTS = 1000
 class EventBuffers:
     console: list[ConsoleEntry] = field(default_factory=list)
     network: list[NetworkEntry] = field(default_factory=list)
+    # Count of oldest entries evicted by the cap since the last clear() — lets
+    # the read tools tell the caller "older events were dropped" instead of
+    # silently returning a partial history.
+    console_dropped: int = 0
+    network_dropped: int = 0
 
     def add_console(self, entry: ConsoleEntry) -> None:
         self.console.append(entry)
         if len(self.console) > _MAX_EVENTS:
+            self.console_dropped += len(self.console) - _MAX_EVENTS
             del self.console[:-_MAX_EVENTS]
 
     def add_network(self, entry: NetworkEntry) -> None:
         self.network.append(entry)
         if len(self.network) > _MAX_EVENTS:
+            self.network_dropped += len(self.network) - _MAX_EVENTS
             del self.network[:-_MAX_EVENTS]
 
     def clear(self) -> None:
         self.console.clear()
         self.network.clear()
+        self.console_dropped = 0
+        self.network_dropped = 0
 
 
 def attach(page, buffers: EventBuffers) -> None:

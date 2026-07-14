@@ -3,6 +3,14 @@
 The PRD requires `pip install` to be the only manual step. On first launch we
 verify the Playwright browser binary exists and, if not, install it via the
 Playwright CLI. If it is already present we return immediately.
+
+In the MCP server this must NOT run before the stdio transport starts —
+a ~150MB download would stall the `initialize` handshake past the client's
+timeout and the server would look dead. So server startup no longer calls this
+synchronously; instead ``BrowserSession.start`` invokes it lazily (via
+``asyncio.to_thread`` so the sync Playwright CLI runs off the event loop) on the
+first browser use, and the install is time-bounded (``INSTALL_TIMEOUT_S``) so a
+throttled/hung download eventually gives up instead of blocking forever.
 """
 from __future__ import annotations
 
@@ -14,6 +22,12 @@ import sys
 from .config import CONFIG, effective_browser
 
 log = logging.getLogger(__name__)
+
+# Upper bound on the first-run `playwright install`. A slow-trickle/throttled
+# connection never trips Playwright's own 30s idle-socket timeout, so bound the
+# whole install here — on expiry we log and continue (the launch will surface a
+# clear error) rather than hang. ~10 min is generous for a ~150MB download.
+INSTALL_TIMEOUT_S = 600
 
 
 def _browser_installed(name: str) -> bool:
@@ -61,6 +75,13 @@ def ensure_chromium() -> None:
             "CHROMIUM_EXECUTABLE set but missing: %s", CONFIG.chromium_executable
         )
 
+    if CONFIG.cdp_url:
+        # CDP mode attaches to the user's already-running browser and never
+        # launches a bundled binary — skip the download. (A CDP-attach failure
+        # falls back to a local launch, which will trigger the install then.)
+        log.info("BROWSER_CDP set — skipping bundled browser install.")
+        return
+
     if _browser_installed(name):
         log.debug("Playwright %s already installed.", name)
         return
@@ -68,17 +89,20 @@ def ensure_chromium() -> None:
     log.info("Playwright %s not found — installing (first run only)...", name)
     try:
         # stdout is the MCP JSON-RPC pipe once Claude Desktop spawns us —
-        # install progress must never reach it.
+        # install progress must never reach it. Time-bounded so a throttled
+        # download can't block forever (the except below then continues).
         subprocess.run(
             [sys.executable, "-m", "playwright", "install", name],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=INSTALL_TIMEOUT_S,
         )
         log.info("Playwright %s installed.", name)
     except Exception as exc:
-        # Never let a failed auto-install crash server startup — the first
-        # browser launch will surface a clear error if no binary is reachable.
+        # Never let a failed/slow auto-install crash startup — the first browser
+        # launch will surface a clear error if no binary is reachable. A
+        # TimeoutExpired lands here too (bounded, not an unbounded hang).
         log.warning(
             "Could not install %s automatically (%s). If a browser is provided "
             "externally, set CHROMIUM_EXECUTABLE to its path.",

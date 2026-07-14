@@ -68,4 +68,7 @@ GitHub Release 발행 또는 Actions `Release → Run workflow`).
 - `secrets.scrub`은 긴 값부터 치환(부분문자열 secret 잔여 노출 방지). HTML 리포트 스크린샷 임베드는 report_dir 하위 경로만.
 - `ai_reason`/`ai_suggestion`은 러너에선 **규칙 기반**(리포트 각주로 명시) — 대화형(Claude)에선 호스트 LLM이 보강. 필드명은 스키마(DESIGN §6.1)라 유지.
 - 서버는 **단일 테넌트**(프로세스당 세션 1개·전역 recorder). 병렬은 CLI 프로세스 분리로만. 공유 서버는 스코프 밖(아키텍처 재작업 필요).
+- **모든 MCP 도구 호출은 `_registry._TOOL_LOCK`으로 직렬화** — MCP SDK는 요청을 동시 디스패치하므로, 전역 recorder(`_LOG/_COUNTER/_RUN_ID`)와 scrub 맵(`_RESOLVED_SECRETS`)의 인터리브(스텝 증발·자격증명 평문 누출)를 막는다. 락 순서 `_TOOL_LOCK` → `_SESSION_LOCK` → `_op_lock`. `run_scenario` 내부는 raw 함수 호출이라 재진입 없음. register_all이 `_serialized`로 감싼다(recorder 래퍼와 별개, 시그니처는 `_copy_schema_sig`가 **해석된 실타입**으로 복사 — `from __future__ annotations` + 래퍼 globals 때문에 문자열 어노테이션은 pydantic이 못 푼다).
+- 브라우저 설치(`ensure_chromium`)는 **핸드셰이크 경로에서 제거** — `mcp.run()` 전에 동기 실행하면 첫 실행 다운로드(~150MB)가 `initialize`를 막아 서버가 죽은 듯 보인다. `session.start()`가 `asyncio.to_thread`로 지연 실행(루프 밖 sync CLI), subprocess는 `INSTALL_TIMEOUT_S` 상한, CDP 모드는 스킵.
+- enum 파라미터는 `Literal`로 스키마 enum 노출(action/kind/wait_until/mode/level/report_format). `report_format`은 `report.save`가 검증(알 수 없는 값→ValueError, save_report는 기록 보존하며 ok:false). navigate는 `{ok, status, error}` — DNS/연결오류는 raise 대신 `ok:false`. get_console_logs/get_network_errors는 `{logs|errors, total, returned, truncated, dropped}`(limit 기본 200, 버퍼 1000캡 드롭 신호).
 - 린트 게이트: `ruff check blackbox_mcp`·`mypy blackbox_mcp` 둘 다 CI 차단(현재 clean). 세션의 Playwright 속성은 `Any`로 타입(옵셔널-init — 생존은 `is_alive()`가 런타임 보장). mypy 메이저는 pyproject에서 `<2` 캡.

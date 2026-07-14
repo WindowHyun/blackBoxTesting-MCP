@@ -103,6 +103,13 @@ async def _dispatch(step: dict) -> dict:
     if action == "navigate":
         res = await navigate(secrets.resolve(step["url"]), step.get("wait_until"))
         status = res.get("status")
+        if res.get("error"):
+            # Navigation ERROR (DNS/refused/invalid URL) — no page loaded.
+            # A hard fail regardless of expect_status.
+            out.update(expected="도착 (2xx/3xx)", actual=res.get("error"),
+                       passed=False, ai_reason="navigation failed",
+                       ai_suggestion="URL 오타·DNS·연결 거부 여부 확인")
+            return out
         expect = step.get("expect_status")  # opt-in: assert an exact status
         if expect is not None:
             ok = status == expect

@@ -67,6 +67,17 @@ class BrowserSession:
     async def start(self) -> None:
         from playwright.async_api import async_playwright
 
+        # Lazy first-run browser install (moved off the server's stdio
+        # handshake). Runs in a worker thread — the sync Playwright CLI can't
+        # run on the event loop, but a thread with no loop is fine — and is
+        # idempotent/fast once installed. Best-effort: a failure here just means
+        # the launch below surfaces the clear "no binary" error.
+        from ..bootstrap import ensure_chromium
+        try:
+            await asyncio.to_thread(ensure_chromium)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("lazy browser install skipped (%s)", exc)
+
         self._pw = await async_playwright().start()
 
         if CONFIG.cdp_url:

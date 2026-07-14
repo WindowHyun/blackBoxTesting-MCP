@@ -1,8 +1,12 @@
 """SM-01: run_scenario — execute a JSON scenario and report results."""
 from __future__ import annotations
 
+from typing import Literal
+
 from ..testing import report, runner
 from ._registry import tool
+
+ReportFormat = Literal["json", "md", "html", "both", "all"]
 
 
 @tool(description="Run a JSON scenario (array of steps) and report per-step results. "
@@ -17,7 +21,7 @@ async def run_scenario(
     description: str = "",
     continue_on_fail: bool = False,
     save_report: bool = True,
-    report_format: str = "both",
+    report_format: ReportFormat = "both",
     screenshot_each: bool = False,
     trace_on_failure: bool = False,
 ) -> dict:
@@ -27,5 +31,10 @@ async def run_scenario(
         trace_on_failure=trace_on_failure,
     )
     if save_report:
-        result["report_files"] = report.save(result, formats=report_format)
+        try:
+            result["report_files"] = report.save(result, formats=report_format)
+        except ValueError as exc:
+            # Bad report_format must not discard the run that already executed.
+            result["report_files"] = {}
+            result["report_error"] = str(exc)
     return result

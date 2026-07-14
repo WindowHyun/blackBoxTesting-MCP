@@ -18,13 +18,13 @@ async def test_navigate_returns_title_and_url(session):
 
 async def test_console_buffer_captures_error(session):
     await navigate(fixture_url("basic.html"), wait_until="load")
-    errors = await get_console_logs(level="error")
+    errors = (await get_console_logs(level="error"))["logs"]
     assert any("fixture console error" in e["text"] for e in errors)
 
 
 async def test_network_buffer_captures_failed_request(session):
     await navigate(fixture_url("basic.html"), wait_until="load")
-    net = await get_network_errors()
+    net = (await get_network_errors())["errors"]
     # the missing image should surface as a failed request
     assert any("does-not-exist.png" in e["url"] for e in net)
 

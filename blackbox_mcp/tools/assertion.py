@@ -4,18 +4,21 @@ Exposed to MCP as the tool name 'assert_' (assert is a Python keyword).
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from ..browser import get_session
 from ..browser.locator import resolve, resolve_count_population
 from ._registry import tool
 
 _KINDS = {"text_visible", "element_visible", "url_is", "url_contains", "count"}
+Kind = Literal["text_visible", "element_visible", "url_is", "url_contains", "count"]
 
 
 @tool(name="assert_",
       description="Assert a condition. kind ∈ text_visible|element_visible|url_is|"
                   "url_contains|count. target is text/selector/url; expected used "
-                  "by count (a number).")
-async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
+                  "by count (a number — accepts 3 or \"3\").")
+async def assert_(kind: Kind, target: str, expected: str | int | None = None) -> dict:
     if kind not in _KINDS:
         return {"passed": False, "kind": kind, "target": target,
                 "expected": expected, "actual": f"unknown kind; expected {sorted(_KINDS)}"}
