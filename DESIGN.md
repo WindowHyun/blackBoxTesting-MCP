@@ -512,13 +512,14 @@ SM-01~04와 함께(또는 직후) 구현한다.
 ```json
 {
   "mcpServers": {
-    "ui-blackbox": { "command": "/abs/path/.venv/bin/python", "args": ["-m", "blackbox_mcp.server"] }
+    "ui-blackbox": { "command": "uvx", "args": ["ui-blackbox-mcp"] }
   }
 }
 ```
-> `command`는 **venv의 절대경로 인터프리터**여야 한다 — 시스템 `python`은 PyJWT
-> RECORD 충돌로 설치가 깨진다(CLAUDE.md). 정식 예시는
-> `claude_desktop_config.example.json`.
+> 권장은 **PyPI 패키지 + uvx**(격리 환경 자동 — `claude_desktop_config.example.json`).
+> 클론 기반 개발 설정은 venv의 **절대경로 인터프리터**를 써야 한다
+> (`/abs/path/.venv/bin/python -m blackbox_mcp.server`) — 시스템 `python`은
+> PyJWT RECORD 충돌로 설치가 깨진다(CLAUDE.md).
 
 ### 7.1 CLI / CI 진입점 (`blackbox_mcp/cli.py`, `ui-blackbox` 스크립트)
 

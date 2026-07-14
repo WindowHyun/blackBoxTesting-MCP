@@ -1,17 +1,18 @@
 # Releasing to PyPI
 
-패키징은 [공식 튜토리얼](https://packaging.python.org/en/latest/tutorials/packaging-projects/)
-절차를 따르며, 빌드·검사까지는 검증 완료 상태다
-(`python -m build` → wheel+sdist, `twine check` PASSED, 깨끗한 venv 설치 후
-`ui-blackbox doctor` OK·25 tools 등록 확인). 이름 `ui-blackbox-mcp`는
-PyPI/TestPyPI 모두 미선점 확인(2026-07).
+**현재 상태: 배포 중.** https://pypi.org/project/ui-blackbox-mcp/ —
+v0.1.0이 trusted publishing(경로 A)으로 게시됐고(2026-07), 실PyPI에서
+`pip install ui-blackbox-mcp` → `ui-blackbox doctor` OK 실측 확인됨.
+trusted publisher 등록(최초 1회)은 완료 상태라, 이후 릴리스는 아래
+"매 릴리스" 절차만 반복하면 된다.
 
-업로드는 계정 소유자만 할 수 있다. 두 경로 중 하나를 쓴다 — **경로 A 권장**
-(토큰을 어디에도 저장하지 않음).
+패키징은 [공식 튜토리얼](https://packaging.python.org/en/latest/tutorials/packaging-projects/)
+절차를 따른다(`python -m build` → wheel+sdist, `twine check`, 깨끗한 venv
+설치 검증). **경로 A 권장**(토큰을 어디에도 저장하지 않음).
 
 ## 경로 A (권장) — GitHub Release → 자동 배포 (Trusted Publishing)
 
-최초 1회 설정:
+최초 1회 설정(✅ 완료됨 — 새 저장소/프로젝트로 옮길 때만 다시 필요):
 1. https://pypi.org 계정 생성(2FA 필수).
 2. PyPI → **Publishing** → *Add a new pending publisher*:
    - PyPI Project Name: `ui-blackbox-mcp`

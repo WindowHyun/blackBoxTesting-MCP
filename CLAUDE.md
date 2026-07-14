@@ -40,7 +40,9 @@ python -m venv .venv
 7. 각 작업 후 `pytest` 통과 + 커밋. PR/병합은 명시 요청 시에만.
 
 ## 작업 브랜치
-`claude/compassionate-gauss-m0w47k` (메인라인 `main` 존재). 커밋은 작업 브랜치에.
+세션별 지정 `claude/*` 브랜치에 커밋(메인라인 `main`, 병합은 PR로 — 명시 요청 시에만).
+배포: PyPI `ui-blackbox-mcp` (릴리스 절차는 `RELEASING.md` — main 병합 후
+GitHub Release 발행 또는 Actions `Release → Run workflow`).
 
 ## 함정(Gotchas)
 - 시스템 Python `pip install`은 PyJWT RECORD 충돌로 실패 → **venv 필수**.

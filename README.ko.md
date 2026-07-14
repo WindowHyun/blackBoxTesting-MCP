@@ -12,6 +12,9 @@
   <br><em>자동 생성된 리포트 — 통과율·스텝별 스크린샷·실패 원인·회귀·접근성·자격증명 마스킹</em>
 </p>
 
+[![PyPI](https://img.shields.io/pypi/v/ui-blackbox-mcp)](https://pypi.org/project/ui-blackbox-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/ui-blackbox-mcp)](https://pypi.org/project/ui-blackbox-mcp/)
+
 Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio · **CI 테스트 green**
 
 ---
@@ -36,17 +39,15 @@ Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio 
 
 ### 1) 설치
 
-**방법 A — 클론 없이 한 줄(권장).** `uvx`(파이썬판 `npx`,
-[uv](https://docs.astral.sh/uv/)에 포함)가 받기·격리·실행을 한 번에 처리한다 —
-아래가 Claude Desktop 설정의 전부다(venv/경로 설정 불필요):
+**방법 A — PyPI에서 한 줄, 클론 불필요(권장).** `uvx`(파이썬판 `npx`,
+[uv](https://docs.astral.sh/uv/)에 포함)가
+[`ui-blackbox-mcp`](https://pypi.org/project/ui-blackbox-mcp/) 패키지를 받아
+격리·실행까지 한 번에 처리한다 — 아래가 Claude Desktop 설정의 전부다:
 
 ```json
 {
   "mcpServers": {
-    "ui-blackbox": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/WindowHyun/blackBoxTesting-MCP.git", "ui-blackbox-mcp"]
-    }
+    "ui-blackbox": { "command": "uvx", "args": ["ui-blackbox-mcp"] }
   }
 }
 ```
@@ -54,14 +55,14 @@ Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio 
 CLI도 같은 방식으로, `pipx`/`pip` 사용자는 아래처럼:
 
 ```bash
-uvx --from git+https://github.com/WindowHyun/blackBoxTesting-MCP.git ui-blackbox doctor
-pipx install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git   # 또는
-pip install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git
+uvx --from ui-blackbox-mcp ui-blackbox doctor
+pipx install ui-blackbox-mcp    # 또는
+pip install ui-blackbox-mcp
 ```
 
 Chromium은 서버 첫 실행 때 자동 설치된다(또는 `playwright install chromium` 1회).
-PyPI에 배포되면 `uvx ui-blackbox-mcp` / `pip install ui-blackbox-mcp`로 더 짧아진다 —
-배포 워크플로 동봉(`.github/workflows/release.yml`, PyPI trusted publishing).
+아직 배포 안 된 최신 개발판을 쓰려면 패키지명 대신
+`git+https://github.com/WindowHyun/blackBoxTesting-MCP.git`를 넣으면 된다.
 
 **방법 B — 클론해서(개발용):**
 ```bash
@@ -83,9 +84,10 @@ python -m venv .venv
 
 ## 🔌 클라이언트 설정
 
-서버는 **stdio**로 동작하므로 모든 MCP 클라이언트가 같은 방식으로 띄운다 — venv의
-Python으로 `-m blackbox_mcp.server`를 실행. 클라이언트마다 **설정 파일/형식만** 다르다.
-본인 것을 고르면 된다.
+서버는 **stdio**로 동작하므로 모든 MCP 클라이언트가 같은 방식으로 띄운다. PyPI
+패키지를 쓰면 명령은 그냥 `uvx` + `ui-blackbox-mcp`(위 방법 A — 아래 모든
+클라이언트에서 command만 바꾸면 됨). 아래 예시들은 클론+venv 방식(venv Python으로
+`-m blackbox_mcp.server`)이고, 클라이언트마다 **설정 파일/형식만** 다르다.
 
 <details open>
 <summary><b>Claude Desktop</b></summary>

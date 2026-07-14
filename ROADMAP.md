@@ -192,6 +192,26 @@ tools 20, 서버 부팅·`doctor` 정상, GitHub Actions CI(유닛+브라우저 
 
 ---
 
+## Phase 7 — 확장 도구·배포 (2026-07, PR #15) ✅ 완료
+
+qa-autopilot(playwright-cli) 사례 분석에서 이식한 실무 패턴 + 배포 파이프라인.
+
+- **로그인 상태 재사용** — `save_state`/`load_state`/`list_states`: 쿠키+localStorage를
+  파일(0600)로 저장·시드. 영구 프로필과 달리 headless/CI 동작, 역할 전환은 state 스왑.
+- **네트워크 모킹** — `mock_route`/`unmock_route`: 글롭 요청을 로컬 fulfill로 결정화,
+  `status=500`+`expect_status`로 에러 페이지 오프라인 검증. 컨텍스트 수명.
+- **실패 증거 강화** — `--trace-on-failure`/`run_scenario(trace_on_failure=)`:
+  실패한 실행만 trace.zip 보존(run_id 공유로 리테인션 연동).
+- **프롬프트 강화** — 증상→도구 선택 매트릭스 내장, `/ui-sync`(저장 시나리오 변경 감지).
+- **배포** — PyPI `ui-blackbox-mcp` 게시(✅ v0.1.0 라이브): `uvx ui-blackbox-mcp` /
+  `pip install ui-blackbox-mcp` 원라인 설치. `release.yml`(trusted publishing,
+  빌드→twine check→휠 부팅 검증→OIDC 게시), 절차는 `RELEASING.md`.
+
+**DoD** — ✅ 테스트 160+ green, tools 25·prompts 5, mypy 차단 게이트 clean,
+실PyPI 설치→`doctor` OK 실측.
+
+---
+
 ## 미결·리스크
 
 | ID | 내용 | 해소 시점 |
