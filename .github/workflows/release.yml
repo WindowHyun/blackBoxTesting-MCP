@@ -12,6 +12,10 @@ name: Release
 on:
   release:
     types: [published]
+  # Manual fallback: Actions 탭 → Release → Run workflow 버튼으로도 배포 가능
+  # (Release 객체 없이 현재 브랜치/태그 기준 빌드·게시). 저장소 쓰기 권한자만
+  # 트리거할 수 있다.
+  workflow_dispatch:
 
 jobs:
   build:
