@@ -27,6 +27,12 @@ async def save_report(name: str = "session", description: str = "",
     except Exception:
         result["meta"] = {}
         result["a11y_findings"] = []
+    # Ad-hoc flows: derive the tested target from the first recorded navigate
+    # (raw is already masked — ${VAR} placeholders, never resolved secrets).
+    result["meta"]["target_url"] = next(
+        (s.get("raw", {}).get("url") for s in result["steps"]
+         if s.get("action") == "navigate" and s.get("raw", {}).get("url")),
+        None)
 
     try:
         report.compute_regression(result)

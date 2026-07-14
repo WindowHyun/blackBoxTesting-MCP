@@ -36,6 +36,7 @@ def test_write_junit_strips_control_chars(tmp_path):
 # M5 — a scenario that raised still yields a countable failed result
 def test_errored_result_shape():
     r = cli._errored_result("login", RuntimeError("browser gone"))
-    assert r["summary"] == {"total": 1, "passed": 0, "failed": 1, "pass_rate": 0.0}
+    assert r["summary"] == {"total": 1, "passed": 0, "failed": 1, "skipped": 0,
+                            "pass_rate": 0.0}
     assert r["steps"][0]["severity"] == "error"
     assert "browser gone" in r["steps"][0]["actual"]

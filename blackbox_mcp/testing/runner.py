@@ -16,6 +16,7 @@ Notes
 """
 from __future__ import annotations
 
+import asyncio
 import time
 from datetime import datetime
 from typing import Any
@@ -41,6 +42,43 @@ def empty_result(name: str) -> dict[str, Any]:
 
 # Single severity implementation lives in report.classify_failure.
 _severity = report.classify_failure
+
+
+def _as_retry(value) -> int:
+    """Tolerant step-level retry count ("2", 2, garbage → 0..N, never raises)."""
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None:
+    """Record the steps that never ran (early stop) as skipped — schema-shaped
+    records so summaries/JUnit/renderers see the whole scenario, not a
+    silently truncated one."""
+    for j, rest in enumerate(steps[failed_idx:], start=failed_idx + 1):
+        result["steps"].append(secrets.scrub_record({
+            "step": j,
+            "action": rest.get("action"),
+            "raw": secrets.mask_step(rest),
+            "selector_input": rest.get("selector") or rest.get("target"),
+            "resolved_by": None,
+            "expected": None,
+            "actual": f"not run (step {failed_idx} failed)",
+            "passed": False,
+            "skipped": True,
+            "duration_ms": 0,
+            "screenshot": None,
+            "page_url": None,
+            "tag": rest.get("tag"),
+            "priority": rest.get("priority"),
+            "retries": 0,
+            "console_errors": [],
+            "network_errors": [],
+            "severity": None,
+            "ai_reason": "이전 스텝 실패로 미실행",
+            "ai_suggestion": None,
+        }))
 
 
 async def _dispatch(step: dict) -> dict:
@@ -194,6 +232,11 @@ async def run(
     result = empty_result(name)
     result["description"] = description
     result["meta"] = _meta(session)
+    # What this report tested (PM/기획: "어느 대상의 리포트인가"). The raw step
+    # url keeps ${VAR} placeholders — never the resolved secret-bearing form.
+    result["meta"]["target_url"] = next(
+        (s.get("url") for s in steps if s.get("action") == "navigate" and s.get("url")),
+        None)
     # One run id shared by this run's screenshots AND its report files (below,
     # via result["run_id"]) so retention keeps/deletes them together. Id leads
     # the screenshot tag so _STAMP_RE extracts it, not a digit in `name`.
@@ -218,13 +261,24 @@ async def run(
         n0 = len(session.buffers.network)
         s0 = time.monotonic()
         exc: Exception | None = None
-        try:
-            fields = await _dispatch(step)
-        except Exception as e:  # a step blew up unexpectedly
-            exc = e
-            fields = {"expected": None, "actual": f"{type(e).__name__}: {e}",
-                      "passed": False, "resolved_by": None,
-                      "ai_reason": "step raised", "ai_suggestion": str(e)[:160]}
+        # Flaky-step handling: `retry: N` re-dispatches up to N extra times
+        # (short backoff). A pass on any attempt counts, but is marked below
+        # so QA can tell flaky-passed from solid-passed.
+        attempts = _as_retry(step.get("retry")) + 1
+        retries_used = 0
+        for attempt in range(attempts):
+            exc = None
+            try:
+                fields = await _dispatch(step)
+            except Exception as e:  # a step blew up unexpectedly
+                exc = e
+                fields = {"expected": None, "actual": f"{type(e).__name__}: {e}",
+                          "passed": False, "resolved_by": None,
+                          "ai_reason": "step raised", "ai_suggestion": str(e)[:160]}
+            retries_used = attempt
+            if bool(fields["passed"]) or attempt == attempts - 1:
+                break
+            await asyncio.sleep(0.25)
 
         duration_ms = int((time.monotonic() - s0) * 1000)
         passed = bool(fields["passed"])
@@ -234,6 +288,15 @@ async def run(
         shot = None
         if not passed or screenshot_each or fields.get("force_screenshot"):
             shot = await report.capture_step_screenshot(session, run_tag, idx)
+
+        try:
+            page_url = session.page.url  # where the step actually ran (SPA 라우팅 디버깅)
+        except Exception:
+            page_url = None
+
+        reason = fields.get("ai_reason", "")
+        if passed and retries_used:
+            reason += f" · passed after {retries_used} retry(s) — flaky?"
 
         result["steps"].append(secrets.scrub_record({
             "step": idx,
@@ -246,14 +309,21 @@ async def run(
             "passed": passed,
             "duration_ms": duration_ms,
             "screenshot": shot,
+            "page_url": page_url,
+            "tag": step.get("tag"),            # 요구사항/이슈 연결용 passthrough
+            "priority": step.get("priority"),  # 비즈니스 우선순위 passthrough
+            "retries": retries_used,
             "console_errors": [e for e in new_console if e.get("level") == "error"],
             "network_errors": new_network,
             "severity": _severity(step.get("action", ""), exc) if not passed else None,
-            "ai_reason": fields.get("ai_reason", ""),
+            "ai_reason": reason,
             "ai_suggestion": fields.get("ai_suggestion"),
         }))
 
         if not passed and not continue_on_fail:
+            # The un-run remainder must not silently vanish from the report —
+            # "3 of 6 steps" reads as a 3-step scenario to a PM/planner.
+            _append_skipped(result, steps, failed_idx=idx)
             break
 
     result["summary"] = report.summarize(result["steps"])
@@ -325,12 +395,25 @@ def _meta(session) -> dict[str, Any]:
         pw = version("playwright")
     except PackageNotFoundError:  # pragma: no cover
         pw = "?"
+    try:
+        vs = session.page.viewport_size
+        viewport = f"{vs['width']}x{vs['height']}" if vs else None
+    except Exception:
+        viewport = None
+    try:
+        # Actual engine build (재현성) — the playwright pin alone doesn't say
+        # which Chromium ran when CHROMIUM_EXECUTABLE/channel is in play.
+        browser_version = session._browser.version if session._browser else None
+    except Exception:
+        browser_version = None
     return {
         "started_at": datetime.now().isoformat(timespec="seconds"),
         "os": platform.system(),
         "python": platform.python_version(),
         "playwright": pw,
         "browser": effective_browser(CONFIG.browser),  # what actually ran, not the raw env
+        "browser_version": browser_version,
+        "viewport": viewport,
         "headless": CONFIG.headless,
         "executable": CONFIG.chromium_executable or "bundled",
         "credentials_masked": True,

@@ -36,11 +36,20 @@ def new_run_id() -> str:
 
 def summarize(steps: list[dict]) -> dict:
     """The one summary shape (DESIGN §6.1) — runner and recorder both use this
-    so a schema change happens in exactly one place."""
+    so a schema change happens in exactly one place.
+
+    Skipped steps (not run because an earlier step failed) count toward
+    ``total`` and ``skipped`` but NOT toward ``failed`` — "6 steps: 2 passed,
+    1 failed, 3 skipped" instead of pretending the un-run steps failed.
+    ``pass_rate`` is over EXECUTED steps, so what ran is judged honestly;
+    the skipped count itself signals how much never ran."""
     total = len(steps)
+    skipped = sum(1 for s in steps if s.get("skipped"))
     passed = sum(1 for s in steps if s.get("passed"))
-    return {"total": total, "passed": passed, "failed": total - passed,
-            "pass_rate": round(passed / total, 3) if total else 0.0}
+    executed = total - skipped
+    return {"total": total, "passed": passed, "failed": executed - passed,
+            "skipped": skipped,
+            "pass_rate": round(passed / executed, 3) if executed else 0.0}
 
 
 def classify_failure(action: str, exc: Exception | None) -> str:
@@ -87,6 +96,7 @@ def compute_regression(result: dict) -> dict:
         hist_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
         result["regression"] = {"previous_run": None, "changed": []}
+        result["trend"] = {"recent": [], "consecutive_failures": 0}
         return result
     path = hist_dir / f"{_SAFE.sub('_', name)}.json"
 
@@ -94,10 +104,12 @@ def compute_regression(result: dict) -> dict:
            for s in result.get("steps", [])]
     changed = []
     prev_ts = None
+    prev_runs: list[dict] = []
     if path.exists():
         try:
             prev = json.loads(path.read_text(encoding="utf-8"))
             prev_ts = prev.get("ts")
+            prev_runs = prev.get("runs") or []
             # key by (step, action) so a changed action at the same index isn't
             # mis-reported as a pass→fail regression of "the same step".
             prev_by_key = {(s["step"], s.get("action")): s["passed"]
@@ -123,9 +135,27 @@ def compute_regression(result: dict) -> dict:
             pass
 
     result["regression"] = {"previous_run": prev_ts, "changed": changed}
+
+    # Trend (PM view): recent same-name runs + current, newest last, capped.
+    # Kept even when the step-overlap guard skipped the diff — the pass/fail
+    # history of a NAME is meaningful even if individual steps changed.
+    s = result.get("summary", {})
+    cur_run = {"ts": result.get("meta", {}).get("started_at"),
+               "passed": s.get("passed", 0), "failed": s.get("failed", 0),
+               "total": s.get("total", 0)}
+    runs = (prev_runs + [cur_run])[-10:]
+    streak = 0
+    for r in reversed(runs):
+        if r.get("failed", 0) > 0:
+            streak += 1
+        else:
+            break
+    result["trend"] = {"recent": runs, "consecutive_failures": streak}
+
     try:
         path.write_text(json.dumps(
-            {"ts": result.get("meta", {}).get("started_at"), "steps": cur},
+            {"ts": result.get("meta", {}).get("started_at"), "steps": cur,
+             "runs": runs},
             ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -229,33 +259,55 @@ def save(result: dict, formats: str = "both") -> dict[str, str]:
 def _render_markdown(result: dict) -> str:
     s = result.get("summary", {})
     meta = result.get("meta", {})
+    skipped = s.get("skipped", 0)
+    skip_note = f" · **{skipped} skipped**" if skipped else ""
     lines = [
         f"# UI Blackbox Report — {result.get('name', 'scenario')}",
         "",
         f"**{s.get('passed', 0)}/{s.get('total', 0)} passed** "
-        f"(rate {s.get('pass_rate', 0)}) · {meta.get('duration_ms', 0)} ms · "
+        f"(rate {s.get('pass_rate', 0)}){skip_note} · {meta.get('duration_ms', 0)} ms · "
         f"{meta.get('started_at', '')}",
+    ]
+    if meta.get("target_url"):
+        lines += ["", f"_대상: {meta['target_url']}_"]
+    trend = result.get("trend") or {}
+    recent = trend.get("recent") or []
+    if len(recent) > 1:
+        icons = "".join("❌" if r.get("failed", 0) > 0 else "✅" for r in recent)
+        streak = trend.get("consecutive_failures", 0)
+        streak_note = f" · 연속 실패 {streak}회" if streak > 1 else ""
+        lines += ["", f"_최근 {len(recent)}회: {icons}{streak_note}_"]
+    lines += [
         "",
         f"_env: {meta.get('os')} · py{meta.get('python')} · "
-        f"playwright {meta.get('playwright')} · {meta.get('browser')}_",
+        f"playwright {meta.get('playwright')} · {meta.get('browser')}"
+        f"{' ' + str(meta.get('browser_version')) if meta.get('browser_version') else ''}"
+        f"{' · ' + str(meta.get('viewport')) if meta.get('viewport') else ''}_",
         "",
         "| # | action | resolved | expected | actual | result | sev |",
         "|---|---|---|---|---|---|---|",
     ]
     for st in result.get("steps", []):
-        res = "✅" if st["passed"] else "❌"
+        res = "⏭" if st.get("skipped") else ("✅" if st["passed"] else "❌")
+        flaky = " ⚠flaky" if st.get("retries") and st.get("passed") else ""
+        tag = f" `{st['tag']}`" if st.get("tag") else ""
         lines.append(
-            f"| {st['step']} | {_cell(st.get('action'))} | {_cell(st.get('resolved_by') or '')} "
-            f"| {_cell(_short(st.get('expected')))} | {_cell(_short(st.get('actual')))} | {res} "
-            f"| {_cell(st.get('severity') or '')} |"
+            f"| {st['step']} | {_cell(st.get('action'))}{_cell(tag)} | {_cell(st.get('resolved_by') or '')} "
+            f"| {_cell(_short(st.get('expected')))} | {_cell(_short(st.get('actual')))} | {res}{flaky} "
+            f"| {_cell(st.get('severity') or st.get('priority') or '')} |"
         )
-    # failure details
-    fails = [st for st in result.get("steps", []) if not st["passed"]]
+    # failure details (skipped steps are listed in the table, not as failures)
+    fails = [st for st in result.get("steps", [])
+             if not st["passed"] and not st.get("skipped")]
     if fails:
         lines += ["", "## 실패 상세"]
         for st in fails:
-            lines.append(f"- **step {st['step']} ({st.get('action')})** — "
+            tag = f" `{st['tag']}`" if st.get("tag") else ""
+            prio = f" [{st['priority']}]" if st.get("priority") else ""
+            lines.append(f"- **step {st['step']} ({st.get('action')}){tag}{prio}** — "
                          f"{st.get('ai_reason')}. 제안: {st.get('ai_suggestion') or '—'}")
+            if st.get("page_url"):
+                lines.append(f"  - 페이지: {st['page_url']}")
             if st.get("screenshot"):
                 lines.append(f"  - 스크린샷: `{st['screenshot']}`")
             for ce in st.get("console_errors", []):
@@ -339,6 +391,9 @@ border-radius:5px;padding:6px 10px;font-size:12.5px;margin-top:8px}
 display:inline-block}
 .verdict.pass{background:var(--mint-bg);color:var(--mint-dim);border:1px solid var(--mint-bd)}
 .verdict.fail{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd)}
+.verdict.skip{background:var(--surface2);color:var(--ink4);border:1px solid var(--border)}
+.tagchip{font:500 10px/1 'IBM Plex Mono',monospace;background:var(--surface2);
+color:var(--ink3);border:1px solid var(--border);padding:2px 6px;border-radius:4px;margin-left:6px}
 .sev{display:block;font:10px/1 'IBM Plex Mono',monospace;color:var(--ink4);margin-top:5px}
 .time{display:block;font-size:11px;color:var(--ink4);margin-top:5px}
 .thumb{margin-top:10px;border:1px solid var(--border);border-radius:6px;max-height:130px;
@@ -377,12 +432,16 @@ def _render_html(result: dict, report_dir: Path) -> str:
     <div class="chips">
       <span class="chip pass">PASS {s.get('passed',0)}</span>
       <span class="chip fail">FAIL {s.get('failed',0)}</span>
+      {f'<span class="chip">SKIP {s.get("skipped",0)}</span>' if s.get('skipped') else ''}
       <span class="chip">{meta.get('duration_ms',0)}ms</span>
       <span class="chip">{html.escape(str(meta.get('os')))} · py{html.escape(str(meta.get('python')))}</span>
       <span class="chip">playwright {html.escape(str(meta.get('playwright')))}</span>
-      <span class="chip">{html.escape(str(meta.get('browser')))} · headless={meta.get('headless')}</span>
+      <span class="chip">{html.escape(str(meta.get('browser')))}{' ' + html.escape(str(meta.get('browser_version'))) if meta.get('browser_version') else ''} · headless={meta.get('headless')}</span>
+      {f'<span class="chip">{html.escape(str(meta.get("viewport")))}</span>' if meta.get('viewport') else ''}
+      {_trend_chip(result)}
       <span class="chip pass">🔒 creds masked</span>
     </div>
+    {f'<div class="kv" style="margin-top:10px"><b>대상</b> {html.escape(str(meta.get("target_url")))}</div>' if meta.get('target_url') else ''}
   </div>
   <div class="card">
     <div class="sec">Steps</div>
@@ -394,8 +453,20 @@ def _render_html(result: dict, report_dir: Path) -> str:
 </div></body></html>"""
 
 
+def _trend_chip(result: dict) -> str:
+    trend = result.get("trend") or {}
+    recent = trend.get("recent") or []
+    if len(recent) < 2:
+        return ""
+    icons = "".join("✗" if r.get("failed", 0) > 0 else "✓" for r in recent)
+    streak = trend.get("consecutive_failures", 0)
+    note = f" · 연속실패 {streak}" if streak > 1 else ""
+    return f'<span class="chip">최근 {icons}{html.escape(note)}</span>'
+
+
 def _step_html(st: dict, report_dir: Path) -> str:
     ok = st["passed"]
+    skipped = st.get("skipped", False)
     thumb = ""
     if st.get("screenshot"):
         data = _b64(report_dir / st["screenshot"], report_dir)
@@ -412,19 +483,28 @@ def _step_html(st: dict, report_dir: Path) -> str:
                  f'{html.escape(str(ne.get("status") or ne.get("failure")))}</div>')
     rb = (f'<span class="rb">{html.escape(str(st["resolved_by"]))}</span>'
           if st.get("resolved_by") else "")
-    sev = (f'<span class="sev">{html.escape(str(st.get("severity")))}</span>'
-           if not ok and st.get("severity") else "")
-    return f"""<div class="step {'fail' if not ok else ''}">
+    tag = (f'<span class="tagchip">{html.escape(str(st["tag"]))}</span>'
+           if st.get("tag") else "")
+    flaky = (' <span class="tagchip">⚠ flaky</span>'
+             if ok and st.get("retries") else "")
+    sev = (f'<span class="sev">{html.escape(str(st.get("severity") or st.get("priority") or ""))}</span>'
+           if not ok and (st.get("severity") or st.get("priority")) else "")
+    purl = (f'<div class="kv"><b>페이지</b> {html.escape(_short(st.get("page_url"), 90))}</div>'
+            if not ok and not skipped and st.get("page_url") else "")
+    verdict = "SKIP" if skipped else ("PASS" if ok else "FAIL")
+    vclass = "skip" if skipped else ("pass" if ok else "fail")
+    return f"""<div class="step {'fail' if (not ok and not skipped) else ''}">
       <div class="num">{st['step']}</div>
       <div>
-        <div class="act">{html.escape(str(st.get('action')))}{rb}</div>
+        <div class="act">{html.escape(str(st.get('action')))}{rb}{tag}{flaky}</div>
         <div class="kv"><b>기대</b> {html.escape(_short(st.get('expected'),70))}
           &nbsp;·&nbsp; <b>실제</b> {html.escape(_short(st.get('actual'),70))}</div>
+        {purl}
         <div class="reason">{html.escape(str(st.get('ai_reason') or ''))}</div>
         {sugg}{errs}{thumb}
       </div>
       <div class="right">
-        <span class="verdict {'pass' if ok else 'fail'}">{'PASS' if ok else 'FAIL'}</span>
+        <span class="verdict {vclass}">{verdict}</span>
         {sev}<span class="time">{st.get('duration_ms')}ms</span>
       </div>
     </div>"""

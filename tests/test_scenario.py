@@ -44,7 +44,11 @@ async def test_stops_on_failure(session):
     steps = [steps[0], {"action": "assert", "kind": "text_visible", "target": "절대없음"}, steps[1]]
     res = await runner.run(steps, name="stop", continue_on_fail=False)
     assert res["summary"]["failed"] == 1
-    assert res["summary"]["total"] == 2  # stopped after the failing step
+    # Execution stops after the failing step, but the un-run remainder is
+    # reported as skipped instead of vanishing (total = whole scenario).
+    assert res["summary"]["total"] == 3
+    assert res["summary"]["skipped"] == 1
+    assert res["steps"][2]["skipped"] is True
     bad = res["steps"][1]
     assert bad["passed"] is False
     assert bad["severity"] == "assertion"
