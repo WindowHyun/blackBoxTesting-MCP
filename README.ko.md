@@ -9,7 +9,7 @@
 
 <p align="center">
   <img src="examples/sample_report_preview.png" alt="샘플 리포트" width="620">
-  <br><em>자동 생성된 리포트 — 통과율·스텝별 스크린샷·실패 원인·회귀·접근성·자격증명 마스킹</em>
+  <br><em>자동 생성된 리포트 — 통과/실패/<b>미실행(SKIP)</b>·실행 <b>트렌드</b>·요구사항 <b>태그</b>·<b>flaky</b> 재시도 마킹·실패 페이지/스크린샷/제안·회귀·접근성·자격증명 마스킹</em>
 </p>
 
 [![PyPI](https://img.shields.io/pypi/v/ui-blackbox-mcp)](https://pypi.org/project/ui-blackbox-mcp/)

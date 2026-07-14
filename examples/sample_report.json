@@ -1,61 +1,76 @@
 {
-  "name": "login_demo",
+  "name": "checkout_login_demo",
   "steps": [
     {
       "step": 1,
       "action": "navigate",
       "raw": {
         "action": "navigate",
-        "url": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/imperfect.html",
-        "wait_until": "load"
+        "url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+        "tag": "REQ-101"
       },
       "selector_input": null,
       "resolved_by": null,
-      "expected": "페이지 도착",
-      "actual": "“Imperfect Login” · HTTP 200",
+      "expected": "도착 (2xx/3xx)",
+      "actual": "“데모 스토어 — UI Blackbox 샘플” · HTTP 200",
       "passed": true,
-      "duration_ms": 25,
-      "screenshot": "screenshots/login_demo_step01.png",
+      "duration_ms": 595,
+      "screenshot": null,
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": "REQ-101",
+      "priority": null,
+      "retries": 0,
       "console_errors": [
         {
           "level": "error",
+          "text": "포인트 모듈 로드 실패 (데모)",
+          "location": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html:40",
+          "ts": 1783996161.8083587
+        },
+        {
+          "level": "error",
           "text": "Failed to load resource: net::ERR_FILE_NOT_FOUND",
-          "location": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/logo.png:0",
-          "ts": 1782369918.8959408
+          "location": "file:///home/user/blackBoxTesting-MCP/examples/banner.png:0",
+          "ts": 1783996161.811399
         }
       ],
       "network_errors": [
         {
-          "url": "file:///home/user/blackBoxTesting-MCP/tests/fixtures/logo.png",
+          "url": "file:///home/user/blackBoxTesting-MCP/examples/banner.png",
           "method": "GET",
           "status": null,
           "failure": "net::ERR_FILE_NOT_FOUND"
         }
       ],
       "severity": null,
-      "ai_reason": "navigated to file:///home/user/blackBoxTesting-MCP/tests/fixtures/imperfect.html (status 200)",
+      "ai_reason": "navigated to file:///home/user/blackBoxTesting-MCP/examples/demo_page.html (status 200)",
       "ai_suggestion": null
     },
     {
       "step": 2,
-      "action": "interact",
+      "action": "assert",
       "raw": {
-        "action": "interact",
-        "type": "type",
-        "selector": "testid=email",
-        "value": "qa@example.com"
+        "action": "assert",
+        "kind": "text_visible",
+        "target": "데모 스토어",
+        "tag": "REQ-101",
+        "priority": "high"
       },
-      "selector_input": "testid=email",
-      "resolved_by": "testid",
-      "expected": "type ok",
-      "actual": "typed",
+      "selector_input": "데모 스토어",
+      "resolved_by": null,
+      "expected": "text_visible",
+      "actual": true,
       "passed": true,
-      "duration_ms": 24,
-      "screenshot": "screenshots/login_demo_step02.png",
+      "duration_ms": 15,
+      "screenshot": null,
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": "REQ-101",
+      "priority": "high",
+      "retries": 0,
       "console_errors": [],
       "network_errors": [],
       "severity": null,
-      "ai_reason": "type via testid selector",
+      "ai_reason": "text_visible held",
       "ai_suggestion": null
     },
     {
@@ -64,16 +79,21 @@
       "raw": {
         "action": "interact",
         "type": "type",
-        "selector": "testid=password",
-        "value": "***"
+        "selector": "testid=email",
+        "value": "demo@example.com",
+        "tag": "REQ-102"
       },
-      "selector_input": "testid=password",
+      "selector_input": "testid=email",
       "resolved_by": "testid",
       "expected": "type ok",
       "actual": "typed",
       "passed": true,
-      "duration_ms": 9,
-      "screenshot": "screenshots/login_demo_step03.png",
+      "duration_ms": 17,
+      "screenshot": null,
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": "REQ-102",
+      "priority": null,
+      "retries": 0,
       "console_errors": [],
       "network_errors": [],
       "severity": null,
@@ -85,6 +105,34 @@
       "action": "interact",
       "raw": {
         "action": "interact",
+        "type": "type",
+        "selector": "testid=password",
+        "value": "***",
+        "tag": "REQ-102",
+        "priority": "high"
+      },
+      "selector_input": "testid=password",
+      "resolved_by": "testid",
+      "expected": "type ok",
+      "actual": "typed",
+      "passed": true,
+      "duration_ms": 15,
+      "screenshot": null,
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": "REQ-102",
+      "priority": "high",
+      "retries": 0,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "type via testid selector",
+      "ai_suggestion": null
+    },
+    {
+      "step": 5,
+      "action": "interact",
+      "raw": {
+        "action": "interact",
         "type": "click",
         "selector": "testid=submit"
       },
@@ -93,33 +141,16 @@
       "expected": "click ok",
       "actual": "clicked",
       "passed": true,
-      "duration_ms": 38,
-      "screenshot": "screenshots/login_demo_step04.png",
+      "duration_ms": 53,
+      "screenshot": null,
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": null,
+      "priority": null,
+      "retries": 0,
       "console_errors": [],
       "network_errors": [],
       "severity": null,
       "ai_reason": "click via testid selector",
-      "ai_suggestion": null
-    },
-    {
-      "step": 5,
-      "action": "assert",
-      "raw": {
-        "action": "assert",
-        "kind": "text_visible",
-        "target": "로그인됨"
-      },
-      "selector_input": "로그인됨",
-      "resolved_by": null,
-      "expected": "text_visible",
-      "actual": true,
-      "passed": true,
-      "duration_ms": 7,
-      "screenshot": "screenshots/login_demo_step05.png",
-      "console_errors": [],
-      "network_errors": [],
-      "severity": null,
-      "ai_reason": "text_visible held",
       "ai_suggestion": null
     },
     {
@@ -128,50 +159,188 @@
       "raw": {
         "action": "assert",
         "kind": "text_visible",
-        "target": "존재하지_않는_텍스트"
+        "target": "환영합니다",
+        "retry": 3,
+        "tag": "REQ-103"
       },
-      "selector_input": "존재하지_않는_텍스트",
+      "selector_input": "환영합니다",
+      "resolved_by": null,
+      "expected": "text_visible",
+      "actual": true,
+      "passed": true,
+      "duration_ms": 521,
+      "screenshot": null,
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": "REQ-103",
+      "priority": null,
+      "retries": 2,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "text_visible held · passed after 2 retry(s) — flaky?",
+      "ai_suggestion": null
+    },
+    {
+      "step": 7,
+      "action": "mock_route",
+      "raw": {
+        "action": "mock_route",
+        "pattern": "**/api/points**",
+        "body": "{\"points\": 1200}"
+      },
+      "selector_input": null,
+      "resolved_by": null,
+      "expected": "mock armed",
+      "actual": "**/api/points**",
+      "passed": true,
+      "duration_ms": 1,
+      "screenshot": null,
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": null,
+      "priority": null,
+      "retries": 0,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "network mock armed",
+      "ai_suggestion": null
+    },
+    {
+      "step": 8,
+      "action": "assert",
+      "raw": {
+        "action": "assert",
+        "kind": "count",
+        "target": "css=.order-row",
+        "expected": "2",
+        "tag": "REQ-104"
+      },
+      "selector_input": "css=.order-row",
+      "resolved_by": null,
+      "expected": "2",
+      "actual": 2,
+      "passed": true,
+      "duration_ms": 6,
+      "screenshot": null,
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": "REQ-104",
+      "priority": null,
+      "retries": 0,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "count held",
+      "ai_suggestion": null
+    },
+    {
+      "step": 9,
+      "action": "assert",
+      "raw": {
+        "action": "assert",
+        "kind": "text_visible",
+        "target": "포인트 잔액",
+        "tag": "REQ-105",
+        "priority": "blocker"
+      },
+      "selector_input": "포인트 잔액",
       "resolved_by": null,
       "expected": "text_visible",
       "actual": false,
       "passed": false,
-      "duration_ms": 3,
-      "screenshot": "screenshots/login_demo_step06.png",
+      "duration_ms": 5,
+      "screenshot": "screenshots/20260714_022921_768085_checkout_login_demo_step09.png",
+      "page_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+      "tag": "REQ-105",
+      "priority": "blocker",
+      "retries": 0,
       "console_errors": [],
       "network_errors": [],
       "severity": "assertion",
       "ai_reason": "text_visible did not hold",
-      "ai_suggestion": "expected text_visible on '존재하지_않는_텍스트' — verify the target"
+      "ai_suggestion": "expected text_visible on '포인트 잔액' — verify the target"
+    },
+    {
+      "step": 10,
+      "action": "interact",
+      "raw": {
+        "action": "interact",
+        "type": "click",
+        "selector": "주문하기"
+      },
+      "selector_input": "주문하기",
+      "resolved_by": null,
+      "expected": null,
+      "actual": "not run (step 9 failed)",
+      "passed": false,
+      "skipped": true,
+      "duration_ms": 0,
+      "screenshot": null,
+      "page_url": null,
+      "tag": null,
+      "priority": null,
+      "retries": 0,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "이전 스텝 실패로 미실행",
+      "ai_suggestion": null
+    },
+    {
+      "step": 11,
+      "action": "assert",
+      "raw": {
+        "action": "assert",
+        "kind": "url_contains",
+        "target": "/complete"
+      },
+      "selector_input": "/complete",
+      "resolved_by": null,
+      "expected": null,
+      "actual": "not run (step 9 failed)",
+      "passed": false,
+      "skipped": true,
+      "duration_ms": 0,
+      "screenshot": null,
+      "page_url": null,
+      "tag": null,
+      "priority": null,
+      "retries": 0,
+      "console_errors": [],
+      "network_errors": [],
+      "severity": null,
+      "ai_reason": "이전 스텝 실패로 미실행",
+      "ai_suggestion": null
     }
   ],
   "summary": {
-    "total": 6,
-    "passed": 5,
+    "total": 11,
+    "passed": 8,
     "failed": 1,
-    "pass_rate": 0.833
+    "skipped": 2,
+    "pass_rate": 0.889
   },
-  "description": "이메일·비밀번호로 로그인하면 '로그인됨' 상태가 보여야 한다 (회귀/접근성 동시 점검)",
+  "description": "이메일/비번 로그인 후 주문 내역과 포인트 노출을 검증한다 (마지막 단언은 의도적으로 실패 → 스킵/회귀/트레이스 데모)",
   "meta": {
-    "started_at": "2026-06-25T06:45:18",
+    "started_at": "2026-07-14T02:29:21",
     "os": "Linux",
     "python": "3.11.15",
-    "playwright": "1.60.0",
+    "playwright": "1.61.0",
     "browser": "chromium",
+    "browser_version": "141.0.7390.37",
+    "viewport": "1280x720",
     "headless": true,
     "executable": "/opt/pw-browsers/chromium",
     "credentials_masked": true,
-    "duration_ms": 425
+    "target_url": "file:///home/user/blackBoxTesting-MCP/examples/demo_page.html",
+    "duration_ms": 1295
   },
+  "run_id": "20260714_022921_768085",
+  "trace": "~/ui-blackbox/reports/traces/20260714_022921_768085_checkout_login_demo.zip",
   "a11y_findings": [
     {
       "type": "img-missing-alt",
       "tag": "img",
-      "info": "logo.png"
-    },
-    {
-      "type": "control-missing-label",
-      "tag": "input",
-      "name": null
+      "info": "banner.png"
     },
     {
       "type": "control-missing-label",
@@ -180,13 +349,40 @@
     }
   ],
   "regression": {
-    "previous_run": "2026-06-25T06:45:18",
+    "previous_run": "2026-07-14T02:29:20",
     "changed": [
       {
-        "step": 6,
+        "step": 9,
+        "from": "absent",
+        "to": "failed"
+      },
+      {
+        "step": 10,
+        "from": "absent",
+        "to": "failed"
+      },
+      {
+        "step": 11,
         "from": "absent",
         "to": "failed"
       }
     ]
+  },
+  "trend": {
+    "recent": [
+      {
+        "ts": "2026-07-14T02:29:20",
+        "passed": 8,
+        "failed": 0,
+        "total": 8
+      },
+      {
+        "ts": "2026-07-14T02:29:21",
+        "passed": 8,
+        "failed": 1,
+        "total": 11
+      }
+    ],
+    "consecutive_failures": 1
   }
 }
