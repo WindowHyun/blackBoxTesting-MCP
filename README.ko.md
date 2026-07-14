@@ -35,6 +35,35 @@ Python 3.11+ · Playwright(Chromium, async) · MCP 공식 SDK(FastMCP) · stdio 
 ## 🚀 빠른 시작
 
 ### 1) 설치
+
+**방법 A — 클론 없이 한 줄(권장).** `uvx`(파이썬판 `npx`,
+[uv](https://docs.astral.sh/uv/)에 포함)가 받기·격리·실행을 한 번에 처리한다 —
+아래가 Claude Desktop 설정의 전부다(venv/경로 설정 불필요):
+
+```json
+{
+  "mcpServers": {
+    "ui-blackbox": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/WindowHyun/blackBoxTesting-MCP.git", "ui-blackbox-mcp"]
+    }
+  }
+}
+```
+
+CLI도 같은 방식으로, `pipx`/`pip` 사용자는 아래처럼:
+
+```bash
+uvx --from git+https://github.com/WindowHyun/blackBoxTesting-MCP.git ui-blackbox doctor
+pipx install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git   # 또는
+pip install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git
+```
+
+Chromium은 서버 첫 실행 때 자동 설치된다(또는 `playwright install chromium` 1회).
+PyPI에 배포되면 `uvx ui-blackbox-mcp` / `pip install ui-blackbox-mcp`로 더 짧아진다 —
+배포 워크플로 동봉(`.github/workflows/release.yml`, PyPI trusted publishing).
+
+**방법 B — 클론해서(개발용):**
 ```bash
 git clone https://github.com/WindowHyun/blackBoxTesting-MCP.git
 cd blackBoxTesting-MCP
@@ -48,7 +77,7 @@ python -m venv .venv
 
 아래 설정에서 `<ABS>`는 이 저장소의 **절대경로**로 바꾼다. 예:
 `/home/you/blackBoxTesting-MCP`. Windows의 인터프리터는
-`<ABS>\.venv\Scripts\python.exe`.
+`<ABS>\.venv\Scripts\python.exe`. (방법 A의 `uvx`를 쓰면 이 과정이 전부 생략된다.)
 
 ---
 

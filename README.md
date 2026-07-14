@@ -35,6 +35,36 @@ Plenty of tools can drive a browser. This one is built around the **QA workflow*
 ## 🚀 Quick start
 
 ### 1) Install
+
+**Option A — one-liner, no clone (recommended).** `uvx` (Python's `npx`; ships with
+[uv](https://docs.astral.sh/uv/)) fetches, isolates, and runs the server in one step —
+this is the whole Claude Desktop config, nothing else to set up:
+
+```json
+{
+  "mcpServers": {
+    "ui-blackbox": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/WindowHyun/blackBoxTesting-MCP.git", "ui-blackbox-mcp"]
+    }
+  }
+}
+```
+
+The same one-liner works for the CLI and for `pipx`/`pip` users:
+
+```bash
+uvx --from git+https://github.com/WindowHyun/blackBoxTesting-MCP.git ui-blackbox doctor
+pipx install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git   # or:
+pip install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git
+```
+
+Chromium auto-installs on the server's first run (or run `playwright install
+chromium` once). Once the package is published to PyPI, this shortens further to
+`uvx ui-blackbox-mcp` / `pip install ui-blackbox-mcp` — a release workflow is
+included (`.github/workflows/release.yml`, PyPI trusted publishing).
+
+**Option B — from a clone (development):**
 ```bash
 git clone https://github.com/WindowHyun/blackBoxTesting-MCP.git
 cd blackBoxTesting-MCP
@@ -48,7 +78,7 @@ python -m venv .venv
 
 Wherever a config below uses `<ABS>`, replace it with the **absolute path** of this
 repo, e.g. `/home/you/blackBoxTesting-MCP`. On Windows the interpreter is
-`<ABS>\.venv\Scripts\python.exe`.
+`<ABS>\.venv\Scripts\python.exe`. (With Option A, `uvx` replaces all of that.)
 
 ---
 
