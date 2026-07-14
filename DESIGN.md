@@ -432,13 +432,17 @@ SM-01~04와 함께(또는 직후) 구현한다.
   "meta": {                                              // SM-08
     "started_at": "2026-06-24T10:00:00",
     "duration_ms": 4210,
-    "target_url": "https://example.com/login",
+    "target_url": "https://example.com/login",           // 첫 navigate 스텝의 raw url
+                                                         // (${VAR} 플레이스홀더 형태 — 해석값 아님)
     "os": "Linux", "python": "3.11.x",
-    "playwright": "1.60.x", "browser": "chromium 1.60.x",
-    "headless": true, "viewport": "1280x720",
+    "playwright": "1.60.x", "browser": "chromium",
+    "browser_version": "139.0.7258.5",                   // 실제 엔진 빌드(재현성)
+    "headless": true, "viewport": "1280x800",
     "credentials_masked": true                           // 보안 배지
   },
-  "summary": { "total": 6, "passed": 5, "failed": 1, "pass_rate": 0.83 },
+  // skipped: 앞선 실패로 미실행된 스텝 수 — failed에 포함되지 않는다.
+  // pass_rate는 "실행된" 스텝 기준(미실행을 실패로 위장하지 않기 위해).
+  "summary": { "total": 6, "passed": 5, "failed": 1, "skipped": 0, "pass_rate": 0.83 },
   "steps": [
     {
       "step": 4,
@@ -447,8 +451,13 @@ SM-01~04와 함께(또는 직후) 구현한다.
       "resolved_by": "role",            // SM-06: D2 체인 중 실제 매칭 전략
       "expected": "클릭 성공", "actual": "클릭됨",
       "passed": true,
+      "skipped": false,                  // 앞선 실패로 미실행이면 true(passed=false)
       "duration_ms": 320,
       "screenshot": "screenshots/step04.png",   // SM-06: 통과/실패 모두
+      "page_url": "https://example.com/login",  // 스텝 실행 시점의 실제 페이지(scrub 경유)
+      "tag": "JIRA-123",                 // 요구사항/이슈 연결 passthrough(선택)
+      "priority": "high",                // 비즈니스 우선순위 passthrough(선택)
+      "retries": 0,                      // retry:N 스텝의 사용된 재시도 수(통과+재시도>0 = flaky 마킹)
       "console_errors": [], "network_errors": [], // SM-06: 스텝 구간 귀속
       "severity": null,                  // SM-08: assertion|js_error|network|timeout
       "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
@@ -460,10 +469,20 @@ SM-01~04와 함께(또는 직후) 구현한다.
     "previous_run": "2026-06-23T18:00:00",
     "changed": [{ "step": 4, "from": "passed", "to": "failed" }]
   },
+  "trend": {                             // 같은 이름의 최근 실행 추이(최대 10, 최신이 끝)
+    "recent": [{ "ts": "…", "passed": 5, "failed": 1, "total": 6 }],
+    "consecutive_failures": 1            // 끝에서부터 failed>0 연속 횟수
+  },
   "trace": "…/reports/traces/<run_id>_<name>.zip"  // trace_on_failure로 실행이
                                          // 실패했을 때만 존재(§7.1) — 통과 런은 폐기
 }
 ```
+> **스텝 입력 확장(선택 필드):** `retry: N`(실패 시 250ms 백오프로 N회 재시도 —
+> 통과하면 리포트에 ⚠flaky 마킹), `tag`(요구사항/이슈 ID — JUnit testcase 이름에도
+> `[tag]`로 노출), `priority`(비즈니스 우선순위 — 실패 상세에 표기). 미실행 스텝은
+> JUnit에서 `<skipped/>`로 표현되어 CI 대시보드가 "실패"가 아닌 "미실행"으로 집계한다.
+> history 파일(`reports/history/{name}.json`)은 baseline 스텝에 더해 `runs`(최근
+> 10회 요약)를 보관 — trend의 단일 출처.
 > **회귀 baseline 가드(2026-07):** 직전 실행과 `(step, action)` 키가 하나도 겹치지
 > 않으면(이름만 공유한 무관한 흐름 — ad-hoc 리포트는 기본 이름이 "session") 비교를
 > 건너뛰고 이번 실행을 새 baseline으로 기록한다. 가짜 "absent" diff 방지.

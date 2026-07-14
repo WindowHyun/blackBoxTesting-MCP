@@ -105,7 +105,7 @@ def scrub_record(record: dict) -> dict:
     """Scrub a finished step record in place: derived text fields plus the
     console/network entries attributed to the step may embed resolved secrets
     (e.g. a token that was part of a navigated URL)."""
-    for key in ("expected", "actual", "ai_reason", "ai_suggestion"):
+    for key in ("expected", "actual", "ai_reason", "ai_suggestion", "page_url"):
         record[key] = scrub(record.get(key))
     for entry in record.get("console_errors") or []:
         entry["text"] = scrub(entry.get("text"))

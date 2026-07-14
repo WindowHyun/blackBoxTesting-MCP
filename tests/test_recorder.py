@@ -16,4 +16,5 @@ def test_observational_tools_not_recorded():
 def test_build_result_empty():
     recorder.reset()
     r = recorder.build_result(name="x")
-    assert r["summary"] == {"total": 0, "passed": 0, "failed": 0, "pass_rate": 0.0}
+    assert r["summary"] == {"total": 0, "passed": 0, "failed": 0, "skipped": 0,
+                            "pass_rate": 0.0}

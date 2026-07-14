@@ -49,7 +49,8 @@ def _errored_result(name: str, exc: Exception) -> dict:
     """A synthetic failed result so one scenario blowing up (browser launch,
     disk-full save…) doesn't discard the whole suite's aggregate/JUnit."""
     return {"name": name, "meta": {},
-            "summary": {"total": 1, "passed": 0, "failed": 1, "pass_rate": 0.0},
+            "summary": {"total": 1, "passed": 0, "failed": 1, "skipped": 0,
+                        "pass_rate": 0.0},
             "steps": [{"step": 1, "action": "run", "passed": False,
                        "actual": f"{type(exc).__name__}: {exc}",
                        "severity": "error", "ai_reason": "scenario raised",
@@ -110,13 +111,19 @@ def _write_junit(results: list[dict], path: str) -> None:
         suite = ET.SubElement(
             suites, "testsuite", name=_xml_safe(res.get("name", "scenario")),
             tests=str(s["total"]), failures=str(s["failed"]),
+            skipped=str(s.get("skipped", 0)),
             time=f"{res.get('meta', {}).get('duration_ms', 0) / 1000:.3f}")
         for step in res.get("steps", []):
+            tag = f" [{step['tag']}]" if step.get("tag") else ""
             case = ET.SubElement(
                 suite, "testcase",
-                name=_xml_safe(f"step{step['step']} {step.get('action')}"),
+                name=_xml_safe(f"step{step['step']} {step.get('action')}{tag}"),
                 time=f"{step.get('duration_ms', 0) / 1000:.3f}")
-            if not step.get("passed"):
+            if step.get("skipped"):
+                # Native JUnit skip — CI dashboards show "not run", not "failed".
+                ET.SubElement(case, "skipped",
+                              message=_xml_safe(step.get("actual") or "not run"))
+            elif not step.get("passed"):
                 fail = ET.SubElement(case, "failure",
                                      message=_xml_safe(step.get("actual") or "failed"))
                 fail.text = _xml_safe(f"severity={step.get('severity')}\n"
