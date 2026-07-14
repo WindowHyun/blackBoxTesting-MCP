@@ -23,6 +23,18 @@ from ._registry import tool
 # Roles implied by tag/type, used to suggest a role-based selector.
 _TAG_ROLE = {"button": "button", "a": "link", "select": "combobox", "textarea": "textbox"}
 
+# ARIA role implied by <input type=...>. Text-like types map to textbox; the
+# rest have their own role, so blindly calling every input a textbox produces a
+# selector that matches nothing (a submit button is role=button, not textbox).
+_INPUT_TYPE_ROLE = {
+    "submit": "button", "button": "button", "reset": "button", "image": "button",
+    "checkbox": "checkbox", "radio": "radio",
+    "range": "slider", "number": "spinbutton",
+    "search": "searchbox",
+    "email": "textbox", "tel": "textbox", "url": "textbox",
+    "password": "textbox", "text": "textbox", "": "textbox",
+}
+
 _COLLECT_JS = """
 () => {
   const sel = 'button, a[href], input, select, textarea, [role=button], [role=link], [role=textbox]';
@@ -54,9 +66,10 @@ _STEP_SCHEMA = {
 def _suggest_selector(el: dict) -> str:
     if el.get("testid"):
         return f"testid={el['testid']}"
-    role = el.get("role") or _TAG_ROLE.get(el.get("tag"))
-    if el.get("tag") == "input":
-        role = "textbox"
+    role = el.get("role") or _TAG_ROLE.get(el.get("tag") or "")
+    if el.get("tag") == "input" and not el.get("role"):
+        # Derive from type; unknown/hidden types keep textbox as a sane default.
+        role = _INPUT_TYPE_ROLE.get((el.get("type") or "").lower(), "textbox")
     if role and el.get("name"):
         return f"role={role} name={el['name']}"
     if el.get("name"):

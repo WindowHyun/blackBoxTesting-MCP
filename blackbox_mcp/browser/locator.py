@@ -13,7 +13,12 @@ strategy, otherwise it is inferred:
     role=button name=로그인   -> get_by_role("button", name="로그인")
     text=다음                 -> get_by_text("다음")
     css=.btn.primary         -> CSS
-    .btn / #id / div > a     -> inferred CSS (contains . # [ > etc.)
+    .btn / #id / div>a       -> inferred CSS (structural signal, no whitespace)
+    #form input / div > a    -> CSS signal with whitespace: resolve() probes it
+                                as CSS first, then the bare-string chain — so
+                                text like "Order #123" or "A > B" still lands
+                                on the text tier when it matches nothing as CSS.
+                                locate() (sync, can't probe) treats it as text.
     로그인                    -> inferred role/text
 
 Returns a Playwright Locator scoped to ``root`` (page or frame locator).
@@ -35,20 +40,39 @@ _COMMON_ROLES = ("button", "link", "textbox", "checkbox", "radio",
 
 
 def _parse_role(rest: str) -> tuple[str, str | None]:
-    """Parse 'button name=로그인' -> ('button', '로그인')."""
-    m = re.match(r"\s*(\S+)\s*(?:name=(.+))?$", rest)
-    if not m:
-        return rest.strip(), None
-    role = m.group(1)
-    name = m.group(2).strip() if m.group(2) else None
+    """Parse 'button name=로그인' -> ('button', '로그인').
+
+    A remainder without the name= prefix is still treated as the accessible
+    name ('button submit' -> ('button', 'submit')) rather than degrading the
+    whole string into a bogus role that Playwright rejects with a type error.
+    """
+    parts = rest.strip().split(None, 1)
+    if not parts:
+        return "", None
+    role, name = parts[0], None
+    if len(parts) == 2:
+        tail = parts[1].strip()
+        name = tail[len("name="):].strip() if tail.startswith("name=") else tail
     # Allow quoted names.
     if name and len(name) >= 2 and name[0] == name[-1] and name[0] in "\"'":
         name = name[1:-1]
-    return role, name
+    return role, name or None
 
 
 def _looks_like_css(s: str) -> bool:
     return bool(_CSS_STRONG.search(s)) and not any(c.isspace() for c in s)
+
+
+_PREFIXES = ("testid=", "role=", "text=", "css=")
+
+
+def is_single_strategy(s: str) -> bool:
+    """True when the string maps to exactly ONE deterministic strategy (explicit
+    prefix, or unambiguous whitespace-free CSS) — no fallback chain involved.
+    Callers use this to fail fast on deterministic errors (a CSS parse error
+    won't heal by retrying) while bare-chain strings keep their fallbacks."""
+    s = s.strip()
+    return s.startswith(_PREFIXES) or _looks_like_css(s)
 
 
 def _testid_selector(value: str) -> str:
@@ -75,12 +99,16 @@ def locate(root, selector: str):
     if s.startswith("css="):
         return root.locator(s[len("css="):].strip())
 
+    # Sync path can't count-probe, so stay conservative: a structural signal
+    # WITH whitespace is ambiguous ("#form input" is CSS, but "[필수] 약관" or
+    # "Order #123" is visible text) — treat as text, like before. Async callers
+    # that need the disambiguation use resolve(), which probes CSS first.
     if _looks_like_css(s):
         return root.locator(s)
     return root.get_by_text(s)
 
 
-async def resolve(root, selector: str):
+async def resolve(root, selector: str, *, visible_only: bool = False):
     """Resolve ``selector`` to ``(locator, resolved_by)`` using the D2 chain.
 
     Explicit prefixes (testid=/role=/text=/css=) pick that strategy directly.
@@ -88,6 +116,12 @@ async def resolve(root, selector: str):
     full D2 order — data-testid → role+name → visible text — and returns the
     first strategy that matches at least one element (falling back to text so
     errors are sensible). ``resolved_by`` records which strategy won (SM-06).
+
+    ``visible_only=True`` makes the bare-string chain probe with
+    ``filter(visible=True)`` — a *hidden* element (skeleton/template node whose
+    data-testid happens to equal the asserted text) must not win a tier and
+    shadow a visible match in a later tier. The returned locator is unfiltered;
+    callers that need only visible matches apply their own filter.
     """
     s = selector.strip()
 
@@ -106,16 +140,49 @@ async def resolve(root, selector: str):
         return root.locator(s), "css"
 
     # Bare plain string: try the chain in D2 priority, pick first with a match.
+    #   0) CSS, when the string carries a structural signal but has whitespace
+    #      ("#form input", "div > a") — count-probed, so visible text that
+    #      merely contains '>' still falls through to the text tier
     #   1) data-testid  2) role+name (common interactive roles)  3) visible text
-    candidates = [("testid", root.locator(_testid_selector(s)))]
+    candidates = []
+    if _CSS_STRONG.search(s):
+        candidates.append(("css", root.locator(s)))
+    candidates.append(("testid", root.locator(_testid_selector(s))))
     for r in _COMMON_ROLES:
         candidates.append((f"role={r}", root.get_by_role(r, name=s)))
     candidates.append(("text", root.get_by_text(s)))
     for name, loc in candidates:
         try:
-            if await loc.count() > 0:
+            probe = loc.filter(visible=True) if visible_only else loc
+            if await probe.count() > 0:
                 return loc, name
         except Exception:
             continue
+    return root.get_by_text(s), "text"
+
+
+async def resolve_count_population(root, selector):
+    """Pick the population an ``assert count`` counts: ``(locator, strategy)``.
+
+    Counting is verdict-critical in a way single-element resolution isn't —
+    the D2 first-match tier silently CHANGES what gets counted when a testid
+    or role name collides with visible text (1 matching testid shadows 3 text
+    matches). So:
+      - explicit prefix / unambiguous CSS → that strategy (deterministic);
+      - spaced structural string → CSS if it matches anything, else text
+        ("#results .row" counts rows; "[필수] 약관" is invalid CSS → text);
+      - plain string → text matches (the original population semantics).
+    testid/role tiers are deliberately NOT probed here.
+    """
+    s = selector.strip()
+    if s.startswith(_PREFIXES) or _looks_like_css(s):
+        return await resolve(root, s)
+    if _CSS_STRONG.search(s):
+        loc = root.locator(s)
+        try:
+            if await loc.count() > 0:
+                return loc, "css"
+        except Exception:
+            pass  # invalid CSS (bracketed/`#`-bearing text) → count as text
     return root.get_by_text(s), "text"
 

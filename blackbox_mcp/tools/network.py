@@ -28,7 +28,7 @@ async def get_network_errors(same_origin: bool = False) -> list[dict]:
                     continue
             except Exception:
                 continue
-        entry = {"url": e.url, "method": e.method}
+        entry: dict = {"url": e.url, "method": e.method}
         if e.status is not None:
             entry["status"] = e.status
         if e.failure is not None:

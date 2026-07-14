@@ -12,7 +12,7 @@
   <br><em>Auto-generated report — pass rate · per-step screenshots · failure cause · regression · accessibility · credential masking</em>
 </p>
 
-Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **104 tests green**
+Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **tests green in CI**
 
 ---
 
@@ -35,6 +35,36 @@ Plenty of tools can drive a browser. This one is built around the **QA workflow*
 ## 🚀 Quick start
 
 ### 1) Install
+
+**Option A — one-liner, no clone (recommended).** `uvx` (Python's `npx`; ships with
+[uv](https://docs.astral.sh/uv/)) fetches, isolates, and runs the server in one step —
+this is the whole Claude Desktop config, nothing else to set up:
+
+```json
+{
+  "mcpServers": {
+    "ui-blackbox": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/WindowHyun/blackBoxTesting-MCP.git", "ui-blackbox-mcp"]
+    }
+  }
+}
+```
+
+The same one-liner works for the CLI and for `pipx`/`pip` users:
+
+```bash
+uvx --from git+https://github.com/WindowHyun/blackBoxTesting-MCP.git ui-blackbox doctor
+pipx install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git   # or:
+pip install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git
+```
+
+Chromium auto-installs on the server's first run (or run `playwright install
+chromium` once). Once the package is published to PyPI, this shortens further to
+`uvx ui-blackbox-mcp` / `pip install ui-blackbox-mcp` — a release workflow is
+included (`.github/workflows/release.yml`, PyPI trusted publishing).
+
+**Option B — from a clone (development):**
 ```bash
 git clone https://github.com/WindowHyun/blackBoxTesting-MCP.git
 cd blackBoxTesting-MCP
@@ -48,7 +78,7 @@ python -m venv .venv
 
 Wherever a config below uses `<ABS>`, replace it with the **absolute path** of this
 repo, e.g. `/home/you/blackBoxTesting-MCP`. On Windows the interpreter is
-`<ABS>\.venv\Scripts\python.exe`.
+`<ABS>\.venv\Scripts\python.exe`. (With Option A, `uvx` replaces all of that.)
 
 ---
 
@@ -190,6 +220,7 @@ the request.
 | `/ui-scenario` | description, url | Build → run → report (all formats) |
 | `/ui-login` | task, url | **Switch to real Chrome (persistent login)** then test a site that needs auth |
 | `/ui-generate` | description, url, name | Analyze a page → generate & save a reusable scenario |
+| `/ui-sync` | name, url | Change detection: diff a saved scenario against the current page, update & re-run |
 
 Example: `/ui-test` → `open example.com, click the login button, take a screenshot`
 
@@ -201,13 +232,15 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 
 ---
 
-## 🧰 MCP Tools (20)
+## 🧰 MCP Tools (25)
 
 | Group | Tools |
 |---|---|
 | Core | `navigate` · `snapshot` (a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
 | Extended | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
-| Scenario & report | `run_scenario` · `generate_scenario` · `save_report` |
+| Auth state | `save_state` · `load_state` · `list_states` — export login (cookies+localStorage) once, reuse headless/in CI, swap roles |
+| Network mock | `mock_route` · `unmock_route` — deterministic offline responses for flaky/unbuilt APIs |
+| Scenario & report | `run_scenario` (incl. `trace_on_failure`) · `generate_scenario` · `save_report` |
 | Library | `save_scenario` · `load_scenario` · `list_scenarios` |
 
 > **Every test flow ends with a report.** Ad-hoc tool calls (navigate/interact/assert…)
@@ -229,6 +262,7 @@ ui-blackbox run ./steps.json --format all       # a steps .json file
 ui-blackbox run a b c --junit results.xml       # suite + JUnit for CI
 ui-blackbox run a b c --parallel 3              # one isolated subprocess each
 ui-blackbox run a b c --parallel 3 --timeout 300  # per-scenario watchdog (sec)
+ui-blackbox run smoke --trace-on-failure        # keep a Playwright trace.zip only on failure
 ui-blackbox doctor                              # browser/dirs/config self-check
 ```
 

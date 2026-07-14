@@ -9,21 +9,47 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from typing import Any
 
-from ..config import CONFIG
+from ..config import CONFIG, effective_browser
 from .listeners import EventBuffers, attach
 
 log = logging.getLogger(__name__)
+
+
+def _launch_attempts() -> list[dict]:
+    """Launch-kwarg variants tried in order (mirrors _switch_to_persistent_impl):
+    channel → explicit executable → bundled default.
+
+    The explicit executable is only usable when the EFFECTIVE browser is
+    chromium (it IS a chromium binary — handing it to firefox/webkit would
+    launch the wrong browser; keying off the coerced name, not the raw env,
+    keeps BROWSER=chrome from skipping a working binary) and only when the
+    path actually exists: a stale CHROMIUM_EXECUTABLE must fall through to
+    the bundled browser bootstrap may have installed, not brick every launch.
+    """
+    attempts: list[dict] = []
+    if CONFIG.browser_channel:
+        attempts.append({"channel": CONFIG.browser_channel})
+    if (CONFIG.chromium_executable and effective_browser(CONFIG.browser) == "chromium"
+            and os.path.exists(CONFIG.chromium_executable)):
+        attempts.append({"executable_path": CONFIG.chromium_executable})
+    attempts.append({})  # bundled default
+    return attempts
 
 
 class BrowserSession:
     """Owns the Playwright lifecycle and the current page/frame context."""
 
     def __init__(self) -> None:
-        self._pw = None
-        self._browser = None
-        self._context = None
-        self._page = None
+        # Playwright objects, populated by start() (optional-init pattern —
+        # typed Any so mypy doesn't pin them to None; liveness is guarded at
+        # runtime by is_alive()/the page property, not the type system).
+        self._pw: Any = None
+        self._browser: Any = None
+        self._context: Any = None
+        self._page: Any = None
         self._cdp = False          # attached to a user-owned browser via CDP
         self._persistent = False   # launched a real browser with a saved profile
         self._persistent_opts: dict | None = None
@@ -31,8 +57,10 @@ class BrowserSession:
         self._frame_selector: str | None = None
         self.buffers = EventBuffers()
         # Serializes lifecycle mutations (reset / switch_to_persistent /
-        # restart) so concurrent tool calls can't tear down a context that
-        # another call is mid-way through using or launching.
+        # restart / close) against EACH OTHER, so two lifecycle ops can't tear
+        # down each other's half-started state. Action tools don't take this
+        # lock (single-tenant server): an action racing a reset may still see
+        # its context close mid-use — that's the documented tenancy model.
         self._op_lock = asyncio.Lock()
 
     # ── lifecycle ────────────────────────────────────────────────
@@ -55,32 +83,56 @@ class BrowserSession:
                               else await self._context.new_page())
                 self._frame_selector = None
                 self.buffers.clear()
-                attach(self._page, self.buffers)
+                self._watch_page(self._page)
                 self._track_pages()
                 log.info("BrowserSession attached over CDP: %s", CONFIG.cdp_url)
                 return
             except Exception as exc:
                 self._cdp = False
+                # A partial attach (connected, but new_context/new_page failed)
+                # must not leak the open CDP connection for the process's life.
+                if self._browser is not None:
+                    try:
+                        await self._browser.close()
+                    except Exception:
+                        pass
+                self._browser = self._context = self._page = None
                 log.warning("CDP connect to %s failed (%s) — launching a normal "
                             "browser instead.", CONFIG.cdp_url, exc)
 
-        browser_type = getattr(self._pw, CONFIG.browser)
-        launch_kwargs = {"headless": CONFIG.headless}
-        if CONFIG.browser_channel:
-            launch_kwargs["channel"] = CONFIG.browser_channel  # real Chrome/Edge
-        elif CONFIG.chromium_executable:
-            launch_kwargs["executable_path"] = CONFIG.chromium_executable
+        browser_name = effective_browser(CONFIG.browser)
+        if browser_name != CONFIG.browser:
+            log.warning("unknown BROWSER=%r — using chromium.", CONFIG.browser)
+        browser_type = getattr(self._pw, browser_name)
+        launch_kwargs: dict = {"headless": CONFIG.headless}
         if CONFIG.stealth:
             launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
-        self._browser = await browser_type.launch(**launch_kwargs)
+
+        # Fallback chain: a channel that isn't installed or a stale executable
+        # must not brick every launch when the bundled browser would work.
+        used, last_err = None, None
+        for extra in _launch_attempts():
+            try:
+                self._browser = await browser_type.launch(**launch_kwargs, **extra)
+                used = extra.get("channel") or extra.get("executable_path") or "bundled"
+                break
+            except Exception as exc:
+                last_err = exc
+                log.warning("launch attempt %s failed: %s", extra or "bundled", exc)
+        if self._browser is None:
+            raise RuntimeError(f"failed to launch {CONFIG.browser}: {last_err}")
         await self._new_context()
         log.info(
-            "BrowserSession started (%s, headless=%s, channel=%s, stealth=%s)",
-            CONFIG.browser, CONFIG.headless, CONFIG.browser_channel or "-", CONFIG.stealth,
+            "BrowserSession started (%s via %s, headless=%s, stealth=%s)",
+            CONFIG.browser, used, CONFIG.headless, CONFIG.stealth,
         )
 
-    async def _new_context(self) -> None:
+    async def _new_context(self, storage_state: str | None = None) -> None:
         ctx_kwargs: dict = {}
+        if storage_state is not None:
+            # Restore cookies/localStorage exported by save_state — auth reuse
+            # without a persistent profile (works headless/CI).
+            ctx_kwargs["storage_state"] = storage_state
         if CONFIG.ignore_https_errors:
             ctx_kwargs["ignore_https_errors"] = True
         if CONFIG.stealth:
@@ -101,13 +153,32 @@ class BrowserSession:
         self._page = await self._context.new_page()
         self._frame_selector = None
         self.buffers.clear()
-        attach(self._page, self.buffers)
+        self._watch_page(self._page)
         self._track_pages()
 
     async def reset(self) -> None:
         """BR-04: wipe context (cookies/session/storage) + buffers, fresh page."""
         async with self._op_lock:
             await self._reset_impl()
+
+    async def load_storage_state(self, path: str) -> None:
+        """Replace the context with a fresh one seeded from a storage-state file
+        (cookies + localStorage exported by ``save_state``).
+
+        Only for browsers we own contexts in (bundled/channel): a CDP-attached
+        or persistent-profile browser keeps its own auth — recreating its
+        context would detach/lose the user's real session.
+        """
+        async with self._op_lock:
+            if self._cdp or self._persistent:
+                raise RuntimeError(
+                    "load_state only applies to the bundled/channel browser — "
+                    "real-browser modes (CDP/persistent profile) keep their own "
+                    "login state.")
+            if self._context is not None:
+                await self._context.close()
+            await self._new_context(storage_state=path)
+            log.info("BrowserSession context reloaded from storage state.")
 
     async def _reset_impl(self) -> None:
         if self._cdp or self._persistent:
@@ -178,25 +249,36 @@ class BrowserSession:
                       else await self._context.new_page())
         self._persistent, self._cdp, self._frame_selector = True, False, None
         self.buffers.clear()
-        attach(self._page, self.buffers)
+        self._watch_page(self._page)
         self._track_pages()
         log.info("BrowserSession → real persistent browser (%s, profile=%s)", used, profile)
         return {"used": used, "profile": profile, "headless": headless, "reused": False}
 
     async def _teardown_current(self) -> None:
-        """Close whatever browser is currently open, keeping Playwright running."""
-        try:
-            if self._cdp and self._browser is not None:
-                await self._browser.close()
-            elif self._persistent and self._context is not None:
-                await self._context.close()
-            else:
-                if self._context is not None:
+        """Close whatever browser is currently open, keeping Playwright running.
+
+        Each close is attempted independently: a context whose close raises (a
+        crashed renderer is exactly why we're switching browsers) must not skip
+        browser.close() — unlike close(), the driver stays running here, so a
+        skipped browser.close() orphans a live Chromium for the process's life.
+        """
+        if self._cdp:
+            if self._browser is not None:
+                try:
+                    await self._browser.close()  # detaches; user's Chrome stays
+                except Exception:
+                    pass
+        else:
+            if self._context is not None:
+                try:
                     await self._context.close()
-                if self._browser is not None:
+                except Exception as exc:
+                    log.warning("context close failed (%s) — closing browser anyway.", exc)
+            if self._browser is not None:
+                try:
                     await self._browser.close()
-        except Exception:
-            pass
+                except Exception:
+                    pass
         self._browser = self._context = self._page = None
         self._cdp = self._persistent = False
 
@@ -211,13 +293,19 @@ class BrowserSession:
             log.warning("BrowserSession restarting after failure.")
             persistent = self._persistent
             opts = self._persistent_opts or {"headless": False, "channel": "chrome"}
-            await self.close()
+            await self._close_impl()
             if persistent:
                 await self._switch_to_persistent_impl(**opts)
             else:
                 await self.start()
 
     async def close(self) -> None:
+        # Same public-lock/_impl split as the other lifecycle ops: shutdown must
+        # not stop the driver while a reset/switch holds the lock mid-operation.
+        async with self._op_lock:
+            await self._close_impl()
+
+    async def _close_impl(self) -> None:
         try:
             try:
                 if self._cdp:
@@ -278,6 +366,21 @@ class BrowserSession:
         """CT-09: switch into an iframe (or back to main with None)."""
         self._frame_selector = selector
 
+    def _watch_page(self, page) -> None:
+        """Attach event listeners + a close-fallback handler to a page we drive.
+
+        Idempotent per page: every page that can become ``_page`` (initial page,
+        persistent context's first page, adopted popups, close-fallback targets)
+        must carry the close handler, or closing it strands the session on a
+        dead page and the next tool call needlessly restarts the whole browser.
+        Guarding repeat calls keeps attach() from double-buffering events.
+        """
+        if getattr(page, "_bbx_watched", False):
+            return
+        page._bbx_watched = True
+        attach(page, self.buffers)
+        page.on("close", lambda: self._on_page_closed(page))
+
     def _adopt_page(self, page) -> None:
         """Follow a popup/new tab so a flow that opens one keeps working.
 
@@ -286,20 +389,20 @@ class BrowserSession:
         """
         self._page = page
         self._frame_selector = None
-        attach(page, self.buffers)
-        page.on("close", lambda: self._on_page_closed(page))
+        self._watch_page(page)
         log.info("Adopted new page/popup.")
 
     def _on_page_closed(self, page) -> None:
-        """When the active popup closes (e.g. OAuth done), fall back to a still-open
-        page so the flow continues on the original tab instead of a dead page."""
+        """When the active page closes (popup done, tab closed), fall back to a
+        still-open page so the flow continues instead of dying on a dead page."""
         if self._page is page and self._context is not None:
             others = [p for p in self._context.pages if not p.is_closed()]
             if others:
                 # oldest remaining page = the original tab the flow came from
                 self._page = others[0]
                 self._frame_selector = None
-                log.info("Active popup closed → fell back to remaining page.")
+                self._watch_page(self._page)  # CDP-mode tabs may be unwatched
+                log.info("Active page closed → fell back to remaining page.")
 
     def _track_pages(self) -> None:
         """Follow popups in browsers we own. NOT in CDP mode — that's the user's
@@ -340,6 +443,10 @@ async def get_session() -> BrowserSession:
 async def close_session() -> None:
     """Close and drop the singleton (used by the server lifespan on shutdown)."""
     global _SESSION
-    if _SESSION is not None:
-        await _SESSION.close()
-        _SESSION = None
+    # Same lock get_session() takes (then close() takes _op_lock — consistent
+    # _SESSION_LOCK → _op_lock ordering), so shutdown can't race a concurrent
+    # create/restart and leave a half-torn-down session published.
+    async with _SESSION_LOCK:
+        if _SESSION is not None:
+            await _SESSION.close()
+            _SESSION = None

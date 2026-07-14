@@ -30,6 +30,11 @@ async def expect_dialog(action: str = "accept", expected_text: str | None = None
     if trigger is None:
         return {"passed": False, "error": "provide 'trigger' selector that raises the dialog"}
 
+    # Normalize so "Accept"/"ACCEPT" don't silently fall through to dismiss.
+    act = (action or "accept").strip().lower()
+    if act not in ("accept", "dismiss"):
+        return {"passed": False, "error": f"action must be accept|dismiss, got {action!r}"}
+
     locator, _ = await resolve(session.root, trigger)
     captured: dict = {}
 
@@ -37,7 +42,7 @@ async def expect_dialog(action: str = "accept", expected_text: str | None = None
         captured["type"] = dialog.type
         captured["message"] = dialog.message
         try:
-            if action == "accept":
+            if act == "accept":
                 await (dialog.accept(accept_text) if accept_text is not None
                        else dialog.accept())
             else:
@@ -70,4 +75,4 @@ async def expect_dialog(action: str = "accept", expected_text: str | None = None
 
     passed = expected_text is None or (expected_text in (captured.get("message") or ""))
     return {"passed": passed, "dialog_type": captured.get("type"),
-            "message": captured.get("message"), "handled": action}
+            "message": captured.get("message"), "handled": act}

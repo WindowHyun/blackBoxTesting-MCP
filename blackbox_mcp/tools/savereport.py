@@ -27,8 +27,14 @@ async def save_report(name: str = "session", description: str = "",
     except Exception:
         result["meta"] = {}
         result["a11y_findings"] = []
-    report.compute_regression(result)
 
-    files = report.save(result, formats=report_format)
-    recorder.reset()
+    try:
+        report.compute_regression(result)
+        files = report.save(result, formats=report_format)
+    except Exception as exc:
+        # Disk-full / permission errors must surface as a tool result, and the
+        # recorder must NOT be reset — the steps are still there to retry.
+        return {"ok": False, "error": f"report save failed: {type(exc).__name__}: {exc}"}
+
+    recorder.reset()  # only after a successful save
     return {"ok": True, "report_files": files, "summary": result["summary"]}

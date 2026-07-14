@@ -39,10 +39,17 @@ async def test_switch_frame_scopes_to_iframe(session):
     await session.page.wait_for_timeout(100)
     r = await switch_frame("#f")
     assert r["ok"] and r["context"] == "#f"
+    assert r["matched"] is True  # a real iframe was found
     # snapshot now scoped to the iframe content
     assert "안쪽" in await snapshot()
     back = await switch_frame(None)
     assert back["context"] == "main"
+
+
+async def test_switch_frame_flags_missing_selector(session):
+    await session.page.set_content("<div>no frames here</div>")
+    r = await switch_frame("#nope")
+    assert r["ok"] is True and r["matched"] is False  # typo flagged, not silent
 
 
 # ── BR-04 reset_session ───────────────────────────────────────────
@@ -72,6 +79,21 @@ async def test_expect_dialog_dismiss_confirm(session):
     r = await expect_dialog(action="dismiss", expected_text="삭제", trigger="testid=c")
     assert r["passed"] is True
     assert r["dialog_type"] == "confirm"
+
+
+async def test_expect_dialog_action_case_insensitive(session):
+    # "Accept" must accept, not silently fall through to dismiss
+    await session.page.set_content(
+        "<button data-testid='a' onclick=\"alert('hi')\">go</button>")
+    r = await expect_dialog(action="Accept", trigger="testid=a")
+    assert r["passed"] is True and r["handled"] == "accept"
+
+
+async def test_expect_dialog_rejects_bad_action(session):
+    await session.page.set_content(
+        "<button data-testid='a' onclick=\"alert('hi')\">go</button>")
+    r = await expect_dialog(action="approve", trigger="testid=a")
+    assert r["passed"] is False and "accept|dismiss" in r["error"]
 
 
 async def test_expect_dialog_missing_is_failure(session):

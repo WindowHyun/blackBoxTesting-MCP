@@ -70,7 +70,10 @@ async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
             try:
                 res = await runner.run(steps, name=name,
                                        continue_on_fail=args.continue_on_fail,
-                                       screenshot_each=args.screenshot_each)
+                                       screenshot_each=args.screenshot_each,
+                                       trace_on_failure=args.trace_on_failure)
+                if res.get("trace"):
+                    print(f"  trace: {res['trace']}  (playwright show-trace로 열기)")
                 files = report.save(res, formats=args.format)
                 s = res["summary"]
                 mark = "PASS" if s["failed"] == 0 else "FAIL"
@@ -139,7 +142,9 @@ def _run_parallel(refs: list[str], args) -> int:
     import os
 
     child_env = {**os.environ, "REPORT_RETENTION": "0"}
-    procs: dict[str, object] = {}
+    # A list, not a ref-keyed dict: the same scenario passed twice must not
+    # shadow its sibling's process and dodge the kill-on-interrupt cleanup.
+    procs: list = []
 
     async def _go() -> list[int]:
         sem = asyncio.Semaphore(args.parallel)
@@ -152,8 +157,10 @@ def _run_parallel(refs: list[str], args) -> int:
                     cmd.append("--continue-on-fail")
                 if args.screenshot_each:
                     cmd.append("--screenshot-each")
+                if args.trace_on_failure:
+                    cmd.append("--trace-on-failure")
                 proc = await asyncio.create_subprocess_exec(*cmd, env=child_env)
-                procs[ref] = proc
+                procs.append(proc)
                 try:
                     return await asyncio.wait_for(proc.wait(), timeout=args.timeout)
                 except asyncio.TimeoutError:
@@ -167,14 +174,14 @@ def _run_parallel(refs: list[str], args) -> int:
             return list(await asyncio.gather(*(one(r) for r in refs)))
         finally:
             # KeyboardInterrupt/cancel: don't orphan child browsers.
-            for p in procs.values():
+            for p in procs:
                 if p.returncode is None:
                     p.kill()
 
     try:
         codes = [_norm_exit(c) for c in asyncio.run(_go())]
     except KeyboardInterrupt:
-        for p in procs.values():
+        for p in procs:
             if getattr(p, "returncode", 0) is None:
                 p.kill()
         print("interrupted", file=sys.stderr)
@@ -231,7 +238,7 @@ def _cmd_run(args) -> int:
 def _cmd_doctor(args) -> int:  # noqa: ARG001
     """Self-check: browser resolvable + output dirs writable + config echo."""
     from .bootstrap import _browser_installed
-    from .config import CONFIG
+    from .config import CONFIG, effective_browser
     from .testing.report import ensure_dirs
 
     ok = True
@@ -245,10 +252,15 @@ def _cmd_doctor(args) -> int:  # noqa: ARG001
         print(f"  browser: CHROMIUM_EXECUTABLE={CONFIG.chromium_executable} "
               f"{'✓' if exists else '✗ MISSING'}")
     else:
-        installed = _browser_installed(CONFIG.browser)
+        # Probe the browser the session will actually launch (BROWSER=chrome
+        # coerces to chromium) — probing the raw value fails a CI gate that
+        # would in fact run fine.
+        name = effective_browser(CONFIG.browser)
+        installed = _browser_installed(name)
         ok &= installed
-        print(f"  browser: playwright {CONFIG.browser} "
-              f"{'✓ installed' if installed else '✗ not installed (run: playwright install chromium)'}")
+        coerced = f" (BROWSER={CONFIG.browser} → {name})" if name != CONFIG.browser else ""
+        print(f"  browser: playwright {name}{coerced} "
+              f"{'✓ installed' if installed else f'✗ not installed (run: playwright install {name})'}")
 
     try:
         d = ensure_dirs()
@@ -281,6 +293,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="keep executing steps after a failure")
     run_p.add_argument("--screenshot-each", action="store_true",
                        help="screenshot every step, not just failures")
+    run_p.add_argument("--trace-on-failure", action="store_true",
+                       help="record a Playwright trace; keep the .zip only if "
+                            "the scenario fails (open with: playwright show-trace)")
     run_p.add_argument("--junit", metavar="PATH",
                        help="also write a JUnit XML report (sequential runs only)")
     run_p.add_argument("--parallel", type=int, default=1, metavar="N",

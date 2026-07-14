@@ -53,6 +53,9 @@ blackbox_mcp/
     session.py(reset_session) · realbrowser.py(use_real_browser)
     scenario.py(run_scenario) · savereport.py(save_report)
     generate.py(generate_scenario) · library.py(save/load/list_scenario)
+    overlays.py(dismiss_banners) # 실사이트 쿠키/동의 배너 닫기(클릭 인터셉트 회피)
+    state.py(save/load/list_states) # 로그인 상태 파일 재사용(headless/CI·역할 전환)
+    mock.py(mock_route/unmock_route) # 네트워크 모킹(불안정 외부 API 결정화)
     status.py(status)      # 읽기 전용 상태 프로브(버전·모드·생존·버퍼·설정)
 
 # 출력 경로(절대, 기본 ~/ui-blackbox/ — MCP cwd가 불가측·쓰기불가일 수 있어 홈 기준):
@@ -101,9 +104,22 @@ def register_all(mcp):             # server.py에서 1회 호출
 - **동시 호출 안전(2026-07 감사 반영):** `get_session()`은 모듈 `asyncio.Lock`으로
   직렬화 — 동시 tool 호출이 이중 기동/이중 restart를 일으키지 않는다. 싱글톤은
   `start()` 성공 후에만 공개되고, 실패 시 반쯤 뜬 드라이버를 정리한다.
-  `reset`/`switch_to_persistent`/`restart`는 인스턴스 락(`_op_lock`)으로 직렬화
-  (본체는 `_impl`로 분리해 재진입 데드락 회피). `close()`는 브라우저가 이미 죽어
-  close가 raise해도 Playwright 드라이버를 반드시 stop한다(고아 프로세스 방지).
+  `reset`/`switch_to_persistent`/`restart`/`close`는 인스턴스 락(`_op_lock`)으로
+  직렬화(본체는 `_impl`로 분리해 재진입 데드락 회피 — `restart`는 `_close_impl`
+  호출). `close_session()`은 `_SESSION_LOCK`을 잡아 종료가 동시 생성/복구와
+  경합하지 않는다(락 순서는 항상 `_SESSION_LOCK` → `_op_lock`). `close()`는
+  브라우저가 이미 죽어 close가 raise해도 Playwright 드라이버를 반드시 stop한다
+  (고아 프로세스 방지). `_teardown_current`(드라이버 유지 전환용)는 각 close를
+  **독립적으로** 시도 — context.close 실패가 browser.close를 건너뛰어 Chromium을
+  고아화하지 않는다.
+- **런치 폴백 체인(2026-07):** `start()`는 `_launch_attempts()` 순서(channel →
+  존재 확인된 chromium 실행 파일 → 번들 기본)로 시도 — stale `CHROMIUM_EXECUTABLE`
+  이나 미설치 channel이 모든 런치를 영구 실패시키지 않는다. 실행 파일 경로는
+  `BROWSER=chromium`일 때만 적용(chromium 바이너리를 firefox에 넘기지 않음).
+- **페이지 추적:** 활성 페이지가 될 수 있는 모든 페이지(최초 페이지·persistent 첫
+  페이지·adopt된 팝업·close-폴백 대상)는 `_watch_page`로 리스너+close 핸들러를
+  받는다(페이지당 1회 멱등 — attach 중복 버퍼링 방지). 원본 탭이 닫혀도 살아있는
+  페이지로 폴백해 불필요한 전체 restart를 피한다.
 - **시작/정리는 FastMCP `lifespan`으로 관리(공식 권장):** `@asynccontextmanager`
   로 서버 기동 시 세션을 준비하고 `finally`에서 `close()`로 브라우저를 정리한다.
   지연 초기화(`get_session()`)와 병행하되, 종료 시 리소스 릭이 없도록 lifespan
@@ -189,11 +205,37 @@ def register_all(mcp):             # server.py에서 1회 호출
 - 접두사 없는 **CSS형 문자열**은 CSS로 해석하되, **명확한 구조 신호에서만**
   판단한다(2026-07 수정): `#`·`[`·`]`·`>` 또는 **선행 `.`**(`. btn`). 중간 점이 있는
   단어(`example.com`, `v1.2`)는 **가시 텍스트로 취급** — 과거엔 이런 텍스트가 CSS로
-  둔갑해 실사이트에서 오타겟팅됐다. 공백 가드는 유지.
+  둔갑해 실사이트에서 오타겟팅됐다.
+- **공백 포함 구조 신호**(`#form input`, `div > a`)의 처리(2026-07 2차 감사):
+  `resolve()`(bare-string 체인)는 CSS를 **count 프로브되는 첫 후보**로 시도하고
+  매칭 없으면 체인을 계속 — `Home > Products`·`Order #123` 같은 가시 텍스트는
+  CSS로 0건이라 텍스트 티어로 자연 귀결된다. **`locate()`(sync, 프로브 불가)는
+  보수적으로 유지**: 공백 포함 문자열은 구조 문자가 있어도 텍스트로 취급.
+- **도구별 체인 사용(2026-07 3차 검증 반영):**
+  - `assert_ element_visible`: `resolve(visible_only=True)` — 티어 프로브가
+    `filter(visible=True)` 기준이라, 단언 텍스트와 같은 값의 **숨은** testid
+    (스켈레톤/템플릿 노드)가 티어를 선점해 뒤 티어의 가시 매치를 가리지 않는다.
+    판정도 "가시 매치 존재"(첫 매치의 가시성이 아니라).
+  - `assert_ count`: 모집단이 판정을 좌우하므로 `resolve_count_population` 사용 —
+    접두사·무공백 CSS는 그 전략, **공백 포함 구조 문자열은 CSS 매치가 있으면
+    CSS·없으면 텍스트**(`[필수] 약관`은 잘못된 CSS → 텍스트), 평문은 텍스트
+    매치(원래 의미론). testid/role 티어는 카운트에서 **의도적으로 배제** —
+    충돌하는 testid/role 이름이 모집단을 1↔3으로 바꾸지 않게.
+  - `wait(selector=)`: **폴링 재해석**(100ms) — wait의 본질은 "아직 없는" 요소라
+    호출 시점 1회 resolve는 모든 티어가 0건 → 텍스트 폴백에 고착된다. 마감까지
+    체인을 재프로브해 요소가 나타나는 시점의 올바른 티어를 잡는다(가시 기준).
+    단일 결정 전략(접두사·무공백 CSS, `is_single_strategy`)의 프로브 예외는
+    **연속 2회 동일 오류일 때만** 조기 실패 — 파싱 오류는 매 폴 동일하게
+    반복되지만(빠른 실패 유지), 팝업 닫힘의 일시적 TargetClosed는 다음 폴에서
+    root가 살아있는 페이지로 교체돼 반복되지 않으므로 1회 발생으로 wait를
+    중단하면 안 된다(2026-07 5차 검증). 폴 간 대기는 `asyncio.sleep`(닫힌
+    페이지의 `wait_for_timeout`이 자체 raise하지 않게).
 - 접두사 없는 **평문**은 **D2 전체 순서**로 실제 fallback(2026-07 수정: role 티어 복원):
   `[data-testid="s"]` → **role+name**(흔한 인터랙티브 role을 접근성 이름 `s`로 시도:
   button/link/textbox/checkbox/… ) → 가시 텍스트, **count>0 인 첫 전략** 채택(없으면
   텍스트로 귀결해 에러가 자연스럽게). 과거엔 role 티어(D2 우선순위 2위)를 건너뛰었다.
+  `role=` 파싱은 `name=` 접두사 없는 나머지도 접근성 이름으로 받는다
+  (`role=button submit` → button + "submit" — 통짜 role 오류 대신).
 - 액션 timeout은 `CONFIG.selector_timeout_ms`(기본 2000) 적용 → 없는 요소에서
   30초 대기 없이 빠르게 실패.
 
@@ -221,11 +263,39 @@ API:
 |---|---|---|---|
 | `reset_session` | `reset_session()` | `{ok, message}` | SHOULD |
 | `use_real_browser` | `use_real_browser(headless=False, channel="chrome")` | `{ok, mode, browser, profile}` | 확장 |
+| `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...]}` | 확장 |
+| `save_state` | `save_state(name="default")` | `{ok, name, path}` | 확장 |
+| `load_state` | `load_state(name="default")` | `{ok, name, path}` | 확장 |
+| `list_states` | `list_states()` | `[{name, saved_at}]` | 확장 |
+| `mock_route` | `mock_route(pattern, body="", status=200, content_type=...)` | `{ok, pattern, active}` | 확장 |
+| `unmock_route` | `unmock_route(pattern=None)` | `{ok, active}` | 확장 |
 | `status` | `status()` | `{version, config, session:{mode,alive,url,버퍼}}` | 확장(관측) |
 
 > **status (관측성):** 세션을 **새로 만들지 않는** 읽기 전용 프로브(`_SESSION`을 직접
 > 조회). 버전·모드(번들/채널/persistent/CDP)·생존·현재 URL·버퍼 크기·유효 설정을
 > 반환해, 사용자 환경 디버깅을 Claude Desktop 로그 없이 대화에서 끝낸다.
+>
+> **dismiss_banners (실사이트 하드닝):** GDPR/쿠키/동의 오버레이가 클릭을 가로채는
+> ("intercepts pointer events") 실사이트용 — 흔한 수락/닫기 라벨(KO/EN)을 role로
+> 순회하며 **보이는 첫 항목**을 클릭(짧은 per-try 타임아웃, 매치 없어도 무에러).
+> 최대 3개까지만 눌러 무관 컨트롤 오클릭을 방지. navigate 후 클릭이 막히면 호출.
+>
+> **save_state / load_state (로그인 재사용, 2026-07):** 현재 컨텍스트의 쿠키+
+> localStorage를 `~/ui-blackbox/state/{name}.json`(POSIX 0600)으로 내보내고,
+> 나중에 새 컨텍스트를 그 파일로 시드한다 — 영구 프로필과 달리 **headless/CI에서
+> 동작**하고, 역할별(state 파일별) 전환으로 guest/member/admin 비교를 단일 테넌트
+> 그대로 해결한다. load는 번들/채널 전용(CDP·persistent는 자체 로그인 유지라 거부,
+> `RuntimeError`→tool이 `{ok:False}`). 검증(1.61): `context.storage_state(path=)`
+> ↔ `new_context(storage_state=)` 라운드트립은 쿠키+**http(s) 오리진**
+> localStorage를 복원하며, **file:// localStorage는 캡처되지 않는다**(§13).
+> 시나리오 스텝 `save_state`/`load_state`(name)로도 사용.
+>
+> **mock_route / unmock_route (네트워크 모킹, 2026-07):** 글롭 패턴 매칭 요청을
+> 현재 컨텍스트에서 가로채 로컬 fulfill(무네트워크) — 불안정/미구현 외부 API를
+> 결정화한다. `status=500`+navigate `expect_status`로 에러 페이지 처리를
+> 오프라인 검증 가능. 활성 패턴은 **컨텍스트 객체에 부착**해 추적(컨텍스트 스왑
+> 시 자연 소멸 — reset/load_state 후 재장착 필요, 도구 설명에 명시). 시나리오
+> 스텝 `mock_route`/`unmock_route`로도 사용.
 
 ### 5.2 코어 (CT)
 | Tool | 시그니처 | 반환 | 우선순위 |
@@ -389,7 +459,9 @@ SM-01~04와 함께(또는 직후) 구현한다.
   "regression": {                        // SM-07: 직전 실행 대비
     "previous_run": "2026-06-23T18:00:00",
     "changed": [{ "step": 4, "from": "passed", "to": "failed" }]
-  }
+  },
+  "trace": "…/reports/traces/<run_id>_<name>.zip"  // trace_on_failure로 실행이
+                                         // 실패했을 때만 존재(§7.1) — 통과 런은 폐기
 }
 ```
 > **회귀 baseline 가드(2026-07):** 직전 실행과 `(step, action)` 키가 하나도 겹치지
@@ -428,6 +500,9 @@ SM-01~04와 함께(또는 직후) 구현한다.
   `/opt/pw-browsers/chromium` 자동 감지)을 세션 `launch(executable_path=...)`에
   전달해 사전 설치 바이너리를 사용한다. `ensure_chromium()`은 이 경로가 있으면
   다운로드를 건너뛰고, 다운로드 시도가 실패해도 크래시 없이 경고만 남긴다.
+  세션 `start()`도 같은 약속을 지킨다(2026-07 2차 감사): 경로가 stale이면
+  `os.path.exists` 검사로 건너뛰고 번들로 폴백 — env 오타가 모든 런치를
+  영구 실패시키지 않는다(§3.1 런치 폴백 체인).
   설치 서브프로세스의 stdout/stderr는 `DEVNULL` — stdout은 MCP JSON-RPC 파이프라
   진행률 출력이 프로토콜을 오염시키면 안 된다(§14).
   > 검증(2026-06): preinstalled chromium **build 1194** + Playwright **1.60** 드라이버를
@@ -437,10 +512,13 @@ SM-01~04와 함께(또는 직후) 구현한다.
 ```json
 {
   "mcpServers": {
-    "ui-blackbox": { "command": "python", "args": ["-m", "blackbox_mcp.server"] }
+    "ui-blackbox": { "command": "/abs/path/.venv/bin/python", "args": ["-m", "blackbox_mcp.server"] }
   }
 }
 ```
+> `command`는 **venv의 절대경로 인터프리터**여야 한다 — 시스템 `python`은 PyJWT
+> RECORD 충돌로 설치가 깨진다(CLAUDE.md). 정식 예시는
+> `claude_desktop_config.example.json`.
 
 ### 7.1 CLI / CI 진입점 (`blackbox_mcp/cli.py`, `ui-blackbox` 스크립트)
 
@@ -453,6 +531,11 @@ SM-01~04와 함께(또는 직후) 구현한다.
   `2`(사용법·인프라 오류) → CI 게이팅.
 - `--junit PATH` — 시나리오당 `testsuite`, 스텝당 `testcase`의 **JUnit XML**(GitHub
   Actions/Jenkins 네이티브 파싱). `--continue-on-fail`, `--screenshot-each`, `--format`.
+- `--trace-on-failure` — Playwright 트레이싱을 켠 채 실행하고 **실패한 실행만**
+  `reports/traces/{run_id}_{name}.zip`을 남긴다(통과 런은 stop 시 폐기 — 아티팩트
+  무한 축적 방지). `playwright show-trace`로 열람. run_id가 파일명을 선도해
+  리테인션이 스크린샷과 동일하게 run 단위로 정리(§7.2). 병렬 자식에도 전파.
+  MCP `run_scenario(trace_on_failure=True)`로도 동일 동작.
 - `--parallel N` — 시나리오당 **서브프로세스 1개**로 격리 실행(각자 자기 세션 싱글톤을
   가지므로 공유 상태 리팩토링 불필요). 동시성은 N으로 제한. **견고화(2026-07 리뷰):**
   자식은 `REPORT_RETENTION=0`으로 돌고 부모가 종료 후 1회 정리(형제 간 리포트 삭제
@@ -629,10 +712,19 @@ SM-01~04와 함께(또는 직후) 구현한다.
 - `ConsoleMessage.type`/`text`/`location`(property) — location 키는 `url`/`line`/`column`
   (`lineNumber`/`columnNumber`는 deprecated) → `line` 우선 사용으로 정정 ✅
 - `page.screenshot(path=, full_page=)` ✅
+- `BrowserContext.storage_state(path=)` ↔ `Browser.new_context(storage_state=)` —
+  시그니처 인스펙션+실측(1.61): 쿠키와 **http(s) 오리진 localStorage** 라운드트립 ✅.
+  **file:// 오리진 localStorage는 캡처되지 않음**(origins 빈 배열, 실측) → state
+  테스트는 route로 만든 가짜 http 오리진 사용 ⚠️
+- `BrowserContext.tracing.start(screenshots=, snapshots=)` · `stop(path=)` —
+  path 없이 stop하면 trace **폐기**(통과 런 아티팩트 미축적에 활용) ✅
+- `BrowserContext.route(url, handler)` · `unroute(url)` · `unroute_all(behavior=)` ·
+  `Route.fulfill(status=, body=, content_type=, json=, headers=)` — 시그니처
+  인스펙션+실측(모킹 도큐먼트 네비게이션·fetch) ✅
 
 **MCP Prompts** — `@mcp.prompt(name=, description=)` 데코레이터, 문자열 인자 → 문자열
 반환이 user 메시지로 직렬화, 인자는 클라이언트에 `PromptArgument`로 노출 ✅
-(슬래시 명령 ui-test/ui-scenario/ui-login/ui-generate)
+(슬래시 명령 ui-test/ui-scenario/ui-login/ui-generate/ui-sync)
 
 > 제약: playwright.dev API 페이지는 직접 fetch가 403으로 막혀, 일부 항목은
 > GitHub 원본 마크다운 + 공식 검색 결과 + **로컬 실측**으로 교차 확인함.

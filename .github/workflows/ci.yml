@@ -6,9 +6,11 @@ on:
   pull_request:
 
 jobs:
-  # Lint gate (was missing despite shipping py.typed). ruff blocks; mypy runs
-  # informationally — the codebase's Playwright optional-init pattern isn't
-  # strict-clean yet, so type errors are surfaced but don't fail the build.
+  # Lint gate (was missing despite shipping py.typed). Both block: the suite
+  # is ruff- and mypy-clean (the Playwright optional-init attrs are typed Any
+  # with runtime liveness guards), and a clean gate only helps if it fails on
+  # regressions. mypy's major is capped in pyproject so a new mypy release
+  # can't break CI on an unrelated PR.
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -19,7 +21,7 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: ruff check blackbox_mcp
-      - run: mypy blackbox_mcp || true
+      - run: mypy blackbox_mcp
 
   # Fast lane: no browser download — unit tests only (-m "not browser").
   # Matrix covers Windows/macOS since Claude Desktop is a cross-platform client.

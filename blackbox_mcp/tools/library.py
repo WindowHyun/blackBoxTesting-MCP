@@ -1,6 +1,8 @@
 """SL-02 / SL-03 / SL-04: scenario library tools."""
 from __future__ import annotations
 
+import json
+
 from ..testing import library
 from ._registry import tool
 
@@ -21,6 +23,10 @@ async def load_scenario(name: str) -> dict:
         steps = library.load(name)
     except FileNotFoundError as e:
         return {"ok": False, "error": str(e)}
+    except (json.JSONDecodeError, ValueError) as e:
+        # A hand-edited or half-written scenario file must surface as a tool
+        # result, not crash the MCP call.
+        return {"ok": False, "error": f"scenario '{name}' is corrupted: {e}"}
     return {"ok": True, "name": name, "steps": steps}
 
 

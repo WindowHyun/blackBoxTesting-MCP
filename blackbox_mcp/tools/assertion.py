@@ -5,7 +5,7 @@ Exposed to MCP as the tool name 'assert_' (assert is a Python keyword).
 from __future__ import annotations
 
 from ..browser import get_session
-from ..browser.locator import locate
+from ..browser.locator import resolve, resolve_count_population
 from ._registry import tool
 
 _KINDS = {"text_visible", "element_visible", "url_is", "url_contains", "count"}
@@ -26,22 +26,35 @@ async def assert_(kind: str, target: str, expected: str | None = None) -> dict:
     actual: object = None
 
     if kind == "text_visible":
+        # "visible somewhere": a VISIBLE match must exist. filter(visible=True)
+        # (not .first.is_visible()) so a hidden first match doesn't mask a
+        # visible later one — and so this agrees with element_visible on the
+        # same page instead of contradicting it.
         loc = root.get_by_text(target)
-        # "visible somewhere": tolerate multiple matches (no strict-mode throw).
-        actual = await loc.count() > 0 and await loc.first.is_visible()
+        actual = await loc.filter(visible=True).count() > 0
         passed = bool(actual)
     elif kind == "element_visible":
-        loc = locate(root, target)
-        actual = await loc.count() > 0 and await loc.first.is_visible()
+        # Full D2 chain, probed for VISIBLE matches: "#form input" resolves as
+        # CSS, visible text like "Order #123" lands on the text tier, and a
+        # hidden testid that shares the asserted text can't win a tier and
+        # shadow the visible match behind it.
+        loc, _ = await resolve(root, target, visible_only=True)
+        actual = await loc.filter(visible=True).count() > 0
         passed = bool(actual)
     elif kind == "url_is":
         actual = session.page.url
         passed = actual == target
     elif kind == "url_contains":
-        actual = session.page.url
-        passed = target in actual
+        url = session.page.url
+        actual = url
+        passed = target in url
     elif kind == "count":
-        actual = await locate(root, target).count()
+        # count's verdict depends on WHICH population is counted — see
+        # resolve_count_population: selectors count their strategy, everything
+        # else counts text matches, and a colliding testid/role name never
+        # silently switches the population.
+        loc, _ = await resolve_count_population(root, target)
+        actual = await loc.count()
         try:
             passed = expected is not None and actual == int(expected)
         except (TypeError, ValueError):

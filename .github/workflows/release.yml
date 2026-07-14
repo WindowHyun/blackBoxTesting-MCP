@@ -1,0 +1,51 @@
+# Publish to PyPI on a GitHub release, so users can `pip install
+# ui-blackbox-mcp` / `uvx ui-blackbox-mcp` instead of installing from git.
+#
+# One-time setup (maintainer): on pypi.org, add this repo as a *trusted
+# publisher* for the ui-blackbox-mcp project (Publishing → GitHub, environment
+# name "pypi"). No API token/secret is stored — publishing uses OIDC.
+#
+# Cutting a release: bump blackbox_mcp/__init__.py __version__, tag (vX.Y.Z),
+# create a GitHub release for the tag → this workflow builds and publishes.
+name: Release
+
+on:
+  release:
+    types: [published]
+  # Manual fallback: Actions 탭 → Release → Run workflow 버튼으로도 배포 가능
+  # (Release 객체 없이 현재 브랜치/태그 기준 빌드·게시). 저장소 쓰기 권한자만
+  # 트리거할 수 있다.
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
+      # The wheel must boot: install it clean and register the tool set.
+      - run: |
+          pip install dist/*.whl
+          python -c "from mcp.server.fastmcp import FastMCP; from blackbox_mcp.tools import register_all; n = register_all(FastMCP('probe')); assert n >= 25, n; print(n, 'tools OK')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # OIDC trusted publishing — no stored token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

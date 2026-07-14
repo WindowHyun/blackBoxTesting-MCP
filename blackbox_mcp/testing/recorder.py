@@ -16,7 +16,7 @@ from . import report, secrets
 RECORDABLE = {
     "navigate", "interact", "assert_", "screenshot", "wait",
     "switch_frame", "expect_dialog", "reset_session", "use_real_browser",
-    "dismiss_banners",
+    "dismiss_banners", "save_state", "load_state", "mock_route", "unmock_route",
 }
 
 # Safety cap so a long-lived server can't grow the log without bound.
@@ -96,6 +96,18 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
                 "switched to real browser", None)
     if name == "reset_session":
         return ("reset", "ok", True, None, "session reset", None)
+    if name in ("save_state", "load_state"):
+        r = result or {}
+        ok = bool(r.get("ok"))
+        return (name, r.get("path") or r.get("error"), ok, None,
+                f"{name} {'ok' if ok else 'failed'}",
+                None if ok else "state file missing or real-browser mode")
+    if name in ("mock_route", "unmock_route"):
+        r = result or {}
+        ok = bool(r.get("ok"))
+        return (name, r.get("pattern") or f"active={r.get('active')}", ok, None,
+                f"{name} {'ok' if ok else 'failed'}",
+                None if ok else r.get("error"))
     return (name, str(result)[:60], True, None, name, None)
 
 

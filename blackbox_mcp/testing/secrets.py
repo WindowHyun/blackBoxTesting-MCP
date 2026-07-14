@@ -87,7 +87,11 @@ def scrub(text):
     exception messages, network entries) with their ${VAR} placeholder."""
     if not isinstance(text, str) or not text:
         return text
-    for val, placeholder in _RESOLVED_SECRETS.items():
+    # Longest value first: when one secret is a prefix/substring of another
+    # (PW="abc", TOKEN="abcdef"), replacing the short one first would mangle
+    # the long one into "${PW}def" and leak its tail.
+    for val, placeholder in sorted(_RESOLVED_SECRETS.items(),
+                                   key=lambda kv: len(kv[0]), reverse=True):
         if val in text:
             text = text.replace(val, placeholder)
     return text

@@ -21,14 +21,16 @@ from datetime import datetime
 from typing import Any
 
 from ..browser import get_session
-from ..config import CONFIG
+from ..config import CONFIG, effective_browser
 from ..tools.assertion import assert_
 from ..tools.dialog import expect_dialog
 from ..tools.frame import switch_frame
 from ..tools.interact import interact
 from ..tools.navigate import navigate
+from ..tools.mock import mock_route, unmock_route
 from ..tools.session import reset_session
 from ..tools.snapshot import snapshot
+from ..tools.state import load_state, save_state
 from ..tools.wait import wait
 from . import report, secrets
 
@@ -126,6 +128,34 @@ async def _dispatch(step: dict) -> dict:
         out.update(expected="reset", actual=res.get("message"), passed=bool(res.get("ok")),
                    ai_reason="session reset")
 
+    elif action in ("save_state", "load_state"):
+        fn = save_state if action == "save_state" else load_state
+        res = await fn(step.get("name", "default"))
+        ok = bool(res.get("ok"))
+        out.update(expected=action, actual=res.get("path") or res.get("error"),
+                   passed=ok, ai_reason=f"{action} {'ok' if ok else 'failed'}")
+        if not ok:
+            out["ai_suggestion"] = ("save_state로 먼저 저장했는지, 실 브라우저 모드가 "
+                                    "아닌지 확인 (load_state는 번들/채널 전용)")
+
+    elif action == "mock_route":
+        if "pattern" not in step:
+            out.update(actual="missing required field(s): pattern", passed=False,
+                       ai_reason="malformed step",
+                       ai_suggestion="add 'pattern' to the mock_route step")
+        else:
+            res = await mock_route(step["pattern"], body=step.get("body", ""),
+                                   status=step.get("status", 200),
+                                   content_type=step.get("content_type",
+                                                         "application/json"))
+            out.update(expected="mock armed", actual=res.get("pattern") or res.get("error"),
+                       passed=bool(res.get("ok")), ai_reason="network mock armed")
+
+    elif action == "unmock_route":
+        res = await unmock_route(step.get("pattern"))
+        out.update(expected="mock removed", actual=f"active={res.get('active')}",
+                   passed=bool(res.get("ok")), ai_reason="network mock removed")
+
     elif action == "screenshot":
         # the actual capture happens in run() (it owns name/idx); flag it.
         out.update(expected="screenshot", actual="captured", passed=True,
@@ -156,6 +186,7 @@ async def run(
     description: str = "",
     continue_on_fail: bool = False,
     screenshot_each: bool = False,
+    trace_on_failure: bool = False,
 ) -> dict[str, Any]:
     """Execute steps and return a structured result (DESIGN §6.1)."""
     session = await get_session()
@@ -169,6 +200,18 @@ async def run(
     run_id = report.new_run_id()
     result["run_id"] = run_id
     run_tag = f"{run_id}_{name}"
+
+    # Playwright tracing: armed up front, kept only if the run fails —
+    # trace.zip (DOM/network/console timeline, `playwright show-trace`) is far
+    # richer failure evidence than a screenshot. Best-effort: tracing must
+    # never break the run (e.g. a reset_session step swaps the context and
+    # orphans the recorder — stop() then just fails quietly).
+    tracing = trace_on_failure
+    if tracing:
+        try:
+            await session._context.tracing.start(screenshots=True, snapshots=True)
+        except Exception:
+            tracing = False
 
     for idx, step in enumerate(steps, start=1):
         c0 = len(session.buffers.console)
@@ -215,6 +258,11 @@ async def run(
 
     result["summary"] = report.summarize(result["steps"])
     result["meta"]["duration_ms"] = int((time.monotonic() - t0) * 1000)
+
+    if tracing:
+        result["trace"] = await _stop_tracing(
+            session, failed=result["summary"]["failed"] > 0, run_tag=run_tag)
+
     result["a11y_findings"] = await _a11y_audit(session)   # SM-09
     report.compute_regression(result)                      # SM-07
     # Records are already scrubbed at append time, so the run's resolved secrets
@@ -243,6 +291,24 @@ _A11Y_JS = """
 """
 
 
+async def _stop_tracing(session, *, failed: bool, run_tag: str) -> str | None:
+    """Stop tracing; keep the trace zip only for FAILED runs (stop() without a
+    path discards — green runs shouldn't accumulate multi-MB artifacts). The
+    filename carries the run id (leading, like screenshots) so retention
+    keeps/deletes it with the rest of the run."""
+    try:
+        if not failed:
+            await session._context.tracing.stop()
+            return None
+        base = report.ensure_dirs() / "traces"
+        base.mkdir(parents=True, exist_ok=True)
+        path = base / f"{report._SAFE.sub('_', run_tag)}.zip"
+        await session._context.tracing.stop(path=str(path))
+        return str(path)
+    except Exception:
+        return None  # context swapped mid-run (reset_session) etc.
+
+
 async def _a11y_audit(session) -> list[dict]:
     """SM-09: cheap accessibility findings as a by-product of the page state."""
     try:
@@ -264,7 +330,7 @@ def _meta(session) -> dict[str, Any]:
         "os": platform.system(),
         "python": platform.python_version(),
         "playwright": pw,
-        "browser": CONFIG.browser,
+        "browser": effective_browser(CONFIG.browser),  # what actually ran, not the raw env
         "headless": CONFIG.headless,
         "executable": CONFIG.chromium_executable or "bundled",
         "credentials_masked": True,
