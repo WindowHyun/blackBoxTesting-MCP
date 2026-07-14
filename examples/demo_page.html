@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>데모 스토어 — UI Blackbox 샘플</title>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#f7f8fa;color:#111;margin:0;padding:40px}
+    .card{background:#fff;border:1px solid #e3e6ec;border-radius:10px;padding:24px;max-width:520px;margin:0 auto 16px}
+    h1{font-size:22px;margin:0 0 14px} h2{font-size:15px;margin:0 0 10px;color:#333}
+    input,button{font:inherit;padding:9px 12px;border-radius:7px;border:1px solid #cfd4dd;width:100%;box-sizing:border-box;margin-bottom:10px}
+    button{background:#0baa77;color:#fff;border:none;cursor:pointer;font-weight:600}
+    .order-row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #eef0f4;font-size:14px}
+    .muted{color:#7a8194;font-size:12.5px}
+    #welcome{color:#0a8a61;font-weight:700;margin-top:4px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>데모 스토어</h1>
+    <p class="muted">ui-blackbox-mcp 샘플 리포트 생성용 픽스처</p>
+    <input data-testid="email" type="email" placeholder="이메일">
+    <input data-testid="password" type="password" placeholder="비밀번호">
+    <button data-testid="submit" type="button">로그인</button>
+    <p id="welcome"></p>
+  </div>
+
+  <div class="card">
+    <h2>주문 내역</h2>
+    <div class="order-row"><span>Order #1024 — 무선 키보드</span><b>₩39,000</b></div>
+    <div class="order-row"><span>Order #1025 — USB-C 허브</span><b>₩24,500</b></div>
+  </div>
+
+  <!-- a11y 데모: alt 없는 이미지 + 라벨 없는 검색창 -->
+  <div class="card">
+    <img src="banner.png" width="80" height="24">
+    <input type="search" placeholder="">
+  </div>
+
+  <script>
+    // 콘솔 에러 데모(리포트 스텝 귀속 확인용)
+    console.error("포인트 모듈 로드 실패 (데모)");
+    // 네트워크 에러 데모: 존재하지 않는 리소스
+    fetch("api/points.json").catch(() => {});
+    // 로그인: 지연 표시 → retry(flaky) 데모
+    document.querySelector('[data-testid="submit"]').addEventListener("click", () => {
+      setTimeout(() => {
+        document.getElementById("welcome").textContent = "환영합니다, 데모님";
+      }, 300);
+    });
+  </script>
+</body>
+</html>

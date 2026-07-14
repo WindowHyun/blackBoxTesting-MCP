@@ -9,7 +9,7 @@
 
 <p align="center">
   <img src="examples/sample_report_preview.png" alt="Sample report" width="620">
-  <br><em>Auto-generated report — pass rate · per-step screenshots · failure cause · regression · accessibility · credential masking</em>
+  <br><em>Auto-generated report — pass/fail/<b>skipped</b> · run <b>trend</b> · requirement <b>tags</b> · <b>flaky</b> retry marks · failure page/screenshot/suggestion · regression · accessibility · credential masking</em>
 </p>
 
 [![PyPI](https://img.shields.io/pypi/v/ui-blackbox-mcp)](https://pypi.org/project/ui-blackbox-mcp/)
