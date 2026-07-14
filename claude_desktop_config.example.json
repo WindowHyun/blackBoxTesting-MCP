@@ -1,11 +1,10 @@
 {
   "mcpServers": {
     "ui-blackbox": {
-      "command": "/ABSOLUTE/PATH/TO/blackBoxTesting-MCP/.venv/bin/python",
-      "args": ["-m", "blackbox_mcp.server"],
+      "command": "uvx",
+      "args": ["ui-blackbox-mcp"],
       "env": {
-        "HEADLESS": "true",
-        "REPORT_DIR": "/ABSOLUTE/PATH/TO/blackBoxTesting-MCP/reports"
+        "HEADLESS": "true"
       }
     }
   }

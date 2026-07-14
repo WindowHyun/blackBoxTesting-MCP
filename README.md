@@ -12,6 +12,9 @@
   <br><em>Auto-generated report — pass rate · per-step screenshots · failure cause · regression · accessibility · credential masking</em>
 </p>
 
+[![PyPI](https://img.shields.io/pypi/v/ui-blackbox-mcp)](https://pypi.org/project/ui-blackbox-mcp/)
+[![Python](https://img.shields.io/pypi/pyversions/ui-blackbox-mcp)](https://pypi.org/project/ui-blackbox-mcp/)
+
 Python 3.11+ · Playwright (Chromium, async) · official MCP SDK (FastMCP) · stdio · **tests green in CI**
 
 ---
@@ -36,17 +39,15 @@ Plenty of tools can drive a browser. This one is built around the **QA workflow*
 
 ### 1) Install
 
-**Option A — one-liner, no clone (recommended).** `uvx` (Python's `npx`; ships with
-[uv](https://docs.astral.sh/uv/)) fetches, isolates, and runs the server in one step —
+**Option A — from PyPI, no clone (recommended).** `uvx` (Python's `npx`; ships with
+[uv](https://docs.astral.sh/uv/)) fetches, isolates, and runs the
+[`ui-blackbox-mcp`](https://pypi.org/project/ui-blackbox-mcp/) package in one step —
 this is the whole Claude Desktop config, nothing else to set up:
 
 ```json
 {
   "mcpServers": {
-    "ui-blackbox": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/WindowHyun/blackBoxTesting-MCP.git", "ui-blackbox-mcp"]
-    }
+    "ui-blackbox": { "command": "uvx", "args": ["ui-blackbox-mcp"] }
   }
 }
 ```
@@ -54,15 +55,15 @@ this is the whole Claude Desktop config, nothing else to set up:
 The same one-liner works for the CLI and for `pipx`/`pip` users:
 
 ```bash
-uvx --from git+https://github.com/WindowHyun/blackBoxTesting-MCP.git ui-blackbox doctor
-pipx install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git   # or:
-pip install git+https://github.com/WindowHyun/blackBoxTesting-MCP.git
+uvx --from ui-blackbox-mcp ui-blackbox doctor
+pipx install ui-blackbox-mcp    # or:
+pip install ui-blackbox-mcp
 ```
 
 Chromium auto-installs on the server's first run (or run `playwright install
-chromium` once). Once the package is published to PyPI, this shortens further to
-`uvx ui-blackbox-mcp` / `pip install ui-blackbox-mcp` — a release workflow is
-included (`.github/workflows/release.yml`, PyPI trusted publishing).
+chromium` once). To run the latest unreleased code instead, swap the package
+name for `git+https://github.com/WindowHyun/blackBoxTesting-MCP.git`
+(e.g. `uvx --from git+… ui-blackbox-mcp`).
 
 **Option B — from a clone (development):**
 ```bash
@@ -84,9 +85,11 @@ repo, e.g. `/home/you/blackBoxTesting-MCP`. On Windows the interpreter is
 
 ## 🔌 Client setup
 
-The server speaks **stdio**, so every MCP client launches it the same way: run the
-venv Python with `-m blackbox_mcp.server`. Only the config file/format differs per
-client. Pick yours.
+The server speaks **stdio**, so every MCP client launches it the same way. With the
+PyPI package the command is simply `uvx` + `ui-blackbox-mcp` (Option A above — works
+in every client below by swapping the command). The sections below show the
+clone+venv variant (`venv Python -m blackbox_mcp.server`); only the config
+file/format differs per client. Pick yours.
 
 <details open>
 <summary><b>Claude Desktop</b></summary>
