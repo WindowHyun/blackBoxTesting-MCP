@@ -174,7 +174,12 @@ def test_buffer_tracks_dropped_overflow():
 async def test_enum_params_have_schema_enums():
     from mcp.server.fastmcp import FastMCP
 
+    import blackbox_mcp.tools as tools_pkg
     from blackbox_mcp.tools import _registry
+    # Import every tool module first (the inner _registry.register_all does NOT)
+    # so this passes in the fast lane too, not only after a browser test has
+    # imported them — order-independent.
+    tools_pkg._import_all()
     _registry._REGISTERED = False
     m = FastMCP("probe")
     _registry.register_all(m)
