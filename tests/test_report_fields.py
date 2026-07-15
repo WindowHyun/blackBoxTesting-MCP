@@ -105,13 +105,18 @@ async def test_tag_and_priority_passthrough(session, report_dir):
 
 # ── P5: flaky retry ────────────────────────────────────────────────
 async def test_retry_marks_flaky_pass(session, report_dir):
+    # The text appears well after the first assert attempt so attempt-0 fails
+    # and a retry succeeds. A generous delay (800ms) + large retry budget
+    # (12 × 250ms backoff ≈ 3s window) keeps attempt-0 reliably BEFORE the
+    # reveal even under heavy CI/parallel load, while the window comfortably
+    # covers the reveal — deterministic, not a wall-clock race.
     await session.page.set_content(
         "<div id='d'></div><script>setTimeout(() => {"
-        "document.getElementById('d').textContent = '늦은텍스트';}, 100)"
+        "document.getElementById('d').textContent = '늦은텍스트';}, 800)"
         "</script>")
     res = await runner.run(
         [{"action": "assert", "kind": "text_visible", "target": "늦은텍스트",
-          "retry": 3}],
+          "retry": 12}],
         name="flaky")
     st = res["steps"][0]
     assert st["passed"] is True
