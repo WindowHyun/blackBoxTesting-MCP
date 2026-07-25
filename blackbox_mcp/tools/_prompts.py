@@ -15,7 +15,8 @@ _ONLY = ("**ui-blackbox MCP 서버의 도구만** 사용해. 다른 브라우저
          "(예: Claude in Chrome, 일반 브라우저 커넥터)는 절대 쓰지 마. "
          "사용 가능한 도구: navigate · snapshot · screenshot · interact · assert_ · "
          "get_console_logs · get_network_errors · wait · switch_frame · "
-         "expect_dialog · reset_session · use_real_browser · dismiss_banners · "
+         "switch_page · expect_dialog · reset_session · use_real_browser · "
+         "dismiss_banners · "
          "save_state · load_state · list_states · mock_route · unmock_route · "
          "run_scenario · save_report · generate_scenario · save_scenario · "
          "load_scenario · list_scenarios · status.")
@@ -35,6 +36,10 @@ _MATRIX = (
     "(reset 후엔 다시 걸 것)\n"
     "- 에러 페이지 자체를 검증 → navigate 스텝에 `expect_status` "
     "(mock_route status=500과 조합하면 오프라인 검증 가능)\n"
+    "- 클릭 후 엉뚱한 페이지(광고 팝업 등)로 넘어감 → `switch_page`로 목록 확인 후 "
+    "`switch_page(index=0)`으로 원래 탭 복귀\n"
+    "- 스텝이 많아 오래 걸릴 것 같으면 → `run_scenario(max_duration_s=...)`로 상한을 "
+    "두면 초과분은 skipped로 리포트된다\n"
     "- 원인 불명 실패 → `status`로 세션 상태 확인 + `get_console_logs`/"
     "`get_network_errors`로 증거 수집\n"
     "- 페이지 구조를 모름 → `snapshot`(트리) 또는 `generate_scenario`(작성 키트)")

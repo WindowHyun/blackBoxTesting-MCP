@@ -16,14 +16,37 @@ _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 # as sensitive. Short tokens ("pw", "otp", "pin") are matched as whole words to
 # avoid false hits inside ordinary words.
 _SENSITIVE_SUBSTR = {"password", "passwd", "pwd", "token", "secret",
-                     "credential", "apikey", "api_key", "auth"}
-_SENSITIVE_TOKENS = {"pw", "otp", "pin", "pass"}
+                     "credential", "apikey", "api_key", "auth",
+                     # 2026-07: names that plainly carry credentials but missed
+                     # the list — ${ADMIN_CREDS} resolved to a real password
+                     # that was then never scrubbed from derived URLs/errors,
+                     # because only "credential" (singular, full) matched.
+                     "creds", "passphrase", "privatekey", "private_key",
+                     "accesskey", "access_key", "sessionkey", "session_key",
+                     "bearer", "cookie"}
+_SENSITIVE_TOKENS = {"pw", "otp", "pin", "pass", "cred", "jwt", "totp", "mfa"}
 # Korean field/selector names commonly used for credentials.
-_SENSITIVE_KO = ("비밀번호", "패스워드", "암호", "인증번호")
+_SENSITIVE_KO = ("비밀번호", "패스워드", "암호", "인증번호", "인증코드", "일회용")
 # Back-compat name (tests/other modules may import it).
 _SENSITIVE_KEYS = _SENSITIVE_SUBSTR
 
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+# A numbered variant of a short token: pw2, pwd1, otp3. Without this, a selector
+# like "testid=pw2" tokenized to {"testid", "pw2"}, matched nothing, and the
+# typed password was written to the report in plaintext.
+_NUMBERED_TOKEN = re.compile(r"^([a-z]+?)\d+$")
+
+
+def _forced_secret_vars() -> set[str]:
+    """Env-var names the USER declared sensitive, via SECRET_VARS=A,B,C.
+
+    A keyword heuristic can never be complete, and the failure mode is silent
+    (a real credential written to a report). This is the deterministic escape
+    hatch: anything listed here is treated as a credential regardless of how it
+    is spelled. Read per call so a test/session can set it without re-import.
+    """
+    raw = os.getenv("SECRET_VARS") or ""
+    return {n.strip().lower() for n in raw.split(",") if n.strip()}
 
 # Resolved values of sensitive ${VAR}s substituted during this process —
 # value → placeholder, used by scrub() to clean derived text before reporting.
@@ -35,11 +58,19 @@ def is_sensitive_name(name: str) -> bool:
     if not name:
         return False
     low = str(name).lower()
+    if low in _forced_secret_vars():          # explicit user declaration wins
+        return True
     if any(k in low for k in _SENSITIVE_SUBSTR):
         return True
     if any(k in str(name) for k in _SENSITIVE_KO):
         return True
-    return any(t in _SENSITIVE_TOKENS for t in _TOKEN_SPLIT.split(low))
+    for token in _TOKEN_SPLIT.split(low):
+        if token in _SENSITIVE_TOKENS or token in _forced_secret_vars():
+            return True
+        m = _NUMBERED_TOKEN.match(token)      # pw2, pwd1, otp3 …
+        if m and m.group(1) in _SENSITIVE_TOKENS:
+            return True
+    return False
 
 
 def resolve(value: str) -> str:
@@ -121,7 +152,12 @@ def mask_step(step: dict) -> dict:
     for key in list(out.keys()):
         if is_sensitive_name(key) and isinstance(out[key], str):
             out[key] = mask_value(out[key])
-    # Mask a 'value' field when the target field name looks sensitive.
-    if "value" in out and is_sensitive_name(str(out.get("selector", ""))):
-        out["value"] = mask_value(str(out["value"]))
+    # Mask a 'value' field when what it is typed INTO looks sensitive. Several
+    # keys can name that target depending on how the step was authored, and
+    # missing one writes the typed credential to the report in plaintext.
+    if "value" in out and isinstance(out.get("value"), str):
+        targets = (out.get("selector"), out.get("target"), out.get("name"),
+                   out.get("field"), out.get("label"))
+        if any(is_sensitive_name(str(t)) for t in targets if t):
+            out["value"] = mask_value(str(out["value"]))
     return out

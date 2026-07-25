@@ -235,12 +235,12 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 
 ---
 
-## 🧰 MCP Tools (25)
+## 🧰 MCP Tools (26)
 
 | Group | Tools |
 |---|---|
 | Core | `navigate` · `snapshot` (a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
-| Extended | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
+| Extended | `wait` · `switch_frame` · `switch_page` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
 | Auth state | `save_state` · `load_state` · `list_states` — export login (cookies+localStorage) once, reuse headless/in CI, swap roles |
 | Network mock | `mock_route` · `unmock_route` — deterministic offline responses for flaky/unbuilt APIs |
 | Scenario & report | `run_scenario` (incl. `trace_on_failure`) · `generate_scenario` · `save_report` |
@@ -331,7 +331,9 @@ Run playbook: [`HARNESS.md`](./HARNESS.md) · Agent context: [`CLAUDE.md`](./CLA
 `SCENARIO_DIR` (~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS` (2000) ·
 `DEFAULT_WAIT_UNTIL` (networkidle) · `NAV_TIMEOUT_MS` (30000) ·
 `IGNORE_HTTPS_ERRORS` (false) · `REPORT_RETENTION` (keep the newest N runs
-**of each scenario**, default 100, 0=unlimited). Details in `.env.example`.
+**of each scenario**, default 100, 0=unlimited) · `REPORT_EMBED_LIMIT_MB` (budget for
+screenshots inlined into the HTML report, default 8, 0=unlimited) · `SECRET_VARS`
+(comma-separated env-var names to always treat as credentials). Details in `.env.example`.
 
 > **Testing live/deployed sites.** ① Ad/polling-heavy sites may never reach
 > `networkidle` — navigate proceeds on timeout (`settled:false`), and

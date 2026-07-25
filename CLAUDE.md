@@ -22,7 +22,7 @@ python -m venv .venv
 ```
 
 ## 아키텍처 지도 (어디에 뭐가 있나)
-- `blackbox_mcp/server.py` — FastMCP 부팅: `ensure_chromium()` → `register_all()` → `mcp.run()`, lifespan으로 세션 정리
+- `blackbox_mcp/server.py` — FastMCP 부팅: `start_background_bootstrap()`(스레드) → `register_all()` → 즉시 `mcp.run()`, lifespan으로 세션 정리
 - `blackbox_mcp/cli.py` — CI 진입점(`ui-blackbox run/doctor`): MCP 없이 runner/report 직접 호출, exit code+JUnit, `--parallel`은 서브프로세스 격리
 - `blackbox_mcp/tools/` — **MCP Tool = 파일 1개**. `_registry.py`의 `@tool`로 등록(`@prompt`=슬래시 명령은 `_prompts.py`). register_all이 액션 도구를 recorder로 래핑
 - `blackbox_mcp/browser/` — `session.py`(싱글톤 + 4 모드: 번들/채널·스텔스/영구프로필/CDP — DESIGN §3.7), `listeners.py`(콘솔/네트워크 버퍼), `locator.py`(D2 체인)
@@ -34,7 +34,7 @@ python -m venv .venv
 1. **Tool 추가 = `tools/`에 파일 1개 + `tools/__init__.py`에 import 한 줄.** `server.py`는 절대 수정하지 않는다.
    단, **액션 도구**(리포트 스텝이 되는 도구)는 실행 경로가 둘이라 4곳이 함께 간다 —
    `tools/<name>.py` · `_TOOL_MODULES` · `recorder.RECORDABLE`(+`_interpret` 분기) ·
-   `runner._dispatch`(+`runner.DISPATCHABLE`). `runner`에 빠지면 채팅에선 되고
+   `runner._HANDLERS`(핸들러 1개 — `DISPATCHABLE`은 여기서 파생). `runner`에 빠지면 채팅에선 되고
    **저장된 시나리오/CLI에서 `unknown action`** 이 된다. `tests/test_registry.py`가
    `RECORDABLE ⊆ DISPATCHABLE`을 강제하니 통과할 때까지 맞춘다.
 2. **async 일관성** — tool/세션은 async. Playwright **async API**만 사용(sync API는 asyncio 루프에서 불가). 단 `bootstrap.ensure_chromium()`은 루프 시작 전이라 sync 허용.
@@ -62,6 +62,12 @@ GitHub Release 발행 또는 Actions `Release → Run workflow`).
   돼 스위트가 자기 앞쪽 시나리오 리포트를 지운다. `_SAFE`는 한글을 보존해야 한다.
 - CLI 순차 스위트는 시나리오 사이에 `reset_session`을 건다(`--no-reset`로 옵트아웃) —
   빼면 A의 로그인이 B로 새고 `--parallel`과 결과가 갈린다.
+- 액션은 `ACTION_LOCK`으로 직렬화된다(락 순서 `ACTION_LOCK` → `_SESSION_LOCK` →
+  `_op_lock`). 관측용 도구(status/get_*)는 일부러 안 잡는다. 액션 안에서 다른 액션의
+  **래핑된** MCP 엔트리포인트를 부르면 데드락 — 내부 호출은 모듈 함수를 쓴다.
+- `runner.DISPATCHABLE`은 `_HANDLERS`에서 **파생**된다. 손으로 목록을 다시 만들지 말 것.
+- HTML 리포트에서 data URI는 **1회만** 출력한다. `<a href>`+`<img src>`에 같은 URI를
+  넣으면 리포트 크기가 그대로 2배가 된다(과거 회귀).
 - 시스템 Python `pip install`은 PyJWT RECORD 충돌로 실패 → **venv 필수**.
 - Chromium 다운로드 ~150MB. Phase 1 착수 시 환경 가능 여부 먼저 확인.
 - `BrowserType.executable_path`는 "설치 여부"가 아니라 "기대 경로" → `os.path.exists()`로 확인.

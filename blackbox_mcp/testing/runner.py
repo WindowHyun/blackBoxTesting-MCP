@@ -18,10 +18,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
-from ..browser import get_session
+from ..browser import ACTION_LOCK, get_session
 from ..config import CONFIG, effective_browser
 from ..tools.assertion import assert_
 from ..tools.dialog import expect_dialog
@@ -31,27 +32,12 @@ from ..tools.navigate import navigate
 from ..tools.mock import mock_route, unmock_route
 from ..tools.overlays import dismiss_banners
 from ..tools.realbrowser import use_real_browser
+from ..tools.pages import switch_page
 from ..tools.session import reset_session
 from ..tools.snapshot import snapshot
 from ..tools.state import load_state, save_state
 from ..tools.wait import wait
 from . import report, secrets
-
-# Every action verb `_dispatch` understands. Single source for the "unknown
-# action" hint AND for the drift guard in tests.
-#
-# Why it exists: a tool the recorder logs in chat (recorder.RECORDABLE) but that
-# `_dispatch` cannot replay is a tool that works interactively and silently
-# breaks the moment the flow is SAVED as a scenario and replayed from the CLI —
-# `dismiss_banners` and `use_real_browser` were exactly that, so the documented
-# "test it in chat, then run it in CI" workflow died on any site with a cookie
-# banner. tests/test_registry.py asserts RECORDABLE ⊆ DISPATCHABLE.
-DISPATCHABLE = frozenset({
-    "navigate", "interact", "assert", "assert_", "snapshot", "wait",
-    "switch_frame", "reset_session", "save_state", "load_state",
-    "mock_route", "unmock_route", "screenshot", "expect_dialog",
-    "dismiss_banners", "use_real_browser",
-})
 
 
 def empty_result(name: str) -> dict[str, Any]:
@@ -70,10 +56,12 @@ def _as_retry(value) -> int:
         return 0
 
 
-def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None:
+def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int,
+                    reason: str | None = None) -> None:
     """Record the steps that never ran (early stop) as skipped — schema-shaped
     records so summaries/JUnit/renderers see the whole scenario, not a
     silently truncated one."""
+    note = reason or f"not run (step {failed_idx} failed)"
     for j, rest in enumerate(steps[failed_idx:], start=failed_idx + 1):
         result["steps"].append(secrets.scrub_record({
             "step": j,
@@ -82,7 +70,7 @@ def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None
             "selector_input": rest.get("selector") or rest.get("target"),
             "resolved_by": None,
             "expected": None,
-            "actual": f"not run (step {failed_idx} failed)",
+            "actual": note,
             "passed": False,
             "skipped": True,
             "duration_ms": 0,
@@ -94,9 +82,201 @@ def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None
             "console_errors": [],
             "network_errors": [],
             "severity": None,
-            "ai_reason": "이전 스텝 실패로 미실행",
+            "ai_reason": reason or "이전 스텝 실패로 미실행",
             "ai_suggestion": None,
         }))
+
+
+# ── step handlers ────────────────────────────────────────────────
+# One coroutine per action verb, each mutating the shared `out` dict. A TABLE,
+# not an if/elif chain, so DISPATCHABLE is *derived* from the handlers that
+# actually exist (see below) and cannot drift from them.
+_Handler = Callable[[dict, dict[str, Any]], Awaitable[None]]
+
+
+async def _h_navigate(step: dict, out: dict[str, Any]) -> None:
+    res = await navigate(secrets.resolve(step["url"]), step.get("wait_until"))
+    status = res.get("status")
+    expect = step.get("expect_status")  # opt-in: assert an exact status
+    if expect is not None:
+        ok = status == expect
+        reason = f"expected HTTP {expect}, got {status}"
+        suggestion = None if ok else f"server returned {status}, not {expect}"
+    else:
+        # status is None on file:// or when the settle timed out (no response
+        # object) — treat as reachable. A real 4xx/5xx is a failed load.
+        ok = status is None or status < 400
+        reason = f"navigated to {res.get('url')} (status {status})"
+        suggestion = None if ok else (f"navigation returned HTTP {status} — server "
+                                      "error or missing page (set expect_status to allow)")
+    out.update(expected=(f"HTTP {expect}" if expect is not None else "도착 (2xx/3xx)"),
+               actual=f"“{res.get('title')}” · HTTP {status}",
+               passed=ok, ai_reason=reason, ai_suggestion=suggestion)
+    if not res.get("settled"):
+        out["ai_reason"] += " · load not settled (proceeded on timeout)"
+    missing_vars = secrets.unresolved_vars(step["url"])
+    if missing_vars:
+        out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
+                                "the literal ${...} placeholder was used")
+
+
+async def _h_interact(step: dict, out: dict[str, Any]) -> None:
+    res = await interact(step.get("type"), step["selector"], step.get("value"))
+    out.update(expected=f"{step.get('type')} ok", actual=res.get("detail") or res.get("error"),
+               passed=bool(res.get("ok")), resolved_by=res.get("resolved_by"))
+    out["ai_reason"] = (f"{step.get('type')} via {res.get('resolved_by')} selector"
+                        if res.get("ok") else "action failed")
+    if not res.get("ok"):
+        out["ai_suggestion"] = "element not found or not actionable — selector may have changed"
+    missing_vars = secrets.unresolved_vars(step.get("value") or "")
+    if missing_vars:
+        out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
+                                "the literal ${...} placeholder was typed")
+
+
+async def _h_assert(step: dict, out: dict[str, Any]) -> None:
+    res = await assert_(step["kind"], step["target"], step.get("expected"))
+    out.update(expected=step.get("expected") or step["kind"], actual=res.get("actual"),
+               passed=bool(res.get("passed")))
+    out["ai_reason"] = f"{step['kind']} {'held' if res.get('passed') else 'did not hold'}"
+    if not res.get("passed"):
+        out["ai_suggestion"] = f"expected {step['kind']} on '{step['target']}' — verify the target"
+
+
+async def _h_snapshot(step: dict, out: dict[str, Any]) -> None:
+    snap = await snapshot(step.get("mode", "a11y"), step.get("focus"), step.get("depth"))
+    out.update(expected="snapshot", actual=f"{len(snap)} chars", passed=True,
+               ai_reason="captured page snapshot")
+
+
+async def _h_wait(step: dict, out: dict[str, Any]) -> None:
+    res = await wait(step.get("ms"), step.get("selector"))
+    out.update(expected="wait", actual=res.get("waited"), passed=bool(res.get("ok")),
+               ai_reason=f"waited {res.get('waited')}")
+
+
+async def _h_switch_frame(step: dict, out: dict[str, Any]) -> None:
+    res = await switch_frame(step.get("selector"))
+    out.update(expected="frame switch", actual=res.get("context"),
+               passed=bool(res.get("ok")), ai_reason=f"context → {res.get('context')}")
+
+
+async def _h_switch_page(step: dict, out: dict[str, Any]) -> None:
+    res = await switch_page(step.get("index"))
+    out.update(expected="page switch", actual=res.get("url") or res.get("error"),
+               passed=bool(res.get("ok")),
+               ai_reason=f"active page → {res.get('index')} of {res.get('count')}")
+    if not res.get("ok"):
+        out["ai_suggestion"] = "index out of range — call switch_page() with no index to list pages"
+
+
+async def _h_reset_session(step: dict, out: dict[str, Any]) -> None:
+    res = await reset_session()
+    out.update(expected="reset", actual=res.get("message"), passed=bool(res.get("ok")),
+               ai_reason="session reset")
+
+
+async def _h_state(step: dict, out: dict[str, Any]) -> None:
+    action = step.get("action")
+    fn = save_state if action == "save_state" else load_state
+    res = await fn(step.get("name", "default"))
+    ok = bool(res.get("ok"))
+    out.update(expected=action, actual=res.get("path") or res.get("error"),
+               passed=ok, ai_reason=f"{action} {'ok' if ok else 'failed'}")
+    if not ok:
+        out["ai_suggestion"] = ("save_state로 먼저 저장했는지, 실 브라우저 모드가 "
+                                "아닌지 확인 (load_state는 번들/채널 전용)")
+
+
+async def _h_mock_route(step: dict, out: dict[str, Any]) -> None:
+    res = await mock_route(step["pattern"], body=step.get("body", ""),
+                           status=step.get("status", 200),
+                           content_type=step.get("content_type", "application/json"))
+    out.update(expected="mock armed", actual=res.get("pattern") or res.get("error"),
+               passed=bool(res.get("ok")), ai_reason="network mock armed")
+
+
+async def _h_unmock_route(step: dict, out: dict[str, Any]) -> None:
+    res = await unmock_route(step.get("pattern"))
+    out.update(expected="mock removed", actual=f"active={res.get('active')}",
+               passed=bool(res.get("ok")), ai_reason="network mock removed")
+
+
+async def _h_screenshot(step: dict, out: dict[str, Any]) -> None:
+    # the actual capture happens in run() (it owns name/idx); flag it.
+    out.update(expected="screenshot", actual="captured", passed=True,
+               ai_reason="explicit screenshot step", force_screenshot=True)
+
+
+async def _h_expect_dialog(step: dict, out: dict[str, Any]) -> None:
+    res = await expect_dialog(step.get("dialog_action", "accept"),
+                              step.get("expected_text"), step.get("trigger"),
+                              step.get("accept_text"))
+    out.update(expected=step.get("expected_text") or "dialog",
+               actual=res.get("message") or res.get("error"),
+               passed=bool(res.get("passed")),
+               ai_reason=f"dialog {res.get('dialog_type')} {res.get('handled')}")
+    if not res.get("passed"):
+        out["ai_suggestion"] = "expected dialog did not appear or text mismatch"
+
+
+async def _h_dismiss_banners(step: dict, out: dict[str, Any]) -> None:
+    # Replayable, not just chat-only: real sites gate every flow behind a
+    # consent banner, so a saved scenario has to be able to clear it too.
+    res = await dismiss_banners()
+    hits = res.get("dismissed") or []
+    out.update(expected="consent overlay dismissed",
+               actual=", ".join(hits) if hits else "no consent control matched",
+               passed=bool(res.get("ok")),
+               ai_reason=(f"dismissed {len(hits)} overlay control(s)" if hits else
+                          "no consent overlay found (page may not have one)"))
+
+
+async def _h_use_real_browser(step: dict, out: dict[str, Any]) -> None:
+    res = await use_real_browser(headless=bool(step.get("headless", False)),
+                                 channel=step.get("channel") or "chrome")
+    out.update(expected="real browser", actual=res.get("browser"),
+               passed=bool(res.get("ok")),
+               ai_reason=f"switched to real browser ({res.get('browser')})")
+
+
+_HANDLERS: dict[str, _Handler] = {
+    "navigate": _h_navigate,
+    "interact": _h_interact,
+    "assert": _h_assert,
+    "assert_": _h_assert,
+    "snapshot": _h_snapshot,
+    "wait": _h_wait,
+    "switch_frame": _h_switch_frame,
+    "switch_page": _h_switch_page,
+    "reset_session": _h_reset_session,
+    "save_state": _h_state,
+    "load_state": _h_state,
+    "mock_route": _h_mock_route,
+    "unmock_route": _h_unmock_route,
+    "screenshot": _h_screenshot,
+    "expect_dialog": _h_expect_dialog,
+    "dismiss_banners": _h_dismiss_banners,
+    "use_real_browser": _h_use_real_browser,
+}
+
+# Derived, never hand-maintained: a handler in the table IS a supported action.
+# Two execution paths exist (recorder wrapper for chat, this runner for saved
+# scenarios); a tool present in one and missing from the other works
+# interactively and dies with `unknown action` the moment the flow is saved and
+# replayed from the CLI — which is what happened to dismiss_banners and
+# use_real_browser. tests/test_registry.py asserts RECORDABLE ⊆ DISPATCHABLE.
+DISPATCHABLE = frozenset(_HANDLERS)
+
+# Fields a step MUST carry, checked before dispatch so an LLM-authored scenario
+# gets a clear message instead of a bare KeyError.
+_REQUIRED: dict[str, list[str]] = {
+    "navigate": ["url"],
+    "interact": ["selector"],
+    "assert": ["kind", "target"],
+    "assert_": ["kind", "target"],
+    "mock_route": ["pattern"],
+}
 
 
 async def _dispatch(step: dict) -> dict:
@@ -107,150 +287,21 @@ async def _dispatch(step: dict) -> dict:
         "resolved_by": None, "ai_reason": "", "ai_suggestion": None,
     }
 
-    # Clear errors for malformed steps (common with LLM-authored scenarios) —
-    # better than a bare KeyError surfaced as a generic exception.
-    _required = {"navigate": ["url"], "interact": ["selector"],
-                 "assert": ["kind", "target"], "assert_": ["kind", "target"]}
-    missing = [k for k in _required.get(action, []) if k not in step]
+    handler = _HANDLERS.get(action)
+    if handler is None:
+        out.update(actual=f"unknown action: {action}", passed=False,
+                   ai_reason="unknown action",
+                   ai_suggestion="supported actions: " + ", ".join(sorted(DISPATCHABLE)))
+        return out
+
+    missing = [k for k in _REQUIRED.get(action, []) if k not in step]
     if missing:
         out.update(actual=f"missing required field(s): {', '.join(missing)}",
                    passed=False, ai_reason="malformed step",
                    ai_suggestion=f"add {missing} to the '{action}' step")
         return out
 
-    if action == "navigate":
-        res = await navigate(secrets.resolve(step["url"]), step.get("wait_until"))
-        status = res.get("status")
-        expect = step.get("expect_status")  # opt-in: assert an exact status
-        if expect is not None:
-            ok = status == expect
-            reason = f"expected HTTP {expect}, got {status}"
-            suggestion = None if ok else f"server returned {status}, not {expect}"
-        else:
-            # status is None on file:// or when the settle timed out (no response
-            # object) — treat as reachable. A real 4xx/5xx is a failed load.
-            ok = status is None or status < 400
-            reason = f"navigated to {res.get('url')} (status {status})"
-            suggestion = None if ok else (f"navigation returned HTTP {status} — server "
-                                          "error or missing page (set expect_status to allow)")
-        out.update(expected=(f"HTTP {expect}" if expect is not None else "도착 (2xx/3xx)"),
-                   actual=f"“{res.get('title')}” · HTTP {status}",
-                   passed=ok, ai_reason=reason, ai_suggestion=suggestion)
-        if not res.get("settled"):
-            out["ai_reason"] += " · load not settled (proceeded on timeout)"
-        missing_vars = secrets.unresolved_vars(step["url"])
-        if missing_vars:
-            out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
-                                    "the literal ${...} placeholder was used")
-
-    elif action == "interact":
-        res = await interact(step.get("type"), step["selector"], step.get("value"))
-        out.update(expected=f"{step.get('type')} ok", actual=res.get("detail") or res.get("error"),
-                   passed=bool(res.get("ok")), resolved_by=res.get("resolved_by"))
-        out["ai_reason"] = (f"{step.get('type')} via {res.get('resolved_by')} selector"
-                            if res.get("ok") else "action failed")
-        if not res.get("ok"):
-            out["ai_suggestion"] = "element not found or not actionable — selector may have changed"
-        missing_vars = secrets.unresolved_vars(step.get("value") or "")
-        if missing_vars:
-            out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
-                                    "the literal ${...} placeholder was typed")
-
-    elif action in ("assert", "assert_"):
-        res = await assert_(step["kind"], step["target"], step.get("expected"))
-        out.update(expected=step.get("expected") or step["kind"], actual=res.get("actual"),
-                   passed=bool(res.get("passed")))
-        out["ai_reason"] = f"{step['kind']} {'held' if res.get('passed') else 'did not hold'}"
-        if not res.get("passed"):
-            out["ai_suggestion"] = f"expected {step['kind']} on '{step['target']}' — verify the target"
-
-    elif action == "snapshot":
-        snap = await snapshot(step.get("mode", "a11y"), step.get("focus"), step.get("depth"))
-        out.update(expected="snapshot", actual=f"{len(snap)} chars", passed=True,
-                   ai_reason="captured page snapshot")
-
-    elif action == "wait":
-        res = await wait(step.get("ms"), step.get("selector"))
-        out.update(expected="wait", actual=res.get("waited"), passed=bool(res.get("ok")),
-                   ai_reason=f"waited {res.get('waited')}")
-
-    elif action == "switch_frame":
-        res = await switch_frame(step.get("selector"))
-        out.update(expected="frame switch", actual=res.get("context"),
-                   passed=bool(res.get("ok")), ai_reason=f"context → {res.get('context')}")
-
-    elif action == "reset_session":
-        res = await reset_session()
-        out.update(expected="reset", actual=res.get("message"), passed=bool(res.get("ok")),
-                   ai_reason="session reset")
-
-    elif action in ("save_state", "load_state"):
-        fn = save_state if action == "save_state" else load_state
-        res = await fn(step.get("name", "default"))
-        ok = bool(res.get("ok"))
-        out.update(expected=action, actual=res.get("path") or res.get("error"),
-                   passed=ok, ai_reason=f"{action} {'ok' if ok else 'failed'}")
-        if not ok:
-            out["ai_suggestion"] = ("save_state로 먼저 저장했는지, 실 브라우저 모드가 "
-                                    "아닌지 확인 (load_state는 번들/채널 전용)")
-
-    elif action == "mock_route":
-        if "pattern" not in step:
-            out.update(actual="missing required field(s): pattern", passed=False,
-                       ai_reason="malformed step",
-                       ai_suggestion="add 'pattern' to the mock_route step")
-        else:
-            res = await mock_route(step["pattern"], body=step.get("body", ""),
-                                   status=step.get("status", 200),
-                                   content_type=step.get("content_type",
-                                                         "application/json"))
-            out.update(expected="mock armed", actual=res.get("pattern") or res.get("error"),
-                       passed=bool(res.get("ok")), ai_reason="network mock armed")
-
-    elif action == "unmock_route":
-        res = await unmock_route(step.get("pattern"))
-        out.update(expected="mock removed", actual=f"active={res.get('active')}",
-                   passed=bool(res.get("ok")), ai_reason="network mock removed")
-
-    elif action == "screenshot":
-        # the actual capture happens in run() (it owns name/idx); flag it.
-        out.update(expected="screenshot", actual="captured", passed=True,
-                   ai_reason="explicit screenshot step", force_screenshot=True)
-
-    elif action == "expect_dialog":
-        res = await expect_dialog(step.get("dialog_action", "accept"),
-                                  step.get("expected_text"), step.get("trigger"),
-                                  step.get("accept_text"))
-        out.update(expected=step.get("expected_text") or "dialog",
-                   actual=res.get("message") or res.get("error"),
-                   passed=bool(res.get("passed")),
-                   ai_reason=f"dialog {res.get('dialog_type')} {res.get('handled')}")
-        if not res.get("passed"):
-            out["ai_suggestion"] = "expected dialog did not appear or text mismatch"
-
-    elif action == "dismiss_banners":
-        # Replayable, not just chat-only: real sites gate every flow behind a
-        # consent banner, so a saved scenario has to be able to clear it too.
-        res = await dismiss_banners()
-        hits = res.get("dismissed") or []
-        out.update(expected="consent overlay dismissed",
-                   actual=", ".join(hits) if hits else "no consent control matched",
-                   passed=bool(res.get("ok")),
-                   ai_reason=(f"dismissed {len(hits)} overlay control(s)" if hits else
-                              "no consent overlay found (page may not have one)"))
-
-    elif action == "use_real_browser":
-        res = await use_real_browser(headless=bool(step.get("headless", False)),
-                                     channel=step.get("channel") or "chrome")
-        out.update(expected="real browser", actual=res.get("browser"),
-                   passed=bool(res.get("ok")),
-                   ai_reason=f"switched to real browser ({res.get('browser')})")
-
-    else:
-        out.update(actual=f"unknown action: {action}", passed=False,
-                   ai_reason="unknown action",
-                   ai_suggestion="supported actions: " + ", ".join(sorted(DISPATCHABLE)))
-
+    await handler(step, out)
     return out
 
 
@@ -262,8 +313,45 @@ async def run(
     continue_on_fail: bool = False,
     screenshot_each: bool = False,
     trace_on_failure: bool = False,
+    on_progress: Callable[[int, int, str], Awaitable[None]] | None = None,
+    max_duration_s: float | None = None,
 ) -> dict[str, Any]:
-    """Execute steps and return a structured result (DESIGN §6.1)."""
+    """Execute steps and return a structured result (DESIGN §6.1).
+
+    ``on_progress(done, total, message)`` is awaited after each step. It is a
+    plain callable, deliberately NOT an MCP Context: `tools/scenario.py` adapts
+    it to ``ctx.report_progress`` so this module (and therefore the CLI import
+    chain) never pulls in the MCP SDK — tests/test_registry.py enforces that.
+
+    ``max_duration_s`` bounds the whole run. A scenario is ONE MCP tool call and
+    each step can burn NAV_TIMEOUT_MS, so a 20-step run against a slow site
+    outlived typical client tool-call timeouts — the client gave up while the
+    server kept driving the browser. Past the budget the remaining steps are
+    recorded as skipped and a partial report is returned, which is strictly
+    better than a caller that has timed out and a run nobody is reading.
+    """
+    # A scenario owns the browser for its duration: an ad-hoc tool call arriving
+    # mid-run would drive the same single page and corrupt this run's per-step
+    # console/network attribution (same contract as recorder.run_and_record).
+    async with ACTION_LOCK:
+        return await _run_locked(
+            steps, name=name, description=description,
+            continue_on_fail=continue_on_fail, screenshot_each=screenshot_each,
+            trace_on_failure=trace_on_failure, on_progress=on_progress,
+            max_duration_s=max_duration_s)
+
+
+async def _run_locked(
+    steps: list[dict],
+    *,
+    name: str,
+    description: str,
+    continue_on_fail: bool,
+    screenshot_each: bool,
+    trace_on_failure: bool,
+    on_progress: Callable[[int, int, str], Awaitable[None]] | None,
+    max_duration_s: float | None,
+) -> dict[str, Any]:
     session = await get_session()
     t0 = time.monotonic()
     result = empty_result(name)
@@ -294,6 +382,16 @@ async def run(
             tracing = False
 
     for idx, step in enumerate(steps, start=1):
+        # Budget check BEFORE starting a step: stopping between steps keeps the
+        # browser in a describable state, unlike cancelling mid-navigation.
+        if max_duration_s is not None and time.monotonic() - t0 >= max_duration_s:
+            _append_skipped(result, steps, failed_idx=idx - 1,
+                            reason=f"시간 예산 {max_duration_s:g}s 초과로 미실행")
+            result["truncated"] = {"reason": "max_duration_s exceeded",
+                                   "budget_s": max_duration_s, "ran": idx - 1,
+                                   "total": len(steps)}
+            break
+
         c0 = len(session.buffers.console)
         n0 = len(session.buffers.network)
         s0 = time.monotonic()
@@ -356,6 +454,16 @@ async def run(
             "ai_reason": reason,
             "ai_suggestion": fields.get("ai_suggestion"),
         }))
+
+        if on_progress is not None:
+            # Best-effort: a client that mishandles progress notifications must
+            # not fail the run it was only meant to narrate.
+            try:
+                await on_progress(idx, len(steps),
+                                  f"{idx}/{len(steps)} {step.get('action')} "
+                                  f"{'✓' if passed else '✗'}")
+            except Exception:
+                pass
 
         if not passed and not continue_on_fail:
             # The un-run remainder must not silently vanish from the report —

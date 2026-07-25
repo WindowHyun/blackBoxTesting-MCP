@@ -22,6 +22,7 @@ _TOOL_MODULES = (
     "network",
     "wait",
     "frame",
+    "pages",
     "dialog",
     "session",
     "realbrowser",

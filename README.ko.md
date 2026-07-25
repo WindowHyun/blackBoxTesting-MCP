@@ -231,12 +231,12 @@ Claude 입력창에 `/`를 치면 아래 명령이 뜬다. **ui-blackbox 도구�
 
 ---
 
-## 🧰 MCP Tools (25)
+## 🧰 MCP Tools (26)
 
 | 그룹 | Tool |
 |---|---|
 | 코어 | `navigate` · `snapshot`(a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
-| 확장 | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
+| 확장 | `wait` · `switch_frame` · `switch_page` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
 | 로그인 상태 | `save_state` · `load_state` · `list_states` — 한 번 로그인한 상태(쿠키+localStorage)를 저장해 headless/CI에서 재사용, 역할 전환 |
 | 네트워크 모킹 | `mock_route` · `unmock_route` — 불안정/미구현 API를 오프라인 응답으로 결정화 |
 | 시나리오·리포트 | `run_scenario`(`trace_on_failure` 포함) · `generate_scenario` · `save_report` |
@@ -322,7 +322,9 @@ blackbox_mcp/
 `SCENARIO_DIR`(~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
 `DEFAULT_WAIT_UNTIL`(networkidle) · `NAV_TIMEOUT_MS`(30000) ·
 `IGNORE_HTTPS_ERRORS`(false) · `REPORT_RETENTION`(**시나리오별로** 최근 N개 실행
-유지, 기본 100, 0=무제한). 자세히는 `.env.example`.
+유지, 기본 100, 0=무제한) · `REPORT_EMBED_LIMIT_MB`(HTML 리포트에 인라인할
+스크린샷 예산 MB, 기본 8, 0=무제한) · `SECRET_VARS`(항상 자격증명으로 취급할
+환경변수 이름 목록, 쉼표 구분). 자세히는 `.env.example`.
 
 > **실 배포 사이트 테스트 팁**: ① 광고/폴링 많은 사이트는 `networkidle`이 안 끝나
 > 느릴 수 있다 — navigate는 타임아웃 시 **현재 상태로 진행**(`settled:false` 반환)하지만,

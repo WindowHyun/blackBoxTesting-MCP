@@ -92,15 +92,43 @@ def test_every_recordable_action_is_replayable_as_a_scenario_step():
     assert not missing, f"recordable in chat but not replayable in a scenario: {missing}"
 
 
-def test_dispatchable_matches_the_real_dispatch_branches():
-    """DISPATCHABLE must describe _dispatch, not drift from it."""
+def test_dispatchable_is_derived_from_the_handler_table():
+    """DISPATCHABLE must be *derived*, not a hand-kept parallel list.
+
+    It used to be a literal frozenset next to an if/elif chain, i.e. a second
+    place to forget. Deriving it from the handler table makes the drift this
+    guards against impossible rather than merely tested.
+    """
     import inspect
 
     from blackbox_mcp.testing import runner
 
-    src = inspect.getsource(runner._dispatch)
-    unhandled = [a for a in sorted(runner.DISPATCHABLE) if f'"{a}"' not in src]
-    assert not unhandled, f"declared DISPATCHABLE but no branch handles it: {unhandled}"
+    assert runner.DISPATCHABLE == frozenset(runner._HANDLERS)
+    for action, handler in runner._HANDLERS.items():
+        assert inspect.iscoroutinefunction(handler), f"{action} handler is not async"
+
+
+async def test_unknown_action_is_rejected_without_touching_the_browser():
+    """The reject path must not need a session (it runs before any handler)."""
+    from blackbox_mcp.testing import runner
+
+    out = await runner._dispatch({"action": "teleport"})
+    assert out["passed"] is False
+    assert out["actual"] == "unknown action: teleport"
+    assert "navigate" in out["ai_suggestion"]
+
+
+async def test_required_fields_are_checked_before_dispatch():
+    """Malformed steps get a clear message, not a KeyError from a handler."""
+    from blackbox_mcp.testing import runner
+
+    for step, missing in (({"action": "navigate"}, "url"),
+                          ({"action": "interact"}, "selector"),
+                          ({"action": "assert"}, "kind"),
+                          ({"action": "mock_route"}, "pattern")):
+        out = await runner._dispatch(step)
+        assert out["passed"] is False
+        assert missing in out["actual"], out
 
 
 def test_locator_prefix_parsing():

@@ -15,8 +15,9 @@ from . import report, secrets
 # and intentionally excluded so they don't add noise to the report.)
 RECORDABLE = {
     "navigate", "interact", "assert_", "screenshot", "wait",
-    "switch_frame", "expect_dialog", "reset_session", "use_real_browser",
-    "dismiss_banners", "save_state", "load_state", "mock_route", "unmock_route",
+    "switch_frame", "switch_page", "expect_dialog", "reset_session",
+    "use_real_browser", "dismiss_banners", "save_state", "load_state",
+    "mock_route", "unmock_route",
 }
 
 # Safety cap so a long-lived server can't grow the log without bound.
@@ -85,6 +86,12 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
         r = result or {}
         return ("frame switch", r.get("context"), bool(r.get("ok")), None,
                 f"context → {r.get('context')}", None)
+    if name == "switch_page":
+        r = result or {}
+        ok = bool(r.get("ok"))
+        return ("page switch", r.get("url") or r.get("error"), ok, None,
+                f"active page → {r.get('index')} of {r.get('count')}",
+                None if ok else "index out of range — call switch_page() to list pages")
     if name == "expect_dialog":
         r = result or {}
         return (r.get("message") or "dialog", r.get("message") or r.get("error"),
@@ -112,9 +119,21 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
 
 
 async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
-    """Execute a tool and append a step record (then return/raise as usual)."""
-    from ..browser import get_session
+    """Execute a tool and append a step record (then return/raise as usual).
 
+    Serialized on ACTION_LOCK: the buffer snapshot, the call, and the append
+    have to be atomic or two concurrent tool calls (MCP clients do issue them —
+    Claude uses parallel tool use) slice overlapping buffer ranges and
+    cross-attribute each other's console/network errors.
+    """
+    from ..browser import ACTION_LOCK, get_session
+
+    async with ACTION_LOCK:
+        return await _run_and_record_locked(name, fn, args, kwargs, get_session)
+
+
+async def _run_and_record_locked(name: str, fn, args: tuple, kwargs: dict,
+                                 get_session):
     session = None
     try:
         session = await get_session()

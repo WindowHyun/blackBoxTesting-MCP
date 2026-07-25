@@ -439,6 +439,40 @@ code{font:12px 'IBM Plex Mono',monospace;background:var(--surface2);padding:1px 
 """
 
 
+def _plan_embeds(result: dict, report_dir: Path) -> set[str]:
+    """Choose which step screenshots get inlined as base64.
+
+    The HTML is meant to be a single portable file, but base64 costs ~1.33x and
+    a `screenshot_each` run on a real site pushed it into the multi-MB range —
+    slow to open, too big to mail or attach as a CI artifact. So the inlining is
+    budgeted (REPORT_EMBED_LIMIT_MB, 0 = unlimited) and **failure screenshots
+    get first claim**: those are the ones anyone actually opens. Whatever the
+    budget can't cover is linked to the .png on disk instead of dropped.
+    """
+    limit = CONFIG.report_embed_limit_mb
+    steps = [st for st in result.get("steps", []) if st.get("screenshot")]
+    if limit <= 0:
+        return {st["screenshot"] for st in steps}
+
+    budget = limit * 1024 * 1024
+    chosen: set[str] = set()
+    # failures first, then the rest — both in step order
+    for st in sorted(steps, key=lambda s: bool(s.get("passed"))):
+        rel = st["screenshot"]
+        if rel in chosen:
+            continue
+        try:
+            size = (report_dir / rel).stat().st_size
+        except OSError:
+            continue
+        cost = size * 4 // 3 + 512  # base64 expansion + the step's markup
+        if cost > budget:
+            continue
+        budget -= cost
+        chosen.add(rel)
+    return chosen
+
+
 def _render_html(result: dict, report_dir: Path) -> str:
     s = result.get("summary", {})
     meta = result.get("meta", {})
@@ -449,7 +483,9 @@ def _render_html(result: dict, report_dir: Path) -> str:
     name = html.escape(result.get("name", "scenario"))
     desc = html.escape(result.get("description") or "")
 
-    steps_html = "".join(_step_html(st, report_dir) for st in result.get("steps", []))
+    embeds = _plan_embeds(result, report_dir)
+    steps_html = "".join(_step_html(st, report_dir, embeds)
+                         for st in result.get("steps", []))
 
     return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -499,15 +535,31 @@ def _trend_chip(result: dict) -> str:
     return f'<span class="chip">최근 {icons}{html.escape(note)}</span>'
 
 
-def _step_html(st: dict, report_dir: Path) -> str:
+def _step_html(st: dict, report_dir: Path, embeds: set[str] | None = None) -> str:
     ok = st["passed"]
     skipped = st.get("skipped", False)
     thumb = ""
-    if st.get("screenshot"):
-        data = _b64(report_dir / st["screenshot"], report_dir)
-        if data:
-            uri = f"data:image/png;base64,{data}"
-            thumb = f'<a href="{uri}" target="_blank"><img class="thumb" src="{uri}"></a>'
+    rel = st.get("screenshot")
+    if rel:
+        if embeds is None or rel in embeds:
+            data = _b64(report_dir / rel, report_dir)
+            if data:
+                # The data URI is emitted ONCE. It used to be repeated in an
+                # <a href> wrapper around the <img src>, which silently DOUBLED
+                # the size of every report (a 20-shot run: 1.36MB of HTML for
+                # 518KB of PNG). Click-through to the full-size image now uses a
+                # relative link to the file, which costs a few bytes.
+                href = html.escape(str(rel).replace("\\", "/"))
+                thumb = (f'<img class="thumb" src="data:image/png;base64,{data}">'
+                         f'<div class="kv"><a href="{href}" target="_blank">'
+                         f'원본 보기</a></div>')
+        else:
+            # Over the embed budget: keep the evidence reachable rather than
+            # dropping it, and say why the image isn't inline.
+            href = html.escape(str(rel).replace("\\", "/"))
+            thumb = (f'<div class="kv"><a href="{href}" target="_blank">'
+                     f'📷 {href}</a> — 임베드 예산(REPORT_EMBED_LIMIT_MB) 초과로 '
+                     f'링크로 남김</div>')
     sugg = (f'<div class="sugg">💡 {html.escape(str(st["ai_suggestion"]))}</div>'
             if st.get("ai_suggestion") else "")
     errs = ""

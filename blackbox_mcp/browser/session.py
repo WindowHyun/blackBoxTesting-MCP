@@ -439,6 +439,22 @@ class BrowserSession:
 
 
 # ── module-level singleton (BR-01) ───────────────────────────────
+# Serializes whole ACTIONS (a recorded tool call, or a scenario run) against
+# each other. The server is single-tenant — one browser, one page — but MCP
+# clients do issue tool calls concurrently (Claude's parallel tool use), and two
+# overlapping actions on one page are both meaningless and actively harmful:
+# recorder/runner attribute console+network events to a step by slicing the
+# buffers around it, so interleaved calls cross-attributed each other's errors
+# and two clicks could race on the same DOM.
+#
+# Lock order is ACTION_LOCK → _SESSION_LOCK → _op_lock: taken before
+# get_session(), never the other way round. Observational tools (status,
+# get_console_logs, snapshot) deliberately do NOT take it, so a stuck flow stays
+# diagnosable. Not reentrant — an action must never invoke another action's
+# *wrapped* MCP entrypoint (internal calls use the unwrapped module function,
+# which is what run_scenario already does).
+ACTION_LOCK = asyncio.Lock()
+
 _SESSION: BrowserSession | None = None
 # Serializes singleton creation/recovery: without it two concurrent tool calls
 # can both see a dead/absent session and launch two browsers (one leaks) or

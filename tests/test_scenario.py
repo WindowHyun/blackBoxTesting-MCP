@@ -134,3 +134,51 @@ async def test_unknown_action_lists_the_supported_verbs(session, report_dir):
     # the hint must enumerate real verbs so the host LLM can self-correct
     assert "dismiss_banners" in step["ai_suggestion"]
     assert "navigate" in step["ai_suggestion"]
+
+
+async def test_run_scenario_reports_progress_per_step(session, report_dir):
+    """A scenario is ONE long tool call; silence is what clients time out on."""
+    seen = []
+
+    class _Ctx:
+        async def report_progress(self, progress, total=None, message=None):
+            seen.append((progress, total, message))
+
+    await run_scenario(_login_steps(), name="prog", save_report=False, ctx=_Ctx())
+    assert seen, "no progress reported"
+    assert seen[-1][0] == seen[-1][1], f"final progress not complete: {seen[-1]}"
+    assert all(a[1] == len(_login_steps()) for a in seen)
+
+
+async def test_progress_failure_does_not_fail_the_run(session, report_dir):
+    """A client that mishandles progress must not break the run it narrates."""
+    class _BadCtx:
+        async def report_progress(self, progress, total=None, message=None):
+            raise RuntimeError("client hung up")
+
+    res = await run_scenario(_login_steps(), name="badprog", save_report=False,
+                             ctx=_BadCtx())
+    assert res["summary"]["failed"] == 0
+
+
+async def test_max_duration_truncates_instead_of_overrunning(session, report_dir):
+    """Past the budget, remaining steps are reported as skipped rather than
+    running on past the caller's timeout."""
+    steps = [{"action": "navigate", "url": fixture_url("basic.html")}]
+    steps += [{"action": "wait", "ms": 400} for _ in range(10)]
+    res = await runner.run(steps, name="budget", max_duration_s=0.5)
+
+    assert res.get("truncated"), "run was not truncated"
+    assert res["truncated"]["ran"] < len(steps)
+    assert res["summary"]["total"] == len(steps)  # nothing vanishes from the report
+    assert res["summary"]["skipped"] > 0
+    skipped = [s for s in res["steps"] if s.get("skipped")]
+    assert "시간 예산" in skipped[0]["actual"]
+
+
+async def test_no_budget_runs_every_step(session, report_dir):
+    steps = [{"action": "navigate", "url": fixture_url("basic.html")},
+             {"action": "wait", "ms": 10}]
+    res = await runner.run(steps, name="nobudget")
+    assert "truncated" not in res
+    assert res["summary"]["skipped"] == 0

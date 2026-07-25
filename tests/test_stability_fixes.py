@@ -261,3 +261,33 @@ async def test_status_reports_session_state(session):
     assert out["session"]["mode"] in ("bundled", "channel")
     assert "basic.html" in out["session"]["url"]
     assert out["config"]["browser"] == "chromium"
+
+
+# ── action serialization: concurrent tool calls (2026-07) ────────
+
+async def test_concurrent_tool_calls_do_not_cross_attribute_errors(session):
+    """Two overlapping recorded calls must not share buffer slices.
+
+    recorder/runner attribute console+network events to a step by slicing the
+    session buffers around it. MCP clients issue tool calls concurrently
+    (Claude's parallel tool use), so without serialization the snapshot/execute/
+    append sequence interleaved and each step absorbed the other's errors.
+    """
+    from blackbox_mcp.testing import recorder
+    from blackbox_mcp.tools._registry import _with_recorder
+
+    async def noisy(tag: str) -> dict:
+        await session.page.evaluate(f"console.error('boom-{tag}')")
+        await asyncio.sleep(0.05)
+        return {"ok": True, "detail": tag}
+
+    wrapped = _with_recorder("navigate", noisy)
+    recorder.reset()
+    await asyncio.gather(wrapped("a"), wrapped("b"))
+
+    steps = recorder.steps()
+    assert len(steps) == 2
+    texts = [[e["text"] for e in s["console_errors"]] for s in steps]
+    flat = [t for group in texts for t in group]
+    # each error is attributed exactly once, never to both steps
+    assert sorted(flat) == ["boom-a", "boom-b"], texts

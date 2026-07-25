@@ -127,3 +127,86 @@ async def test_retry_exhausted_still_fails(session, report_dir):
         name="retry_fail")
     st = res["steps"][0]
     assert st["passed"] is False and st["retries"] == 2
+
+
+# ── HTML embed budget (report size) ──────────────────────────────
+
+def _result_with_shots(tmp_path, n, *, fail_at=None, kb=200):
+    """A result whose steps carry real (chunky) screenshot files on disk."""
+    shots = tmp_path / "screenshots"
+    shots.mkdir(exist_ok=True)
+    steps = []
+    for i in range(1, n + 1):
+        rel = f"screenshots/shot{i:02d}.png"
+        (tmp_path / rel).write_bytes(b"\x89PNG" + b"x" * (kb * 1024))
+        passed = (i != fail_at)
+        steps.append({"step": i, "action": "navigate", "passed": passed,
+                      "duration_ms": 1, "screenshot": rel, "expected": "e",
+                      "actual": "a", "ai_reason": "r"})
+    return {"name": "shots", "steps": steps, "meta": {},
+            "summary": {"total": n, "passed": n - (1 if fail_at else 0),
+                        "failed": 1 if fail_at else 0, "skipped": 0,
+                        "pass_rate": 1.0}}
+
+
+def test_html_embed_budget_caps_report_size(tmp_path, monkeypatch):
+    """A screenshot-heavy run must not produce a multi-MB single-file HTML.
+
+    base64 costs ~1.33x, so `screenshot_each` on a real site inlined every shot
+    and produced a report browsers choke on and artifact/mail limits reject.
+    """
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_embed_limit_mb=1))
+    res = _result_with_shots(tmp_path, 20, kb=200)  # 4MB of PNGs on disk
+    html_text = report._render_html(res, tmp_path)
+    size_mb = len(html_text.encode("utf-8")) / 1024 / 1024
+    assert size_mb < 2, f"HTML grew to {size_mb:.1f}MB despite a 1MB budget"
+    # the un-embedded shots are linked, not silently dropped
+    assert "screenshots/shot20.png" in html_text
+
+
+def test_failure_screenshots_win_the_embed_budget(tmp_path, monkeypatch):
+    """Whoever gets inlined, it must be the failure — that's what people open."""
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_embed_limit_mb=1))
+    res = _result_with_shots(tmp_path, 12, fail_at=12, kb=200)
+    embeds = report._plan_embeds(res, tmp_path)
+    assert "screenshots/shot12.png" in embeds, "failure shot lost to earlier passes"
+
+
+def test_embed_budget_zero_means_unlimited(tmp_path, monkeypatch):
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_embed_limit_mb=0))
+    res = _result_with_shots(tmp_path, 5, kb=10)
+    assert len(report._plan_embeds(res, tmp_path)) == 5
+
+
+def test_embedded_screenshot_is_not_duplicated(tmp_path, monkeypatch):
+    """Each data URI must appear ONCE in the HTML.
+
+    The thumbnail used to be wrapped in `<a href="{data_uri}"><img
+    src="{data_uri}">`, repeating the whole base64 payload and silently
+    doubling every report (measured: 1.36MB of HTML for 518KB of PNG).
+    """
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_embed_limit_mb=0))
+    res = _result_with_shots(tmp_path, 1, kb=40)
+    html_text = report._render_html(res, tmp_path)
+    assert html_text.count("data:image/png;base64,") == 1
+    # the full-size link survives, as a cheap relative href
+    assert 'href="screenshots/shot01.png"' in html_text
+    # and the HTML stays close to one base64 expansion, not two
+    on_disk = (tmp_path / "screenshots/shot01.png").stat().st_size
+    assert len(html_text.encode("utf-8")) < on_disk * 4 // 3 + 20_000

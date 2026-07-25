@@ -125,6 +125,23 @@ def register_all(mcp):             # server.py에서 1회 호출
   지연 초기화(`get_session()`)와 병행하되, 종료 시 리소스 릭이 없도록 lifespan
   `finally`에서 반드시 닫는다. (Phase 1에서 lifespan 배선.)
 
+### 3.1.1 액션 직렬화 (ACTION_LOCK, 2026-07)
+
+`_op_lock`은 **수명주기 연산끼리만** 직렬화했고 액션은 무방비였다. FastMCP는 요청을
+동시 처리하고 MCP 클라이언트는 실제로 도구를 병렬 호출한다(Claude parallel tool
+use). 브라우저·페이지는 하나뿐이라 겹친 액션은 의미가 없을 뿐 아니라 해롭다:
+recorder/runner는 스텝 구간 콘솔·네트워크 에러를 **버퍼 인덱스 슬라이스**로 귀속하는데,
+스냅샷→실행→append가 인터리브되면 서로의 에러를 교차 귀속하고 두 클릭이 같은 DOM에서
+경합한다.
+
+`browser.session.ACTION_LOCK`이 **액션 1건 전체**(recorder가 감싼 도구 호출, 또는
+`runner.run` 한 판)를 직렬화한다.
+- 락 순서: `ACTION_LOCK` → `_SESSION_LOCK` → `_op_lock` (`get_session()` 이전에 획득).
+- **관측용 도구는 락을 잡지 않는다**(`status`·`get_console_logs`·`get_network_errors`) —
+  멈춘 흐름을 진단할 수 있어야 하므로.
+- 재진입 불가. 액션이 다른 액션의 *래핑된 MCP 엔트리포인트*를 호출하면 안 된다
+  (내부 호출은 unwrapped 모듈 함수를 쓴다 — `run_scenario`가 이미 그렇게 한다).
+
 ### 3.2 헤드리스 토글 (BR-03)
 - 기본 `headless=True`. `HEADLESS=false`(env)면 `headless=False`.
 - 브라우저 엔진은 `BROWSER`(env, 기본 `chromium`) — firefox/webkit 허용하되 기본·검증 대상은 chromium.
@@ -263,7 +280,8 @@ API:
 |---|---|---|---|
 | `reset_session` | `reset_session()` | `{ok, message}` | SHOULD |
 | `use_real_browser` | `use_real_browser(headless=False, channel="chrome")` | `{ok, mode, browser, profile}` | 확장 |
-| `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...]}` | 확장 |
+| `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...], overlays_seen}` | 확장 |
+| `switch_page` | `switch_page(index?)` | `{ok, count, index, url, pages[]}` | 확장 |
 | `save_state` | `save_state(name="default")` | `{ok, name, path}` | 확장 |
 | `load_state` | `load_state(name="default")` | `{ok, name, path}` | 확장 |
 | `list_states` | `list_states()` | `[{name, saved_at}]` | 확장 |
@@ -293,6 +311,15 @@ API:
 > cookie/consent/gdpr/banner/modal/popup id·class)에서만 클릭.
 > 희귀 배너 몇 개를 놓치더라도 업무 액션을 절대 발화하지 않는 쪽이 옳다.
 > 반환에 `overlays_seen`(감지된 오버레이 수)을 실어 진단에 쓴다.
+>
+> **switch_page (팝업 채택 되돌리기, 2026-07):** 컨텍스트가 여는 모든 페이지는
+> `_adopt_page`로 활성이 된다 — OAuth 팝업·`target=_blank`에 필요하지만, 광고
+> 팝언더도 똑같이 채택돼 **이후 모든 스텝이 광고 페이지에서 실행**됐고 돌아올
+> 방법이 없었다(`reset_session`은 테스트 중인 로그인까지 버린다). `switch_page()`는
+> 열린 탭 목록을, `switch_page(index=0)`은 원래 탭으로 복귀를 제공한다. 시나리오
+> 스텝으로도 쓸 수 있어 저장된 흐름이 자기 탭에 고정될 수 있다.
+> 활성 페이지 전환은 `_adopt_page`와 같은 뒷정리를 한다(리스너 1회 부착, 프레임
+> 컨텍스트 해제).
 >
 > **save_state / load_state (로그인 재사용, 2026-07):** 현재 컨텍스트의 쿠키+
 > localStorage를 `~/ui-blackbox/state/{name}.json`(POSIX 0600)으로 내보내고,
@@ -420,6 +447,16 @@ SM-01~04와 함께(또는 직후) 구현한다.
 > 스텝 예: `{"action": "dismiss_banners"}` ·
 > `{"action": "use_real_browser", "headless": false, "channel": "chrome"}`
 
+> **긴 단일 호출 대책 (2026-07):** 시나리오는 MCP **도구 호출 1건**인데 스텝마다
+> `NAV_TIMEOUT_MS`를 태울 수 있어, 실사이트 15~20스텝이면 클라이언트의 도구 호출
+> 타임아웃을 넘겼다 — 클라이언트는 포기했는데 서버는 계속 브라우저를 몰았다. 두 가지로
+> 대응한다: ① `run_scenario(ctx=...)`가 스텝마다 `ctx.report_progress(done, total,
+> message)`를 보내 진행을 알리고 활동 신호를 갱신한다. ② `max_duration_s`로 전체 상한을
+> 두면 예산 초과 시 **스텝 경계에서** 멈추고 나머지를 skipped로 기록해 부분 리포트를
+> 반환한다(진행 중 취소는 브라우저 상태를 설명 불가능하게 만든다).
+> Context 어댑터는 `tools/scenario.py`에 있다 — `testing/runner`가 MCP SDK를 import하면
+> "MCP 없이 도는 CLI" 계약이 깨지고 `tests/test_registry.py`가 이를 강제한다.
+
 ### 5.5 라이브러리 (SL)
 | Tool | 시그니처 | 우선순위 |
 |---|---|---|
@@ -525,6 +562,15 @@ SM-01~04와 함께(또는 직후) 구현한다.
 - **HTML(SM-04)**: 단일 self-contained `.html` — 통과율 헤더, 스텝 카드(캡처 인라인),
   실패 강조·심각도 색상, AI 판단근거·수정제안, 회귀 diff, 환경 메타 푸터.
   CSS 인라인, 스크린샷 base64, 외부 의존성/네트워크 없음.
+
+> **HTML 임베드 예산 (REPORT_EMBED_LIMIT_MB, 2026-07):** 자기완결 단일 HTML을 위해
+> 스크린샷을 base64로 인라인하는데, `screenshot_each` 실사이트 실행은 이걸 수 MB로
+> 부풀려 브라우저가 버벅이고 메일/아티팩트 한도에 걸렸다.
+> ① **중복 제거** — 썸네일이 `<a href="{data_uri}"><img src="{data_uri}">` 형태라 같은
+> base64가 **두 번** 들어갔다(측정: PNG 518KB → HTML 1.36MB). 이제 data URI는 1회만
+> 쓰고 원본 보기는 상대 경로 링크로 건다(0.69MB, 정확히 절반).
+> ② **예산** — `_plan_embeds`가 한도(기본 8MB, 0=무제한)까지만 임베드하고 초과분은
+> 파일 링크로 남긴다. **실패 스크린샷이 우선권**을 갖는다(사람이 실제로 여는 건 그것).
 
 ### 6.3 단계적 구현
 - 1차(Phase 3): meta(SM-08) · 스텝 캡처/셀렉터/에러귀속(SM-06) · AI 근거/제안(SM-05) · JSON/MD/HTML.
@@ -856,3 +902,22 @@ PRD 보안 제약(로컬 전용·자격증명 마스킹·외부 전송 없음) �
   디스크 저장**된다 — 공유 머신에서 주의.
 - `navigate`는 `file://`로 로컬 파일을 열 수 있다(로컬 테스트 도구 특성).
 - `BROWSER_CDP`는 localhost 디버그 포트(무인증)에 attach — 로컬 한정.
+
+### 14.1 마스킹 휴리스틱의 한계와 SECRET_VARS (2026-07)
+
+`is_sensitive_name()`은 키워드 휴리스틱이고, **실패 모드가 조용하다** — 못 잡으면
+실제 자격증명이 리포트에 평문으로 남는다. 실제로 뚫린 두 경로:
+- `${ADMIN_CREDS}` — 목록엔 `credential`(단수·완전형)만 있어 `creds`가 미탐 →
+  해석값이 scrub 레지스트리에 등록되지 않아 파생 URL/에러 텍스트에서 지워지지 않았다.
+- `selector="testid=pw2"` — 토큰 분해가 `{testid, pw2}`라 `pw`와 일치하지 않아
+  입력한 비밀번호가 그대로 기록됐다.
+
+대응 3가지:
+1. 키워드 확장 — `creds`·`passphrase`·`private_key`·`access_key`·`bearer`·`cookie`,
+   토큰 `cred`·`jwt`·`totp`·`mfa`, 한국어 `인증코드`·`일회용`.
+2. **숫자 접미 토큰** 인식(`_NUMBERED_TOKEN`) — `pw2`/`pwd1`/`otp3`.
+3. **`SECRET_VARS` 환경변수**(쉼표 구분) — 휴리스틱은 원리적으로 완전할 수 없으므로,
+   사용자가 이름을 명시하면 철자와 무관하게 자격증명으로 강제한다. 결정적 탈출구.
+
+또한 `mask_step`은 `selector`만 보던 것을 `target`·`name`·`field`·`label`까지
+확인한다 — 그 키들로 작성된 스텝은 입력값이 그대로 새어나갔다.

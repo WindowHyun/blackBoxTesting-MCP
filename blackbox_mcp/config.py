@@ -85,6 +85,11 @@ class Config:
     # Keep at most N report runs (per format set) in REPORT_DIR; 0 = unlimited.
     # Prevents unbounded growth of ~/ui-blackbox/reports on long-lived setups.
     report_retention: int
+    # Budget (MB) for screenshots inlined as base64 into the HTML report;
+    # 0 = unlimited. Beyond it, steps link to the .png on disk instead. A run
+    # with screenshot_each on a real site produced a multi-MB single-file HTML
+    # that browsers choke on and mail/artifact limits reject.
+    report_embed_limit_mb: int
 
     @staticmethod
     def from_env() -> "Config":
@@ -102,6 +107,7 @@ class Config:
             nav_timeout_ms=_as_int(os.getenv("NAV_TIMEOUT_MS"), 30000),
             ignore_https_errors=_as_bool(os.getenv("IGNORE_HTTPS_ERRORS"), False),
             report_retention=_as_int(os.getenv("REPORT_RETENTION"), 100),
+            report_embed_limit_mb=_as_int(os.getenv("REPORT_EMBED_LIMIT_MB"), 8),
         )
 
 
