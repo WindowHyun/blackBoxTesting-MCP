@@ -278,7 +278,21 @@ API:
 > **dismiss_banners (실사이트 하드닝):** GDPR/쿠키/동의 오버레이가 클릭을 가로채는
 > ("intercepts pointer events") 실사이트용 — 흔한 수락/닫기 라벨(KO/EN)을 role로
 > 순회하며 **보이는 첫 항목**을 클릭(짧은 per-try 타임아웃, 매치 없어도 무에러).
-> 최대 3개까지만 눌러 무관 컨트롤 오클릭을 방지. navigate 후 클릭이 막히면 호출.
+> 최대 3개까지만 누른다. navigate 후 클릭이 막히면 호출.
+>
+> **오클릭 방지 (2026-07 수정):** 초기 구현은 Playwright `get_by_role(name=)`의
+> **기본 부분일치**로 페이지 전체를 훑어, 배너가 없는 페이지에서 실제 업무 버튼을
+> 눌렀다 — `확인`이 "주문 확인하기"에, `Accept`가 "Accept terms and place order"에,
+> `Continue`가 "Continue to payment"에 매칭돼 **주문이 제출**됐다. 프롬프트 매트릭스가
+> 클릭 인터셉트마다 이 도구를 부르라고 지시하므로 오탐은 항상 테스트 대상 페이지에
+> 떨어진다. 두 가지로 범위를 묶는다:
+> ① 이름은 `exact=True`로 **정확 일치만**(부분일치 금지).
+> ② 라벨을 모호도로 분리 — `_CONSENT_LABELS`("모두 동의", "Accept all" …)는 동의
+> 행위 외의 의미가 없어 페이지 어디서든 허용, `_GENERIC_LABELS`("확인", "OK",
+> "Continue" …)는 **오버레이 컨테이너 내부**(`[role=dialog]`, `aria-modal`,
+> cookie/consent/gdpr/banner/modal/popup id·class)에서만 클릭.
+> 희귀 배너 몇 개를 놓치더라도 업무 액션을 절대 발화하지 않는 쪽이 옳다.
+> 반환에 `overlays_seen`(감지된 오버레이 수)을 실어 진단에 쓴다.
 >
 > **save_state / load_state (로그인 재사용, 2026-07):** 현재 컨텍스트의 쿠키+
 > localStorage를 `~/ui-blackbox/state/{name}.json`(POSIX 0600)으로 내보내고,
@@ -392,6 +406,20 @@ SM-01~04와 함께(또는 직후) 구현한다.
 ```
 - `${ENV_VAR}` 치환: 자격증명은 env/.env에서 주입, 리포트엔 마스킹(제약).
 
+> **지원 액션 = `runner.DISPATCHABLE` (2026-07):** 실행 경로가 둘이다 — 대화형은
+> recorder 래퍼(`recorder.RECORDABLE`), 저장된 시나리오는 `runner._dispatch`. 한쪽에만
+> 있는 도구는 **채팅에선 되는데 시나리오로 저장하는 순간 죽는다.** 실제로
+> `dismiss_banners`·`use_real_browser`가 그랬고, 그 결과 "채팅에서 만들고 → 저장하고 →
+> CI에서 재생"이라는 핵심 워크플로가 **쿠키 배너 있는 사이트(사실상 모든 실사이트)**
+> 에서 `unknown action`으로 끊겼다. 이제 둘 다 디스패치되며, 지원 액션 목록은
+> `runner.DISPATCHABLE` 단일 출처(미지원 액션 에러 메시지도 여기서 생성)이고
+> `tests/test_registry.py`가 **`RECORDABLE ⊆ DISPATCHABLE`** 을 강제한다.
+> 관측용 읽기 도구(`snapshot` 제외한 `get_console_logs`/`get_network_errors` 등)는
+> RECORDABLE이 아니므로 의도적으로 스텝이 아니다.
+>
+> 스텝 예: `{"action": "dismiss_banners"}` ·
+> `{"action": "use_real_browser", "headless": false, "channel": "chrome"}`
+
 ### 5.5 라이브러리 (SL)
 | Tool | 시그니처 | 우선순위 |
 |---|---|---|
@@ -459,7 +487,8 @@ SM-01~04와 함께(또는 직후) 구현한다.
       "priority": "high",                // 비즈니스 우선순위 passthrough(선택)
       "retries": 0,                      // retry:N 스텝의 사용된 재시도 수(통과+재시도>0 = flaky 마킹)
       "console_errors": [], "network_errors": [], // SM-06: 스텝 구간 귀속
-      "severity": null,                  // SM-08: assertion|js_error|network|timeout
+      "severity": null,                  // SM-08: assertion|timeout|error (실패 스텝만;
+                                         // 통과 시 null — report.classify_failure가 단일 출처)
       "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
       "ai_suggestion": null              // SM-05: 실패 시 가설/수정 제안
     }
@@ -507,7 +536,23 @@ SM-01~04와 함께(또는 직후) 구현한다.
 
 - `bootstrap.ensure_chromium()`: Chromium 존재 확인(`playwright`의 설치 경로 점검),
   없으면 `subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"])`.
-  이미 있으면 즉시 통과. `server.py`의 `main()`에서 `mcp.run()` **이전에** 1회 호출.
+  이미 있으면 즉시 통과.
+- **핸드셰이크 비차단 부트스트랩 (2026-07 수정):** `server.main()`은
+  `ensure_chromium()`을 인라인 호출하지 않고 `start_background_bootstrap()`으로
+  **워커 스레드에 위임**한 뒤 즉시 `mcp.run()`으로 넘어간다. 이유: MCP 클라이언트는
+  프로세스를 띄우자마자 `initialize`를 보내고 짧은 타임아웃(Claude Desktop 기준
+  ~60초) 내에 응답이 없으면 서버를 죽은 것으로 처리한다. 첫 실행의 Chromium
+  다운로드(~150MB)는 보통 회선에서 그 시간을 넘기므로, **README가 권장하는 설치
+  경로(uvx, 클론 없음)의 첫 기동이 "서버 시작 실패"로 끝났다** — 45초 다운로드
+  시뮬레이션에서 initialize 응답까지 45.6초(브라우저가 이미 있으면 0.6초).
+  이제 다운로드가 핸드셰이크와 겹쳐 돌고, **첫 브라우저 런치**가
+  `BrowserSession.start() → await_bootstrap()`으로 기다린다(느려지는 것은 첫 도구
+  호출이지 서버 기동이 아니다). `ensure_chromium()`은 Playwright **sync** API를
+  쓰는데, sync API는 *실행 중인 asyncio 루프를 가진 스레드*에서만 거부되고 워커
+  스레드는 루프를 갖지 않으므로 CLAUDE.md 규칙 2를 위반하지 않는다. 스레드는
+  daemon — 반쯤 받은 다운로드가 종료를 붙잡지 않는다. CLI는 종전대로 루프 생성
+  **전에** `ensure_chromium()`을 동기 호출하며(그쪽은 블로킹이 옳다),
+  `await_bootstrap()`은 그 경우 no-op이다.
   > **확인 필요(Phase 1):** 설치 경로 점검에 쓰는 `browser_type.executable_path`는
   > Playwright 버전에 따라 property/메서드 표기가 다를 수 있고, 반환값은 "설치
   > 여부"가 아니라 "기대 경로"다 → `os.path.exists()`로 실제 존재를 확인한다.
@@ -522,8 +567,15 @@ SM-01~04와 함께(또는 직후) 구현한다.
   세션 `start()`도 같은 약속을 지킨다(2026-07 2차 감사): 경로가 stale이면
   `os.path.exists` 검사로 건너뛰고 번들로 폴백 — env 오타가 모든 런치를
   영구 실패시키지 않는다(§3.1 런치 폴백 체인).
-  설치 서브프로세스의 stdout/stderr는 `DEVNULL` — stdout은 MCP JSON-RPC 파이프라
-  진행률 출력이 프로토콜을 오염시키면 안 된다(§14).
+  설치 서브프로세스의 stdout은 `DEVNULL` — stdout은 MCP JSON-RPC 파이프라
+  진행률 출력이 프로토콜을 오염시키면 안 된다(§14). **stderr는 `PIPE`로 캡처**해
+  실패 시 로그에 실어 보낸다(2026-07 수정): 예전엔 stderr도 `DEVNULL`이라 CDN 차단·
+  디스크 부족·프록시 거부가 **아무 흔적도 남기지 않았고**, 사용자는 이후 모든 도구
+  호출이 "브라우저 없음"으로 죽는 것만 봤다.
+- **런치 실패 메시지(2026-07):** `_launch_error()`가 두 가지 흔한 실패를 실행 가능한
+  안내로 바꾼다 — 바이너리 없음(`playwright install <browser>`), 바이너리는 있으나
+  시스템 라이브러리 없음(`playwright install-deps <browser>`; 부트스트랩은 root가
+  필요한 `--with-deps`를 쓰지 않으므로 데스크톱 리눅스에서 실제로 발생한다).
   > 검증(2026-06): preinstalled chromium **build 1194** + Playwright **1.60** 드라이버를
   > `executable_path`로 런치 → `aria_snapshot` 포함 정상 동작 확인(빌드 버전 불일치
   > 무방). R1 해소.
@@ -551,6 +603,16 @@ SM-01~04와 함께(또는 직후) 구현한다.
   `2`(사용법·인프라 오류) → CI 게이팅.
 - `--junit PATH` — 시나리오당 `testsuite`, 스텝당 `testcase`의 **JUnit XML**(GitHub
   Actions/Jenkins 네이티브 파싱). `--continue-on-fail`, `--screenshot-each`, `--format`.
+- **시나리오 간 격리 (2026-07 수정):** 순차 스위트는 브라우저 컨텍스트 **하나**를
+  공유하므로, 예전엔 시나리오 A의 로그인·localStorage가 B로 새어 스위트가 순서
+  의존적이 됐다 — 반면 `--parallel`은 시나리오마다 프로세스가 분리돼 격리된다.
+  **같은 명령이 플래그 하나로 다른 의미**를 갖던 셈. 이제 시나리오 사이에
+  `reset_session()`을 호출한다(`_isolate()`). 상태를 의도적으로 이어가고 싶으면
+  `--no-reset`(시나리오 1에서 한 번 로그인 → 2..N에서 재사용). 실 브라우저 모드
+  (영구 프로필/CDP)는 설계상 로그인을 유지하므로 거기선 버퍼만 비운다.
+- 첫 실행에 브라우저가 없을 때 `--parallel`이 자식 N개를 동시에 띄우면 같은
+  디렉터리로 `playwright install`이 N번 경합한다 → 부모가 **팬아웃 전에**
+  `ensure_chromium()`을 1회 실행한다(2026-07 수정).
 - `--trace-on-failure` — Playwright 트레이싱을 켠 채 실행하고 **실패한 실행만**
   `reports/traces/{run_id}_{name}.zip`을 남긴다(통과 런은 stop 시 폐기 — 아티팩트
   무한 축적 방지). `playwright show-trace`로 열람. run_id가 파일명을 선도해
@@ -569,8 +631,8 @@ SM-01~04와 함께(또는 직후) 구현한다.
 
 ### 7.2 리포트 보존 (REPORT_RETENTION)
 
-`REPORT_DIR`이 무한 성장하지 않도록, `save()` 성공 직후 최신 N개(`REPORT_RETENTION`,
-기본 100, 0=무제한) 실행을 남기고 초과분을 삭제한다. **한 실행의 리포트 파일과
+`REPORT_DIR`이 무한 성장하지 않도록, `save()` 성공 직후 **시나리오별로** 최신 N개
+(`REPORT_RETENTION`, 기본 100, 0=무제한) 실행을 남기고 초과분을 삭제한다. **한 실행의 리포트 파일과
 스크린샷은 동일 `run_id`를 공유**(`report.new_run_id()` → `result["run_id"]` → 리포트
 파일명·스크린샷 태그에 동일 사용)하므로, 정리는 두 파일군을 run_id로 상관시켜
 **보관하는 실행은 스크린샷도 함께 보관**한다. run_id는 마이크로초까지 포함해 병렬
@@ -578,6 +640,16 @@ SM-01~04와 함께(또는 직후) 구현한다.
 저장을 절대 깨지 않는다.
 > 이전 구현은 스크린샷 스탬프(시나리오 시작)와 리포트 스탬프(저장 시점)가 달라
 > `REPORT_RETENTION=1`이 방금 저장한 리포트의 스크린샷을 지웠다(2026-07 수정).
+>
+> **시나리오별 그룹핑 (2026-07 수정):** 이전엔 디렉터리 전역으로 "최신 N개 파일"을
+> 남겨서, `REPORT_DIR`이 평평하고 공유되는 탓에 **스위트가 실행 도중 자기 앞쪽
+> 시나리오의 리포트를 지웠다**(retention=3에 시나리오 5개 → 뒤 3개만 1회분씩 생존).
+> 시나리오 20개를 쓰는 팀은 각 시나리오당 ~5회분으로 잘렸다. 이제 리포트 파일명이
+> `report_{run_id}_{시나리오 슬러그}.{ext}`로 슬러그를 싣고(`_scenario_of`), 정리는
+> 슬러그별 버킷에서 최신 N개를 남긴다. 슬러그가 없는 구버전 파일은 `''` 버킷에
+> 모여 종전과 동일하게 처리된다. 슬러그 정규식은 한글을 보존한다 — 한글 이름이
+> 전부 같은 슬러그로 뭉개지면 서로 다른 시나리오가 한 버킷에 섞이기 때문.
+> `history/`는 정리 대상이 아니므로 회귀 baseline은 영향받지 않는다.
 
 ---
 

@@ -76,6 +76,33 @@ def test_prompt_primers_reference_real_tools():
     assert not unknown, f"prompts reference nonexistent tools: {unknown}"
 
 
+def test_every_recordable_action_is_replayable_as_a_scenario_step():
+    """A tool the recorder logs in chat must also be dispatchable by the runner.
+
+    Otherwise the tool works interactively and breaks the moment the flow is
+    SAVED as a scenario and replayed from the CLI — which is what happened to
+    dismiss_banners and use_real_browser: `run_scenario` answered "unknown
+    action", so the documented "test in chat → run in CI" workflow died on any
+    site with a cookie banner.
+    """
+    from blackbox_mcp.testing import recorder
+    from blackbox_mcp.testing.runner import DISPATCHABLE
+
+    missing = sorted(recorder.RECORDABLE - DISPATCHABLE)
+    assert not missing, f"recordable in chat but not replayable in a scenario: {missing}"
+
+
+def test_dispatchable_matches_the_real_dispatch_branches():
+    """DISPATCHABLE must describe _dispatch, not drift from it."""
+    import inspect
+
+    from blackbox_mcp.testing import runner
+
+    src = inspect.getsource(runner._dispatch)
+    unhandled = [a for a in sorted(runner.DISPATCHABLE) if f'"{a}"' not in src]
+    assert not unhandled, f"declared DISPATCHABLE but no branch handles it: {unhandled}"
+
+
 def test_locator_prefix_parsing():
     from blackbox_mcp.browser import locator
 

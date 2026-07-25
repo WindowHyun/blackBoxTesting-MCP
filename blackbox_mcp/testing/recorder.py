@@ -147,6 +147,16 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     if session and not passed:
         shot = await report.capture_step_screenshot(session, f"{_RUN_ID}_session", idx)
 
+    # Same field the runner records (DESIGN §6.1): without it every ad-hoc
+    # report rendered "페이지: —" on failures, because scrub_record created the
+    # key as None and the HTML/MD renderers then had nothing to show.
+    page_url = None
+    try:
+        if session:
+            page_url = session.page.url
+    except Exception:
+        page_url = None
+
     _LOG.append(secrets.scrub_record({
         "step": idx,
         "action": name,
@@ -158,6 +168,10 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         "passed": passed,
         "duration_ms": duration_ms,
         "screenshot": shot,
+        "page_url": page_url,
+        # Ad-hoc calls are one-shot (no retry loop) — recorded so both report
+        # producers emit the same shape and the flaky badge never reads stale.
+        "retries": 0,
         "console_errors": [e for e in new_console if e.get("level") == "error"],
         "network_errors": new_network,
         "severity": None if passed else report.classify_failure(name, exc),

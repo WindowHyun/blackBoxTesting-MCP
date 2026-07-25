@@ -259,6 +259,7 @@ Claude 입력창에 `/`를 치면 아래 명령이 뜬다. **ui-blackbox 도구�
 ui-blackbox run smoke_login                     # 라이브러리 시나리오 → exit 0/1
 ui-blackbox run ./steps.json --format all       # 스텝 .json 파일
 ui-blackbox run a b c --junit results.xml       # 스위트 + CI용 JUnit
+ui-blackbox run a b c --no-reset                # 시나리오 간 상태를 이어서 사용
 ui-blackbox run a b c --parallel 3              # 시나리오당 격리 서브프로세스
 ui-blackbox run a b c --parallel 3 --timeout 300  # 시나리오당 워치독(초)
 ui-blackbox run smoke --trace-on-failure        # 실패한 실행만 Playwright trace.zip 보존
@@ -320,14 +321,18 @@ blackbox_mcp/
 `STEALTH`(봇오탐 완화) · `REPORT_DIR`(기본 ~/ui-blackbox/reports) ·
 `SCENARIO_DIR`(~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS`(2000) ·
 `DEFAULT_WAIT_UNTIL`(networkidle) · `NAV_TIMEOUT_MS`(30000) ·
-`IGNORE_HTTPS_ERRORS`(false) · `REPORT_RETENTION`(최근 N개 실행 유지, 기본 100,
-0=무제한). 자세히는 `.env.example`.
+`IGNORE_HTTPS_ERRORS`(false) · `REPORT_RETENTION`(**시나리오별로** 최근 N개 실행
+유지, 기본 100, 0=무제한). 자세히는 `.env.example`.
 
 > **실 배포 사이트 테스트 팁**: ① 광고/폴링 많은 사이트는 `networkidle`이 안 끝나
 > 느릴 수 있다 — navigate는 타임아웃 시 **현재 상태로 진행**(`settled:false` 반환)하지만,
 > `DEFAULT_WAIT_UNTIL=domcontentloaded`가 더 빠르다. ② 요소가 늦게 뜨면
 > `SELECTOR_TIMEOUT_MS`를 5000~10000으로. ③ 광고·트래커의 4xx 노이즈는
-> `get_network_errors(same_origin=True)`로 같은 도메인만 본다. ④ 쿠키 동의 배너는 `dismiss_banners`로 닫는다(클릭이 가려지면 자동 권유). ⑤ 로그인/봇월은
+> `get_network_errors(same_origin=True)`로 같은 도메인만 본다. ④ 쿠키 동의 배너는
+> `dismiss_banners`로 닫는다(클릭이 가려지면 자동 권유, 시나리오 스텝으로도 사용
+> 가능). 접근성 이름을 **정확히** 일치시키고, 모호한 라벨(확인/OK/Continue)은
+> **동의/다이얼로그 컨테이너 안에서만** 클릭하므로 테스트 대상 페이지의 실제 제출
+> 버튼을 누르지 않는다. ⑤ 로그인/봇월은
 > `use_real_browser`. ⑥ 스테이징 인증서는 `IGNORE_HTTPS_ERRORS=true`.
 > ⑦ **새 탭/팝업은 자동 추적**된다(클릭으로 새 창이 열리면 세션이 따라가고, 팝업이
 > 닫히면 원래 탭으로 복귀 — OAuth 팝업 등).

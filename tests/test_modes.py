@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import subprocess
+import threading
 import time
 import urllib.request
 
@@ -108,6 +109,69 @@ def test_bootstrap_survives_install_failure(monkeypatch):
     monkeypatch.setattr(bootstrap, "CONFIG",
                         dataclasses.replace(bootstrap.CONFIG, chromium_executable=""))
     bootstrap.ensure_chromium()  # must not raise
+
+
+def test_install_failure_reports_the_installer_reason(monkeypatch, caplog):
+    """A failed auto-install must leave a diagnosable reason.
+
+    stderr used to go to DEVNULL alongside stdout, so a blocked CDN / full disk
+    / proxy rejection produced no explanation anywhere — the user only saw every
+    later tool call die on a missing browser.
+    """
+    from blackbox_mcp import bootstrap
+
+    def boom(cmd, *a, **k):
+        raise subprocess.CalledProcessError(1, cmd,
+                                            stderr=b"Download failed: 403 from cdn")
+
+    monkeypatch.setattr(bootstrap.subprocess, "run", boom)
+    monkeypatch.setattr(bootstrap, "_browser_installed", lambda name: False)
+    monkeypatch.setattr(bootstrap, "CONFIG",
+                        dataclasses.replace(bootstrap.CONFIG, chromium_executable=""))
+    with caplog.at_level("WARNING"):
+        bootstrap.ensure_chromium()
+    assert "403 from cdn" in caplog.text
+
+
+async def test_background_bootstrap_does_not_block_startup(monkeypatch):
+    """The first-run browser download must not sit in front of mcp.run().
+
+    An MCP client answers `initialize` or declares the server dead (~60s in
+    Claude Desktop); a ~150MB download exceeds that on an ordinary connection,
+    which broke the RECOMMENDED install path (uvx, no clone) on its very first
+    launch. start_background_bootstrap() returns immediately and the first
+    browser launch is what waits, via await_bootstrap().
+    """
+    from blackbox_mcp import bootstrap
+
+    started = threading.Event()
+
+    def slow_install() -> None:
+        started.set()
+        time.sleep(0.6)
+
+    monkeypatch.setattr(bootstrap, "ensure_chromium", slow_install)
+    monkeypatch.setattr(bootstrap, "_BOOTSTRAP_STARTED", False)
+    monkeypatch.setattr(bootstrap, "_BOOTSTRAP_DONE", threading.Event())
+
+    t0 = time.monotonic()
+    bootstrap.start_background_bootstrap()
+    kickoff = time.monotonic() - t0
+    assert kickoff < 0.2, f"startup blocked for {kickoff:.2f}s"
+    assert started.wait(2), "bootstrap thread never ran"
+
+    # ...but a consumer can still wait for it, off the event loop.
+    await bootstrap.await_bootstrap()
+    assert bootstrap._BOOTSTRAP_DONE.is_set()
+
+
+async def test_await_bootstrap_is_a_noop_without_a_background_run(monkeypatch):
+    """The CLI runs ensure_chromium() synchronously before its loop exists;
+    awaiting a bootstrap that was never started must return, not hang."""
+    from blackbox_mcp import bootstrap
+
+    monkeypatch.setattr(bootstrap, "_BOOTSTRAP_STARTED", False)
+    await asyncio.wait_for(bootstrap.await_bootstrap(), timeout=2)
 
 
 async def test_concurrent_lifecycle_ops_serialize(session):

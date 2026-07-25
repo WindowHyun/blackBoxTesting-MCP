@@ -32,6 +32,11 @@ python -m venv .venv
 
 ## 불변 규칙 (반드시 지킬 것)
 1. **Tool 추가 = `tools/`에 파일 1개 + `tools/__init__.py`에 import 한 줄.** `server.py`는 절대 수정하지 않는다.
+   단, **액션 도구**(리포트 스텝이 되는 도구)는 실행 경로가 둘이라 4곳이 함께 간다 —
+   `tools/<name>.py` · `_TOOL_MODULES` · `recorder.RECORDABLE`(+`_interpret` 분기) ·
+   `runner._dispatch`(+`runner.DISPATCHABLE`). `runner`에 빠지면 채팅에선 되고
+   **저장된 시나리오/CLI에서 `unknown action`** 이 된다. `tests/test_registry.py`가
+   `RECORDABLE ⊆ DISPATCHABLE`을 강제하니 통과할 때까지 맞춘다.
 2. **async 일관성** — tool/세션은 async. Playwright **async API**만 사용(sync API는 asyncio 루프에서 불가). 단 `bootstrap.ensure_chromium()`은 루프 시작 전이라 sync 허용.
 3. **공식 문서 검증** — MCP/Playwright API를 쓰기 전 공식 문서로 확인하고, 새 사실은 `DESIGN.md §13`에 기록. 추측 금지.
 4. **자격증명** — 시나리오의 `${VAR}`는 env에서 주입, 리포트엔 완전 마스킹(`***`) + 해석값 scrub(`testing/secrets.py` — 파생 URL/에러 텍스트까지). 평문 저장 금지. 리포트에 닿는 새 텍스트 필드는 `scrub_record` 경유.
@@ -45,6 +50,18 @@ python -m venv .venv
 GitHub Release 발행 또는 Actions `Release → Run workflow`).
 
 ## 함정(Gotchas)
+- **부트스트랩은 핸드셰이크를 막으면 안 된다** — `server.main()`은
+  `start_background_bootstrap()`(워커 스레드)만 걸고 즉시 `mcp.run()`. 첫 브라우저
+  런치가 `session.start() → await_bootstrap()`으로 기다린다. 인라인으로 되돌리면
+  첫 실행(150MB 다운로드)이 클라이언트 기동 타임아웃을 넘겨 "서버 시작 실패"가 된다.
+- `dismiss_banners`는 **정확 일치 + 오버레이 스코프**가 안전 계약이다. `exact=True`를
+  빼거나 범용 라벨(확인/OK/Continue)을 페이지 전역으로 풀면 테스트 대상의 실제
+  제출 버튼을 누른다(과거 "주문 확인하기"를 눌러 주문이 제출된 회귀 — DESIGN §5.1).
+- 리포트 파일명은 `report_{run_id}_{시나리오 슬러그}.{ext}` — 슬러그가 리텐션
+  그룹 키다(`_scenario_of`). 파일명에서 슬러그를 빼면 리텐션이 다시 디렉터리 전역이
+  돼 스위트가 자기 앞쪽 시나리오 리포트를 지운다. `_SAFE`는 한글을 보존해야 한다.
+- CLI 순차 스위트는 시나리오 사이에 `reset_session`을 건다(`--no-reset`로 옵트아웃) —
+  빼면 A의 로그인이 B로 새고 `--parallel`과 결과가 갈린다.
 - 시스템 Python `pip install`은 PyJWT RECORD 충돌로 실패 → **venv 필수**.
 - Chromium 다운로드 ~150MB. Phase 1 착수 시 환경 가능 여부 먼저 확인.
 - `BrowserType.executable_path`는 "설치 여부"가 아니라 "기대 경로" → `os.path.exists()`로 확인.

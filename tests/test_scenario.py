@@ -104,3 +104,33 @@ async def test_report_writes_all_formats(session, report_dir):
     assert {"json", "md", "html"} <= set(files)
     htmls = list(report_dir.glob("*.html"))
     assert htmls and "PASS" in htmls[0].read_text(encoding="utf-8")
+
+
+async def test_consent_banner_can_be_dismissed_from_a_saved_scenario(session, report_dir):
+    """A banner-clearing step must survive being saved and replayed.
+
+    `dismiss_banners` was registered as an MCP tool and recorded by the
+    recorder, but the runner had no branch for it — so the documented workflow
+    (build the flow in chat, save it, replay it in CI) answered "unknown action"
+    on every real site that gates content behind a consent overlay.
+    """
+    await session.page.set_content(
+        "<div id='cookie-consent'>쿠키 사용에 동의해 주세요"
+        "<button onclick=\"document.getElementById('cookie-consent').remove()\">"
+        "모두 동의</button></div><button data-testid='go'>계속</button>"
+    )
+    res = await runner.run([{"action": "dismiss_banners"}], name="consent")
+    step = res["steps"][0]
+    assert step["passed"] is True, step["actual"]
+    assert "unknown action" not in str(step["actual"])
+    assert (await runner.assert_("element_visible", "#cookie-consent"))["passed"] is False
+
+
+async def test_unknown_action_lists_the_supported_verbs(session, report_dir):
+    res = await runner.run([{"action": "teleport"}], name="bogus")
+    step = res["steps"][0]
+    assert step["passed"] is False
+    assert "unknown action: teleport" in step["actual"]
+    # the hint must enumerate real verbs so the host LLM can self-correct
+    assert "dismiss_banners" in step["ai_suggestion"]
+    assert "navigate" in step["ai_suggestion"]

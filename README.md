@@ -263,6 +263,7 @@ runner, same reports, plus an exit code and JUnit XML:
 ui-blackbox run smoke_login                     # library scenario → exit 0/1
 ui-blackbox run ./steps.json --format all       # a steps .json file
 ui-blackbox run a b c --junit results.xml       # suite + JUnit for CI
+ui-blackbox run a b c --no-reset                # chain state across scenarios
 ui-blackbox run a b c --parallel 3              # one isolated subprocess each
 ui-blackbox run a b c --parallel 3 --timeout 300  # per-scenario watchdog (sec)
 ui-blackbox run smoke --trace-on-failure        # keep a Playwright trace.zip only on failure
@@ -287,6 +288,9 @@ In chat, the `status` tool reports version/mode/liveness for debugging.
 - The server is **single-tenant** — one browser/session per process. True
   parallelism is via `--parallel` (one subprocess per scenario), not a shared
   server.
+- A suite **resets the browser between scenarios**, so cookies/localStorage from
+  one never leak into the next and order doesn't change results. Pass
+  `--no-reset` when you *want* the chain (log in once in scenario 1, reuse it).
 
 ---
 
@@ -326,15 +330,18 @@ Run playbook: [`HARNESS.md`](./HARNESS.md) · Agent context: [`CLAUDE.md`](./CLA
 `STEALTH` (reduce bot false-positives) · `REPORT_DIR` (default ~/ui-blackbox/reports) ·
 `SCENARIO_DIR` (~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS` (2000) ·
 `DEFAULT_WAIT_UNTIL` (networkidle) · `NAV_TIMEOUT_MS` (30000) ·
-`IGNORE_HTTPS_ERRORS` (false) · `REPORT_RETENTION` (keep newest N runs,
-default 100, 0=unlimited). Details in `.env.example`.
+`IGNORE_HTTPS_ERRORS` (false) · `REPORT_RETENTION` (keep the newest N runs
+**of each scenario**, default 100, 0=unlimited). Details in `.env.example`.
 
 > **Testing live/deployed sites.** ① Ad/polling-heavy sites may never reach
 > `networkidle` — navigate proceeds on timeout (`settled:false`), and
 > `DEFAULT_WAIT_UNTIL=domcontentloaded` is faster. ② For slow-appearing elements,
 > raise `SELECTOR_TIMEOUT_MS` to 5000–10000. ③ Filter ad/tracker 4xx noise with
 > `get_network_errors(same_origin=True)`. ④ Cookie-consent banners: `dismiss_banners`
-> (auto-suggested when a click is blocked). ⑤ Login/bot-walls: `use_real_browser`.
+> (auto-suggested when a click is blocked; also usable as a scenario step). It
+> matches accessible names **exactly** and only clicks ambiguous labels
+> (확인/OK/Continue) **inside** a consent/dialog container, so it can't press a
+> real submit button on the page under test. ⑤ Login/bot-walls: `use_real_browser`.
 > ⑥ Staging certs: `IGNORE_HTTPS_ERRORS=true`. ⑦ **New tabs/popups are tracked
 > automatically** (the session follows a click that opens a new window and returns to
 > the original tab when the popup closes — e.g. OAuth popups).

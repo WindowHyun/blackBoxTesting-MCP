@@ -162,7 +162,7 @@ def _seed_run(tmp_path, run_id, name="r"):
     """Write a report + its screenshot sharing one run id (as real runs do)."""
     shots = tmp_path / "screenshots"
     shots.mkdir(exist_ok=True)
-    (tmp_path / f"report_{run_id}.json").write_text("{}", encoding="utf-8")
+    (tmp_path / f"report_{run_id}_{name}.json").write_text("{}", encoding="utf-8")
     (shots / f"{run_id}_{name}_step01.png").write_bytes(b"")
 
 
@@ -177,13 +177,55 @@ def test_report_retention_prunes_old_runs(tmp_path, monkeypatch):
         _seed_run(tmp_path, rid)
     minimal = {"name": "r", "steps": [], "run_id": "20200101_000004_000000",
                "summary": {"total": 0, "passed": 0, "failed": 0, "pass_rate": 0.0}}
-    report.save(minimal, formats="json")  # newest run
+    report.save(minimal, formats="json")  # newest run of the SAME scenario
     kept = sorted(p.name for p in tmp_path.glob("report_*.json"))
     assert len(kept) == 2  # retention=2 → newest fake + the new save
-    assert "report_20200101_000003_000000.json" in kept
+    assert "report_20200101_000003_000000_r.json" in kept
     shots = tmp_path / "screenshots"
     assert not (shots / "20200101_000001_000000_r_step01.png").exists()
     assert (shots / "20200101_000003_000000_r_step01.png").exists()
+
+
+def test_retention_is_per_scenario_not_per_directory(tmp_path, monkeypatch):
+    """A suite must not delete its OWN earlier scenarios mid-run.
+
+    REPORT_DIR is flat and shared, so a global "newest N files" rule meant that
+    running more scenarios than the retention limit silently discarded the
+    first ones' reports while the suite was still going.
+    """
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_retention=2))
+    for i in range(5):  # five DIFFERENT scenarios, one run each
+        res = {"name": f"scenario_{i}", "steps": [], "meta": {},
+               "run_id": f"2020010{i + 1}_000000_000000",
+               "summary": {"total": 0, "passed": 0, "failed": 0, "pass_rate": 0.0}}
+        report.save(res, formats="json")
+
+    kept = sorted(p.name for p in tmp_path.glob("report_*.json"))
+    assert len(kept) == 5, f"a scenario's only run was pruned by a sibling: {kept}"
+    for i in range(5):
+        assert any(f"scenario_{i}.json" in k for k in kept)
+
+
+def test_retention_still_caps_runs_of_one_scenario(tmp_path, monkeypatch):
+    """Per-scenario grouping must not become "keep everything"."""
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_retention=2))
+    for i in range(4):  # four runs of the SAME scenario
+        res = {"name": "smoke", "steps": [], "meta": {},
+               "run_id": f"2020010{i + 1}_000000_000000",
+               "summary": {"total": 0, "passed": 0, "failed": 0, "pass_rate": 0.0}}
+        report.save(res, formats="json")
+    kept = sorted(p.name for p in tmp_path.glob("report_*.json"))
+    assert len(kept) == 2, kept
+    assert kept == ["report_20200103_000000_000000_smoke.json",
+                    "report_20200104_000000_000000_smoke.json"]
 
 
 def test_retention_keeps_a_run_with_its_own_screenshots(tmp_path, monkeypatch):
@@ -202,7 +244,7 @@ def test_retention_keeps_a_run_with_its_own_screenshots(tmp_path, monkeypatch):
               "summary": {"total": 1, "passed": 0, "failed": 1, "pass_rate": 0.0}}
     report.save(result, formats="json")
     # the just-saved run's report AND its screenshot both survive
-    assert (tmp_path / f"report_{rid}.json").exists()
+    assert (tmp_path / f"report_{rid}_r.json").exists()
     assert (shots / f"{rid}_r_step01.png").exists()
 
 

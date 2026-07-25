@@ -12,10 +12,31 @@ import logging
 import os
 from typing import Any
 
+from ..bootstrap import await_bootstrap
 from ..config import CONFIG, effective_browser
 from .listeners import EventBuffers, attach
 
 log = logging.getLogger(__name__)
+
+
+def _launch_error(name: str, err: Exception | None) -> str:
+    """Turn a launch failure into something the user can act on.
+
+    The two failures people actually hit are "no binary" and "binary present,
+    system libraries are not" (bootstrap installs without --with-deps, which
+    needs root). Both used to surface as a bare Playwright traceback.
+    """
+    msg = f"failed to launch {name}: {err}"
+    text = str(err or "")
+    low = text.lower()
+    if "missing dependencies" in low or "error while loading shared librar" in low:
+        return (msg + " — the browser binary is there but its system libraries are "
+                "not. Run: playwright install-deps " + name + "  (or reinstall with "
+                "playwright install --with-deps " + name + ").")
+    if "executable doesn't exist" in low or "please run the following command" in low:
+        return (msg + " — no browser binary. Run: playwright install " + name +
+                ", or point CHROMIUM_EXECUTABLE at an existing Chrome/Chromium.")
+    return msg
 
 
 def _launch_attempts() -> list[dict]:
@@ -67,6 +88,11 @@ class BrowserSession:
     async def start(self) -> None:
         from playwright.async_api import async_playwright
 
+        # First run: the browser may still be downloading on the bootstrap
+        # thread (server.main starts it there so the MCP handshake stays
+        # responsive). Waiting here makes the FIRST TOOL CALL slow instead of
+        # making server startup fail. No-op on the CLI path.
+        await await_bootstrap()
         self._pw = await async_playwright().start()
 
         if CONFIG.cdp_url:
@@ -120,7 +146,7 @@ class BrowserSession:
                 last_err = exc
                 log.warning("launch attempt %s failed: %s", extra or "bundled", exc)
         if self._browser is None:
-            raise RuntimeError(f"failed to launch {CONFIG.browser}: {last_err}")
+            raise RuntimeError(_launch_error(browser_name, last_err))
         await self._new_context()
         log.info(
             "BrowserSession started (%s via %s, headless=%s, stealth=%s)",

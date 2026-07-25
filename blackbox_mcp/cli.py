@@ -57,6 +57,25 @@ def _errored_result(name: str, exc: Exception) -> dict:
                        "ai_suggestion": str(exc)[:160], "duration_ms": 0}]}
 
 
+async def _isolate() -> None:
+    """Wipe cookies/localStorage/storage + buffers between scenarios.
+
+    A sequential suite shares ONE browser context, so without this a login (or
+    any localStorage write) in scenario A leaks into scenario B and the suite
+    becomes order-dependent — while `--parallel` gives every scenario its own
+    process and IS isolated. One command, two different semantics, and the
+    sequential one silently passed on state it should not have had.
+
+    Real-browser modes (persistent profile / CDP) keep their login by design;
+    reset_session only clears their buffers there.
+    """
+    try:
+        from .tools.session import reset_session
+        await reset_session()
+    except Exception as exc:  # never let isolation bookkeeping kill the suite
+        print(f"  warn: could not reset between scenarios ({exc})", file=sys.stderr)
+
+
 async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
     """Run scenarios sequentially in one browser session; always clean up.
     A scenario that raises is recorded as an errored result and the suite
@@ -66,7 +85,9 @@ async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
 
     results: list[dict] = []
     try:
-        for name, steps in items:
+        for i, (name, steps) in enumerate(items):
+            if i and not args.no_reset:
+                await _isolate()
             print(f"▶ {name} ({len(steps)} steps)")
             try:
                 res = await runner.run(steps, name=name,
@@ -166,6 +187,8 @@ def _run_parallel(refs: list[str], args) -> int:
                     cmd.append("--screenshot-each")
                 if args.trace_on_failure:
                     cmd.append("--trace-on-failure")
+                if args.no_reset:
+                    cmd.append("--no-reset")
                 proc = await asyncio.create_subprocess_exec(*cmd, env=child_env)
                 procs.append(proc)
                 try:
@@ -212,12 +235,17 @@ def _parent_prune() -> None:
 
 
 def _cmd_run(args) -> int:
+    from .bootstrap import ensure_chromium
+
     if args.parallel > 1:
         if args.junit:
             print("--junit is not supported with --parallel (each child writes "
                   "its own reports); run sequentially for a merged JUnit file.",
                   file=sys.stderr)
             return EXIT_ERROR
+        # Install BEFORE fanning out: otherwise N children race to run
+        # `playwright install` into the same directory on a fresh machine.
+        ensure_chromium()
         return _run_parallel(args.scenario, args)
 
     try:
@@ -226,7 +254,6 @@ def _cmd_run(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
 
-    from .bootstrap import ensure_chromium
     ensure_chromium()
     try:
         results = asyncio.run(_run_all(items, args))
@@ -303,6 +330,10 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--trace-on-failure", action="store_true",
                        help="record a Playwright trace; keep the .zip only if "
                             "the scenario fails (open with: playwright show-trace)")
+    run_p.add_argument("--no-reset", action="store_true",
+                       help="do NOT reset the browser between scenarios; lets a "
+                            "suite chain state (e.g. log in once, then reuse it). "
+                            "Default is to reset, so scenarios stay independent.")
     run_p.add_argument("--junit", metavar="PATH",
                        help="also write a JUnit XML report (sequential runs only)")
     run_p.add_argument("--parallel", type=int, default=1, metavar="N",

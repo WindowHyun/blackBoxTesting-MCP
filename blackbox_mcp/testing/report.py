@@ -18,7 +18,11 @@ from pathlib import Path
 
 from ..config import CONFIG
 
-_SAFE = re.compile(r"[^A-Za-z0-9_\-]")
+# Hangul is kept: this project's scenarios are routinely named in Korean, and
+# stripping it collapsed every such name to the same slug — which, now that the
+# slug is what groups retention (see _prune), would put unrelated scenarios in
+# one bucket. Filenames are UTF-8 on every OS we support.
+_SAFE = re.compile(r"[^A-Za-z0-9_\-가-힣]")
 
 
 def _stamp() -> str:
@@ -184,6 +188,8 @@ async def capture_step_screenshot(session, run_tag: str, idx: int) -> str | None
 _STAMP_RE = re.compile(r"^(?:report_)?(\d{8}_\d{6}_\d{6})")
 # Legacy fallback: pre-microsecond files stamped to the second only.
 _STAMP_RE_LEGACY = re.compile(r"(\d{8}_\d{6})")
+# report_<run id>_<scenario slug>.<ext> — the slug is what groups retention.
+_REPORT_RE = re.compile(r"^report_(?:\d{8}_\d{6}_\d{6}|\d{8}_\d{6})_?(.*)$")
 
 
 def _run_id_of(name: str) -> str | None:
@@ -191,19 +197,44 @@ def _run_id_of(name: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _scenario_of(filename: str) -> str:
+    """The scenario slug embedded in a report filename.
+
+    Empty string for legacy files written before the slug existed — they all
+    share one bucket, which is exactly the old global behavior for old files.
+    """
+    stem = filename.rsplit(".", 1)[0]
+    m = _REPORT_RE.match(stem)
+    return m.group(1) if m else ""
+
+
 def _prune(report_dir: Path) -> None:
-    """Retention: keep the newest CONFIG.report_retention runs, deleting older
-    report files AND the screenshots that share those runs' ids. Report files
-    and screenshots carry the SAME run id (see new_run_id), so a kept run keeps
-    its screenshots. Never allowed to break report saving — caller try/excepts."""
+    """Retention: keep the newest CONFIG.report_retention runs **of each
+    scenario**, deleting older report files AND the screenshots/traces sharing
+    those runs' ids (they carry the SAME run id — see new_run_id — so a kept run
+    always keeps its evidence).
+
+    Per scenario, not per directory: REPORT_DIR is flat and shared, so a global
+    "newest N files" rule made a suite delete its OWN earlier scenarios *during
+    the same run* (5 scenarios at retention 3 left 3 scenarios × 1 run, the
+    first two gone), and capped a 20-scenario project at ~5 runs each — while
+    the setting reads as "keep the newest N runs".
+
+    Never allowed to break report saving — caller try/excepts.
+    """
     keep = CONFIG.report_retention
     if keep <= 0:
         return
-    ids = sorted({rid for p in report_dir.glob("report_*.*")
-                  if (rid := _run_id_of(p.name))}, reverse=True)
-    if len(ids) <= keep:
+    by_scenario: dict[str, set[str]] = {}
+    for p in report_dir.glob("report_*.*"):
+        rid = _run_id_of(p.name)
+        if rid:
+            by_scenario.setdefault(_scenario_of(p.name), set()).add(rid)
+    doomed: set[str] = set()
+    for ids in by_scenario.values():
+        doomed.update(sorted(ids, reverse=True)[keep:])
+    if not doomed:
         return
-    doomed = set(ids[keep:])  # everything older than the newest `keep` runs
     for p in report_dir.glob("report_*.*"):
         if _run_id_of(p.name) in doomed:
             p.unlink(missing_ok=True)
@@ -228,6 +259,10 @@ def save(result: dict, formats: str = "both") -> dict[str, str]:
     # Reuse the run id the screenshots were stamped with, so retention keeps
     # report + screenshots together. Falls back for callers that didn't set it.
     stamp = result.get("run_id") or new_run_id()
+    # The scenario slug rides in the filename so retention can group by scenario
+    # (_prune) — and so a flat REPORT_DIR is browsable without opening files.
+    slug = _SAFE.sub("_", str(result.get("name") or "scenario"))[:40]
+    base = f"report_{stamp}_{slug}"
     written: dict[str, str] = {}
 
     want_json = formats in ("json", "both", "all")
@@ -235,16 +270,16 @@ def save(result: dict, formats: str = "both") -> dict[str, str]:
     want_html = formats in ("html", "all")
 
     if want_json:
-        p = report_dir / f"report_{stamp}.json"
+        p = report_dir / f"{base}.json"
         p.write_text(json.dumps(result, ensure_ascii=False, indent=2, default=str),
                      encoding="utf-8")
         written["json"] = str(p)
     if want_md:
-        p = report_dir / f"report_{stamp}.md"
+        p = report_dir / f"{base}.md"
         p.write_text(_render_markdown(result), encoding="utf-8")
         written["md"] = str(p)
     if want_html:
-        p = report_dir / f"report_{stamp}.html"
+        p = report_dir / f"{base}.html"
         p.write_text(_render_html(result, report_dir), encoding="utf-8")
         written["html"] = str(p)
 

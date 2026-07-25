@@ -29,11 +29,29 @@ from ..tools.frame import switch_frame
 from ..tools.interact import interact
 from ..tools.navigate import navigate
 from ..tools.mock import mock_route, unmock_route
+from ..tools.overlays import dismiss_banners
+from ..tools.realbrowser import use_real_browser
 from ..tools.session import reset_session
 from ..tools.snapshot import snapshot
 from ..tools.state import load_state, save_state
 from ..tools.wait import wait
 from . import report, secrets
+
+# Every action verb `_dispatch` understands. Single source for the "unknown
+# action" hint AND for the drift guard in tests.
+#
+# Why it exists: a tool the recorder logs in chat (recorder.RECORDABLE) but that
+# `_dispatch` cannot replay is a tool that works interactively and silently
+# breaks the moment the flow is SAVED as a scenario and replayed from the CLI —
+# `dismiss_banners` and `use_real_browser` were exactly that, so the documented
+# "test it in chat, then run it in CI" workflow died on any site with a cookie
+# banner. tests/test_registry.py asserts RECORDABLE ⊆ DISPATCHABLE.
+DISPATCHABLE = frozenset({
+    "navigate", "interact", "assert", "assert_", "snapshot", "wait",
+    "switch_frame", "reset_session", "save_state", "load_state",
+    "mock_route", "unmock_route", "screenshot", "expect_dialog",
+    "dismiss_banners", "use_real_browser",
+})
 
 
 def empty_result(name: str) -> dict[str, Any]:
@@ -210,9 +228,28 @@ async def _dispatch(step: dict) -> dict:
         if not res.get("passed"):
             out["ai_suggestion"] = "expected dialog did not appear or text mismatch"
 
+    elif action == "dismiss_banners":
+        # Replayable, not just chat-only: real sites gate every flow behind a
+        # consent banner, so a saved scenario has to be able to clear it too.
+        res = await dismiss_banners()
+        hits = res.get("dismissed") or []
+        out.update(expected="consent overlay dismissed",
+                   actual=", ".join(hits) if hits else "no consent control matched",
+                   passed=bool(res.get("ok")),
+                   ai_reason=(f"dismissed {len(hits)} overlay control(s)" if hits else
+                              "no consent overlay found (page may not have one)"))
+
+    elif action == "use_real_browser":
+        res = await use_real_browser(headless=bool(step.get("headless", False)),
+                                     channel=step.get("channel") or "chrome")
+        out.update(expected="real browser", actual=res.get("browser"),
+                   passed=bool(res.get("ok")),
+                   ai_reason=f"switched to real browser ({res.get('browser')})")
+
     else:
         out.update(actual=f"unknown action: {action}", passed=False,
-                   ai_reason="unknown action", ai_suggestion="use a supported action verb")
+                   ai_reason="unknown action",
+                   ai_suggestion="supported actions: " + ", ".join(sorted(DISPATCHABLE)))
 
     return out
 
