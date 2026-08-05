@@ -112,6 +112,9 @@ def scrub_record(record: dict) -> dict:
         entry["location"] = scrub(entry.get("location"))
     for entry in record.get("network_errors") or []:
         entry["url"] = scrub(entry.get("url"))
+    for entry in record.get("dialogs") or []:
+        # A prompt's message can echo back a value the flow just typed.
+        entry["message"] = scrub(entry.get("message"))
     return record
 
 

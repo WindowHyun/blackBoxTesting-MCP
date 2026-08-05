@@ -315,6 +315,10 @@ def _render_markdown(result: dict) -> str:
             for ne in st.get("network_errors", []):
                 lines.append(f"  - network: {ne.get('url')} "
                              f"{ne.get('status') or ne.get('failure')}")
+            for dl in st.get("dialogs", []):
+                mark = "예상치 못한 " if not dl.get("expected") else ""
+                lines.append(f"  - {mark}dialog: {dl.get('type')} "
+                             f"“{dl.get('message')}” → {dl.get('handled')}")
 
     reg = result.get("regression") or {}
     if reg.get("changed"):
@@ -322,6 +326,19 @@ def _render_markdown(result: dict) -> str:
         lines.append(f"_기준: {reg.get('previous_run')}_")
         for c in reg["changed"]:
             lines.append(f"- step {c['step']}: {c['from']} → **{c['to']}**")
+
+    # Unexpected dialogs deserve their own section: they can land on a step that
+    # otherwise PASSED (the page kept going only because the dialog was
+    # auto-dismissed), so the 실패 상세 list above would never surface them.
+    surprises = [(st, dl) for st in result.get("steps", [])
+                 for dl in (st.get("dialogs") or []) if not dl.get("expected")]
+    if surprises:
+        lines += ["", f"## 예상치 못한 dialog ({len(surprises)})",
+                  "_expect_dialog로 대기하지 않은 alert/confirm/prompt — 자동 dismiss "
+                  "되어 흐름은 이어졌지만 확인이 필요합니다._"]
+        for st, dl in surprises[:20]:
+            lines.append(f"- step {st['step']} ({st.get('action')}): "
+                         f"`{dl.get('type')}` “{dl.get('message')}”")
 
     a11y = result.get("a11y_findings") or []
     if a11y:
@@ -481,6 +498,13 @@ def _step_html(st: dict, report_dir: Path) -> str:
     for ne in st.get("network_errors", []):
         errs += (f'<div class="err">network: {html.escape(str(ne.get("url")))} '
                  f'{html.escape(str(ne.get("status") or ne.get("failure")))}</div>')
+    for dl in st.get("dialogs", []):
+        # Unexpected dialogs are findings; armed ones are just context.
+        kind = "err" if not dl.get("expected") else "kv"
+        label = "예상치 못한 dialog" if not dl.get("expected") else "dialog"
+        errs += (f'<div class="{kind}">{label}: {html.escape(str(dl.get("type")))} '
+                 f'“{html.escape(_short(dl.get("message"), 120))}” '
+                 f'→ {html.escape(str(dl.get("handled")))}</div>')
     rb = (f'<span class="rb">{html.escape(str(st["resolved_by"]))}</span>'
           if st.get("resolved_by") else "")
     tag = (f'<span class="tagchip">{html.escape(str(st["tag"]))}</span>'

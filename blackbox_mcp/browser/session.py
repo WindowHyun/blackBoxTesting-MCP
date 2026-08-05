@@ -17,6 +17,15 @@ from .listeners import EventBuffers, attach
 
 log = logging.getLogger(__name__)
 
+# Separator for a nested-iframe chain in a single selector string. Deliberately
+# NOT Playwright's own ">>": that combinator is valid *within* one document, so
+# reusing it would make "#a >> #b" ambiguous. ">>>" has no Playwright meaning.
+_FRAME_SEP = " >>> "
+
+# How long a tool call waits for a just-adopted popup to commit its navigation
+# before giving up and using it as-is (seconds).
+_POPUP_SETTLE_S = 5.0
+
 
 def _launch_attempts() -> list[dict]:
     """Launch-kwarg variants tried in order (mirrors _switch_to_persistent_impl):
@@ -39,6 +48,65 @@ def _launch_attempts() -> list[dict]:
     return attempts
 
 
+def _launch_args() -> list[str]:
+    """Chromium command-line args assembled from config.
+
+    Kept separate from the stealth flag because intranet SSO (NTLM/Kerberos)
+    needs its own allowlist args: without them Chromium refuses to negotiate
+    and an internal site that "just works" in the user's browser shows a login
+    prompt the automation can't answer.
+    """
+    args: list[str] = []
+    if CONFIG.stealth:
+        args.append("--disable-blink-features=AutomationControlled")
+    if CONFIG.auth_server_allowlist:
+        args.append(f"--auth-server-allowlist={CONFIG.auth_server_allowlist}")
+        args.append(
+            f"--auth-negotiate-delegate-allowlist={CONFIG.auth_server_allowlist}")
+    return args
+
+
+def _base_launch_kwargs() -> dict:
+    """Launch options shared by the normal and persistent-profile paths."""
+    kwargs: dict = {}
+    args = _launch_args()
+    if args:
+        kwargs["args"] = args
+    proxy = CONFIG.proxy_settings()
+    if proxy:
+        # Proxy belongs on launch, not the context: Chromium only honours the
+        # OS/env proxy on some platforms and never its credentials — an
+        # authenticating corporate proxy otherwise raises a native auth dialog
+        # that no automation can answer.
+        kwargs["proxy"] = proxy
+    return kwargs
+
+
+def _context_kwargs() -> dict:
+    """Browser-context options shared by every launch mode (normal, storage
+    state, persistent profile) so an intranet setup doesn't work in one and
+    silently fail in another."""
+    kwargs: dict = {}
+    if CONFIG.ignore_https_errors:
+        kwargs["ignore_https_errors"] = True
+    creds = CONFIG.http_credentials()
+    if creds:
+        kwargs["http_credentials"] = creds
+    if CONFIG.viewport:
+        kwargs["viewport"] = CONFIG.viewport
+    if CONFIG.stealth:
+        kwargs.update(
+            user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/124.0.0.0 Safari/537.36"),
+            locale="ko-KR",
+            timezone_id="Asia/Seoul",
+        )
+        # An explicit VIEWPORT wins over the stealth default.
+        kwargs.setdefault("viewport", {"width": 1280, "height": 800})
+    return kwargs
+
+
 class BrowserSession:
     """Owns the Playwright lifecycle and the current page/frame context."""
 
@@ -53,8 +121,14 @@ class BrowserSession:
         self._cdp = False          # attached to a user-owned browser via CDP
         self._persistent = False   # launched a real browser with a saved profile
         self._persistent_opts: dict | None = None
-        # Current iframe context for CT-09; None == main page.
-        self._frame_selector: str | None = None
+        # Current iframe context for CT-09 as a chain (outer → inner); empty ==
+        # main page. A list, not a single selector: nested iframes are only
+        # reachable by chaining frame_locator() calls — no selector string can
+        # cross a frame boundary (`#outer >> #inner` matches nothing).
+        self._frame_chain: list[str] = []
+        # Pending "the popup we just adopted is still loading" task — see
+        # _adopt_page/settle.
+        self._page_ready: Any = None
         self.buffers = EventBuffers()
         # Serializes lifecycle mutations (reset / switch_to_persistent /
         # restart / close) against EACH OTHER, so two lifecycle ops can't tear
@@ -81,7 +155,7 @@ class BrowserSession:
                                  else await self._browser.new_context())
                 self._page = (self._context.pages[0] if self._context.pages
                               else await self._context.new_page())
-                self._frame_selector = None
+                self._frame_chain = []
                 self.buffers.clear()
                 self._watch_page(self._page)
                 self._track_pages()
@@ -104,9 +178,7 @@ class BrowserSession:
         if browser_name != CONFIG.browser:
             log.warning("unknown BROWSER=%r — using chromium.", CONFIG.browser)
         browser_type = getattr(self._pw, browser_name)
-        launch_kwargs: dict = {"headless": CONFIG.headless}
-        if CONFIG.stealth:
-            launch_kwargs["args"] = ["--disable-blink-features=AutomationControlled"]
+        launch_kwargs: dict = {"headless": CONFIG.headless, **_base_launch_kwargs()}
 
         # Fallback chain: a channel that isn't installed or a stale executable
         # must not brick every launch when the bundled browser would work.
@@ -128,22 +200,11 @@ class BrowserSession:
         )
 
     async def _new_context(self, storage_state: str | None = None) -> None:
-        ctx_kwargs: dict = {}
+        ctx_kwargs: dict = {**_context_kwargs()}
         if storage_state is not None:
             # Restore cookies/localStorage exported by save_state — auth reuse
             # without a persistent profile (works headless/CI).
             ctx_kwargs["storage_state"] = storage_state
-        if CONFIG.ignore_https_errors:
-            ctx_kwargs["ignore_https_errors"] = True
-        if CONFIG.stealth:
-            ctx_kwargs.update(
-                user_agent=("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/124.0.0.0 Safari/537.36"),
-                locale="ko-KR",
-                timezone_id="Asia/Seoul",
-                viewport={"width": 1280, "height": 800},
-            )
         self._context = await self._browser.new_context(**ctx_kwargs)
         if CONFIG.stealth:
             # hide the most obvious automation signal
@@ -151,7 +212,7 @@ class BrowserSession:
                 "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
             )
         self._page = await self._context.new_page()
-        self._frame_selector = None
+        self._frame_chain = []
         self.buffers.clear()
         self._watch_page(self._page)
         self._track_pages()
@@ -221,9 +282,11 @@ class BrowserSession:
         await self._teardown_current()
 
         self._persistent_opts = {"headless": headless, "channel": channel}
-        base = {"user_data_dir": profile, "headless": headless}
-        if CONFIG.ignore_https_errors:
-            base["ignore_https_errors"] = True
+        # launch_persistent_context takes BOTH launch and context options, so the
+        # real-browser mode gets the same proxy/SSO/credentials/viewport as the
+        # bundled one — an intranet that works headless must not break here.
+        base = {"user_data_dir": profile, "headless": headless,
+                **_base_launch_kwargs(), **_context_kwargs()}
 
         attempts = []
         if channel:
@@ -247,7 +310,8 @@ class BrowserSession:
         self._browser = self._context.browser
         self._page = (self._context.pages[0] if self._context.pages
                       else await self._context.new_page())
-        self._persistent, self._cdp, self._frame_selector = True, False, None
+        self._persistent, self._cdp = True, False
+        self._frame_chain = []
         self.buffers.clear()
         self._watch_page(self._page)
         self._track_pages()
@@ -356,15 +420,44 @@ class BrowserSession:
         return self._page
 
     @property
-    def root(self):
-        """Active root for actions: the current frame locator, or the page."""
-        if self._frame_selector is None:
-            return self._page
-        return self._page.frame_locator(self._frame_selector)
+    def _frame_selector(self) -> str | None:
+        """The current frame context as a display string (None == main page).
 
-    def set_frame(self, selector: str | None) -> None:
-        """CT-09: switch into an iframe (or back to main with None)."""
-        self._frame_selector = selector
+        Read-only view of ``_frame_chain`` kept so status/tests/log lines have a
+        single printable value for both the flat and the nested case.
+        """
+        return _FRAME_SEP.join(self._frame_chain) if self._frame_chain else None
+
+    @property
+    def root(self):
+        """Active root for actions: the current frame locator chain, or the page.
+
+        Each hop is a separate frame_locator() call — that is the only way into
+        a nested iframe, since a selector string never crosses a frame boundary.
+        """
+        node = self._page
+        for selector in self._frame_chain:
+            node = node.frame_locator(selector)
+        return node
+
+    def set_frame(self, selector: str | list[str] | None) -> None:
+        """CT-09: switch into an iframe (or back to main with None).
+
+        Accepts a single CSS selector, a nested chain string ("#outer >>> #inner"),
+        or an explicit list of selectors ordered outermost → innermost.
+        """
+        if selector is None:
+            self._frame_chain = []
+        elif isinstance(selector, str):
+            self._frame_chain = [s.strip() for s in selector.split(_FRAME_SEP.strip())
+                                 if s.strip()]
+        else:
+            self._frame_chain = [s.strip() for s in selector if s and s.strip()]
+
+    @property
+    def frame_chain(self) -> list[str]:
+        """Copy of the active iframe chain (outermost → innermost)."""
+        return list(self._frame_chain)
 
     def _watch_page(self, page) -> None:
         """Attach event listeners + a close-fallback handler to a page we drive.
@@ -386,11 +479,82 @@ class BrowserSession:
 
         Real sites open new tabs (target=_blank, window.open, OAuth popups); the
         active page switches to the newest one and gets event listeners attached.
+
+        The "page" event fires the moment the popup is *created*, long before it
+        has navigated — a following assertion would run against about:blank and
+        fail on any remote server. This handler is sync (Playwright event
+        callback), so it parks the load wait in a task that ``settle()`` awaits
+        at the start of the next tool call.
         """
         self._page = page
-        self._frame_selector = None
+        self._frame_chain = []
         self._watch_page(page)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:      # no loop (shouldn't happen under Playwright)
+            self._page_ready = None
+        else:
+            self._page_ready = loop.create_task(self._await_page_ready(page))
         log.info("Adopted new page/popup.")
+
+    @staticmethod
+    async def _await_page_ready(page) -> None:
+        """Wait for an adopted popup to commit + parse its document.
+
+        Swallows everything: a popup that is closed again immediately, or one
+        that never loads, must not raise out of a background task.
+        """
+        try:
+            await page.wait_for_load_state("domcontentloaded")
+        except Exception:
+            pass
+
+    async def settle(self) -> None:
+        """Await a pending popup load, if any. Cheap no-op otherwise.
+
+        Called from get_session(), i.e. once at the head of every tool call, so
+        popup timing is handled in one place instead of every tool remembering
+        to wait.
+        """
+        task, self._page_ready = self._page_ready, None
+        if task is None or task.done():
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(task), _POPUP_SETTLE_S)
+        except Exception:
+            # Timed out or failed — proceed with the page as it is. The tool's
+            # own selector timeout is the next line of defence.
+            log.debug("popup did not settle within %ss", _POPUP_SETTLE_S)
+
+    # ── tabs / windows ───────────────────────────────────────────
+    def list_pages(self) -> list[dict]:
+        """Open tabs in the current context, with the active one flagged."""
+        if self._context is None:
+            return []
+        out: list[dict] = []
+        for i, p in enumerate(self._context.pages):
+            if p.is_closed():
+                continue
+            try:
+                url = p.url
+            except Exception:
+                url = None
+            out.append({"index": i, "url": url, "active": p is self._page})
+        return out
+
+    def switch_page(self, index: int) -> dict:
+        """Make an open tab the active one (explicit counterpart to auto-adopt)."""
+        if self._context is None:
+            raise RuntimeError("BrowserSession not started.")
+        pages = [p for p in self._context.pages if not p.is_closed()]
+        if not pages:
+            raise RuntimeError("no open tabs")
+        if not 0 <= index < len(pages):
+            raise IndexError(f"tab {index} out of range (0..{len(pages) - 1})")
+        self._page = pages[index]
+        self._frame_chain = []
+        self._watch_page(self._page)   # CDP-mode tabs may be unwatched
+        return {"index": index, "url": self._page.url}
 
     def _on_page_closed(self, page) -> None:
         """When the active page closes (popup done, tab closed), fall back to a
@@ -400,7 +564,7 @@ class BrowserSession:
             if others:
                 # oldest remaining page = the original tab the flow came from
                 self._page = others[0]
-                self._frame_selector = None
+                self._frame_chain = []
                 self._watch_page(self._page)  # CDP-mode tabs may be unwatched
                 log.info("Active page closed → fell back to remaining page.")
 
@@ -437,7 +601,12 @@ async def get_session() -> BrowserSession:
         elif not _SESSION.is_alive():
             # Browser crashed/closed since last call — recover transparently (NFR).
             await _SESSION.restart()
-        return _SESSION
+        session = _SESSION
+    # Outside the lock: settle() can wait seconds for a popup to load, and every
+    # tool call passes through here — holding _SESSION_LOCK that long would
+    # serialize shutdown/restart behind an unrelated page load.
+    await session.settle()
+    return session
 
 
 async def close_session() -> None:
