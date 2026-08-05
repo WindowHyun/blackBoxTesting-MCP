@@ -248,6 +248,23 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 | Scenario & report | `run_scenario` (incl. `trace_on_failure`) · `generate_scenario` · `save_report` |
 | Library | `save_scenario` · `load_scenario` · `list_scenarios` |
 
+### 🎯 무엇을 잡고 무엇을 놓치는가
+
+결함 6종을 심은 [defect lab](examples/defect-lab/)으로 탐지 범위를 실측했다.
+**못 잡는 것까지 회귀 테스트로 고정**해 뒀다 — 커버리지를 조용히 부풀리거나 잃지 않도록.
+
+| 결함 유형 | 결과 |
+|---|---|
+| 요소 상태 (담기 후 배지 미갱신) | ✅ 탐지 |
+| 화면 전이 (입력이 조용히 사라져 체크아웃 실패) | ✅ 탐지 |
+| 미처리 JS 예외 | ✅ 탐지 (`--fail-on-js-error`로 CI 게이트) |
+| 잘못된 이미지 | ❌ 미탐지 — 시각 회귀 범위 밖 |
+| 정렬 오동작 | ❌ 미탐지 — 순서 어서션 없음 |
+| 2배 느린 렌더 | ⚠️ 측정만, 실패 아님 |
+
+기준선 계정은 20/20 통과(오탐 0). 전체 기록:
+[`docs/CASE-STUDY-defect-detection.md`](docs/CASE-STUDY-defect-detection.md)
+
 > **Every test flow ends with a report.** Ad-hoc tool calls (navigate/interact/assert…)
 > are recorded automatically, and a final `save_report` writes the JSON/MD/HTML report
 > (slash commands instruct this automatically). `run_scenario` saves its own report.

@@ -52,8 +52,17 @@ def summarize(steps: list[dict]) -> dict:
             "pass_rate": round(passed / executed, 3) if executed else 0.0}
 
 
-def classify_failure(action: str, exc: Exception | None) -> str:
-    """Severity for a FAILED step — single implementation for runner/recorder."""
+def classify_failure(action: str, exc: Exception | None,
+                     js_error: bool = False) -> str:
+    """Severity for a FAILED step — single implementation for runner/recorder.
+
+    ``js_error`` wins over the action-derived value: when a step is failed
+    *because* the page threw, "the app crashed" is the finding, not "an
+    assertion did not hold". DESIGN §6.1 lists js_error in the severity
+    vocabulary and nothing produced it until this path existed.
+    """
+    if js_error:
+        return "js_error"
     if exc is not None:
         return "timeout" if "Timeout" in type(exc).__name__ else "error"
     if action.startswith("assert"):

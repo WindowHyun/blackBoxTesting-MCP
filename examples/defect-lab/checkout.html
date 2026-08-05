@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Defect Lab — 주문 정보</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<header class="topbar"><span class="title">Checkout: Your Information</span></header>
+
+<form id="checkout_form" autocomplete="off">
+  <input id="first-name" placeholder="First Name" aria-label="First Name">
+  <input id="last-name" placeholder="Last Name" aria-label="Last Name">
+  <input id="postal-code" placeholder="Zip/Postal Code" aria-label="Zip/Postal Code">
+  <input type="submit" id="continue" value="Continue">
+</form>
+
+<h3 data-test="error" id="error" hidden></h3>
+
+<script src="lab.js"></script>
+<script>
+const P = profile();
+
+// D-2: the field accepts keystrokes and then silently discards them. fill()
+// reports success, the value is empty, and the failure only shows up one step
+// later when the form refuses to submit.
+if (P.lastNameEats) {
+  const last = document.getElementById("last-name");
+  last.addEventListener("input", () => { last.value = ""; });
+}
+
+document.getElementById("checkout_form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const missing = ["first-name", "last-name", "postal-code"]
+    .find((id) => !document.getElementById(id).value.trim());
+  if (missing) {
+    const label = { "first-name": "First Name", "last-name": "Last Name",
+                    "postal-code": "Postal Code" }[missing];
+    const el = document.getElementById("error");
+    el.textContent = "Error: " + label + " is required";
+    el.hidden = false;
+    return;
+  }
+  location.href = carry("complete.html", {});
+});
+</script>
+</body>
+</html>

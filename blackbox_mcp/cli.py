@@ -72,7 +72,8 @@ async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
                 res = await runner.run(steps, name=name,
                                        continue_on_fail=args.continue_on_fail,
                                        screenshot_each=args.screenshot_each,
-                                       trace_on_failure=args.trace_on_failure)
+                                       trace_on_failure=args.trace_on_failure,
+                                       fail_on_js_error=args.fail_on_js_error)
                 if res.get("trace"):
                     print(f"  trace: {res['trace']}  (playwright show-trace로 열기)")
                 files = report.save(res, formats=args.format)
@@ -166,6 +167,8 @@ def _run_parallel(refs: list[str], args) -> int:
                     cmd.append("--screenshot-each")
                 if args.trace_on_failure:
                     cmd.append("--trace-on-failure")
+                if args.fail_on_js_error:
+                    cmd.append("--fail-on-js-error")
                 proc = await asyncio.create_subprocess_exec(*cmd, env=child_env)
                 procs.append(proc)
                 try:
@@ -350,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--trace-on-failure", action="store_true",
                        help="record a Playwright trace; keep the .zip only if "
                             "the scenario fails (open with: playwright show-trace)")
+    run_p.add_argument("--fail-on-js-error", action="store_true",
+                       help="fail a step whose assertion held but whose page threw "
+                            "an uncaught JS exception (always recorded either way)")
     run_p.add_argument("--junit", metavar="PATH",
                        help="also write a JUnit XML report (sequential runs only)")
     run_p.add_argument("--parallel", type=int, default=1, metavar="N",

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Defect Lab — 장바구니</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<header class="topbar"><span class="title">Your Cart</span></header>
+
+<main id="cart_list"></main>
+
+<div class="controls">
+  <button id="continue-shopping">Continue Shopping</button>
+  <button id="checkout">Checkout</button>
+</div>
+
+<script src="lab.js"></script>
+<script>
+const count = Number(qs("items", 0));
+const list = document.getElementById("cart_list");
+
+for (let i = 0; i < count; i++) {
+  const p = PRODUCTS[i % PRODUCTS.length];
+  const el = document.createElement("div");
+  el.className = "cart_item";
+  el.innerHTML = '<div class="inventory_item_name">' + p.name + "</div>" +
+                 '<div class="inventory_item_price">' + money(p.price) + "</div>";
+  list.appendChild(el);
+}
+if (!count) list.innerHTML = '<p class="empty">장바구니가 비어 있습니다.</p>';
+
+document.getElementById("checkout").addEventListener("click", () => {
+  location.href = carry("checkout.html", {});
+});
+document.getElementById("continue-shopping").addEventListener("click", () => {
+  location.href = carry("inventory.html", {});
+});
+</script>
+</body>
+</html>

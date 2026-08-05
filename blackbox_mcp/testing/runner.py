@@ -294,6 +294,7 @@ async def run(
     continue_on_fail: bool = False,
     screenshot_each: bool = False,
     trace_on_failure: bool = False,
+    fail_on_js_error: bool = False,
 ) -> dict[str, Any]:
     """Execute steps and return a structured result (DESIGN §6.1)."""
     session = await get_session()
@@ -356,6 +357,21 @@ async def run(
         new_network = [n.__dict__ for n in session.buffers.network[n0:]]
         new_dialogs = [d.__dict__ for d in session.buffers.dialogs[d0:]]
 
+        # An uncaught exception is a defect even when the step's own assertion
+        # held: the page threw, the UI just happened to still satisfy this
+        # check. Capturing it without letting it affect the verdict means CI
+        # stays green on a broken page — opt in to make it fail.
+        js_errors = [c for c in new_console if c.get("source") == "pageerror"]
+        failed_by_js = bool(fail_on_js_error and passed and js_errors)
+        if failed_by_js:
+            passed = False
+            fields["actual"] = (f"{fields.get('actual')} · 미처리 JS 예외 "
+                                f"{len(js_errors)}건")
+            fields["ai_reason"] = (f"단언은 통과했으나 미처리 JS 예외 발생: "
+                                   f"{js_errors[0]['text'][:100]}")
+            fields["ai_suggestion"] = ("페이지가 예외를 던졌다 — 단언만으로는 "
+                                       "드러나지 않는 결함")
+
         shot = None
         if not passed or screenshot_each or fields.get("force_screenshot"):
             shot = await report.capture_step_screenshot(session, run_tag, idx)
@@ -393,7 +409,8 @@ async def run(
             "console_errors": [e for e in new_console if e.get("level") == "error"],
             "network_errors": new_network,
             "dialogs": new_dialogs,
-            "severity": _severity(step.get("action", ""), exc) if not passed else None,
+            "severity": (_severity(step.get("action", ""), exc, failed_by_js)
+                         if not passed else None),
             "ai_reason": reason,
             "ai_suggestion": fields.get("ai_suggestion"),
         }))
