@@ -165,9 +165,15 @@ async def _dispatch(step: dict) -> dict:
                    ai_reason="captured page snapshot")
 
     elif action == "wait":
-        res = await wait(step.get("ms"), step.get("selector"))
+        # timeout_ms must ride along: a slow-by-design page (or a sluggish
+        # intranet server) needs a longer budget than the 10s default, and
+        # dropping the field silently capped every wait at 10s.
+        res = await wait(step.get("ms"), step.get("selector"),
+                         step.get("timeout_ms", 10000))
         out.update(expected="wait", actual=res.get("waited"), passed=bool(res.get("ok")),
                    ai_reason=f"waited {res.get('waited')}")
+        if not res.get("ok"):
+            out["ai_suggestion"] = res.get("error") or "대기 조건이 시간 내에 충족되지 않음"
 
     elif action == "switch_frame":
         res = await switch_frame(step.get("selector"))

@@ -1,0 +1,53 @@
+{
+  "name": "saucedemo-performance-glitch",
+  "description": "performance_glitch_user는 로그인이 의도적으로 느리다. 기능은 통과하되 리포트의 duration_ms가 standard_user 대비 눈에 띄게 커지는 것이 관찰 대상 — 기능 통과/성능 이상을 리포트가 구분해 보여주는지 확인한다. retry를 두지 않아 '느려서 실패'가 재시도로 가려지지 않게 한다.",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "https://www.saucedemo.com/",
+      "expect_status": 200,
+      "tag": "REQ-PERF-01"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#user-name",
+      "value": "performance_glitch_user",
+      "tag": "REQ-PERF-01"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#password",
+      "value": "${SAUCE_PASSWORD}",
+      "tag": "REQ-PERF-01"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#login-button",
+      "tag": "REQ-PERF-01",
+      "priority": "high"
+    },
+    {
+      "action": "wait",
+      "selector": ".inventory_item",
+      "timeout_ms": 15000,
+      "tag": "REQ-PERF-02",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "url_contains",
+      "target": "inventory.html",
+      "tag": "REQ-PERF-02"
+    },
+    {
+      "action": "assert",
+      "kind": "count",
+      "target": ".inventory_item",
+      "expected": "6",
+      "tag": "REQ-PERF-02"
+    }
+  ]
+}
