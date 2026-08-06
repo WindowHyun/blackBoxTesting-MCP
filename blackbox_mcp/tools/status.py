@@ -10,7 +10,7 @@ import sys
 from importlib.metadata import PackageNotFoundError, version
 
 from ..browser import session as session_mod
-from ..config import CONFIG, effective_browser
+from ..config import CONFIG, effective_browser, redact_url
 from ._registry import tool
 
 
@@ -37,6 +37,13 @@ async def status() -> dict:
             "scenario_dir": str(CONFIG.scenario_dir),
             "selector_timeout_ms": CONFIG.selector_timeout_ms,
             "nav_timeout_ms": CONFIG.nav_timeout_ms,
+            "viewport": CONFIG.viewport,
+            # 사내망 진단용. 값은 설정 여부만 — 프록시/계정 비밀번호는 노출 금지.
+            "proxy_server": redact_url(CONFIG.proxy_server),
+            "proxy_auth": bool(CONFIG.proxy_username),
+            "http_credentials": bool(CONFIG.http_username),
+            "auth_server_allowlist": CONFIG.auth_server_allowlist,
+            "ignore_https_errors": CONFIG.ignore_https_errors,
         },
     }
 
@@ -52,7 +59,10 @@ async def status() -> dict:
             "channel" if CONFIG.browser_channel else "bundled")
     info: dict = {"started": True, "mode": mode, "alive": s.is_alive(),
                   "console_buffered": len(s.buffers.console),
-                  "network_buffered": len(s.buffers.network)}
+                  "network_buffered": len(s.buffers.network),
+                  "dialogs_buffered": len(s.buffers.dialogs),
+                  "frame_context": s._frame_selector or "main",
+                  "tabs": len(s.list_pages())}
     try:
         if s.is_alive():
             info["url"] = s.page.url

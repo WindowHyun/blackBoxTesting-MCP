@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+# A new push supersedes the previous run for the same ref. Without this a
+# hung run keeps burning a runner until the 6h ceiling while its replacement
+# queues behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Lint gate (was missing despite shipping py.typed). Both block: the suite
   # is ruff- and mypy-clean (the Playwright optional-init attrs are typed Any
@@ -13,6 +20,7 @@ jobs:
   # can't break CI on an unrelated PR.
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,6 +39,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,6 +52,7 @@ jobs:
   # Full lane: everything, with real Chromium (integration + E2E + modes).
   browser:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

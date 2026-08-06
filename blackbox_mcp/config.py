@@ -6,6 +6,7 @@ instead of touching os.environ directly.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,6 +56,23 @@ def _resolve_dir(value: str | None, default_name: str) -> Path:
     return (Path.home() / "ui-blackbox" / default_name).resolve()
 
 
+def _as_viewport(value: str | None) -> dict | None:
+    """Parse VIEWPORT="1280x800" into Playwright's viewport dict.
+
+    Unparseable values fall back to None (Playwright's default) rather than
+    raising: a typo in the client's env block must not kill the server.
+    """
+    if not value:
+        return None
+    m = re.fullmatch(r"\s*(\d{2,5})\s*[xX*,]\s*(\d{2,5})\s*", value)
+    if not m:
+        import sys
+        print(f"[blackbox-mcp] invalid VIEWPORT {value!r} — expected e.g. 1280x800",
+              file=sys.stderr)
+        return None
+    return {"width": int(m.group(1)), "height": int(m.group(2))}
+
+
 @dataclass(frozen=True)
 class Config:
     headless: bool
@@ -85,6 +103,30 @@ class Config:
     # Keep at most N report runs (per format set) in REPORT_DIR; 0 = unlimited.
     # Prevents unbounded growth of ~/ui-blackbox/reports on long-lived setups.
     report_retention: int
+    # ── corporate network (사내망) ────────────────────────────────
+    # Explicit proxy for the BROWSER's traffic. Chromium only picks up the
+    # OS/env proxy on some platforms, and never the credentials — an
+    # authenticating corporate proxy pops a native auth dialog that no
+    # automation can answer. Passing proxy= to launch() covers both.
+    proxy_server: str | None
+    proxy_username: str | None
+    proxy_password: str | None
+    proxy_bypass: str | None
+    # HTTP Basic/Digest auth (context-level), common on internal staging.
+    http_username: str | None
+    http_password: str | None
+    # Hosts Chromium may auto-negotiate NTLM/Kerberos SSO with (comma list or
+    # "*.corp.example.com"). Without it, intranet SSO shows a login prompt.
+    auth_server_allowlist: str | None
+    # Fixed viewport ("1280x800") for reproducible/responsive runs.
+    viewport: dict | None
+    # Seconds to wait for the first-run `playwright install`. A blocked CDN
+    # behind a corporate proxy can hang the download forever, and this runs
+    # BEFORE mcp.run() — an unbounded wait means the server never starts and
+    # the client just shows a dead server.
+    install_timeout_s: int
+    # Where expect_download saves files.
+    download_dir: Path
 
     @staticmethod
     def from_env() -> "Config":
@@ -102,13 +144,61 @@ class Config:
             nav_timeout_ms=_as_int(os.getenv("NAV_TIMEOUT_MS"), 30000),
             ignore_https_errors=_as_bool(os.getenv("IGNORE_HTTPS_ERRORS"), False),
             report_retention=_as_int(os.getenv("REPORT_RETENTION"), 100),
+            # PROXY_SERVER is explicit; fall back to the conventional env vars so
+            # a machine already configured for corporate egress works untouched.
+            proxy_server=(os.getenv("PROXY_SERVER") or os.getenv("HTTPS_PROXY")
+                          or os.getenv("HTTP_PROXY") or None),
+            proxy_username=(os.getenv("PROXY_USERNAME") or None),
+            proxy_password=(os.getenv("PROXY_PASSWORD") or None),
+            proxy_bypass=(os.getenv("PROXY_BYPASS") or os.getenv("NO_PROXY") or None),
+            http_username=(os.getenv("HTTP_USERNAME") or None),
+            http_password=(os.getenv("HTTP_PASSWORD") or None),
+            auth_server_allowlist=(os.getenv("AUTH_SERVER_ALLOWLIST") or None),
+            viewport=_as_viewport(os.getenv("VIEWPORT")),
+            install_timeout_s=_as_int(os.getenv("BROWSER_INSTALL_TIMEOUT_S"), 300),
+            download_dir=_resolve_dir(os.getenv("DOWNLOAD_DIR"), "downloads"),
         )
+
+    # ── derived launch/context options ───────────────────────────
+    def proxy_settings(self) -> dict | None:
+        """Playwright ``proxy=`` option, or None when no proxy is configured."""
+        if not self.proxy_server:
+            return None
+        proxy: dict = {"server": self.proxy_server}
+        if self.proxy_username:
+            proxy["username"] = self.proxy_username
+        if self.proxy_password:
+            proxy["password"] = self.proxy_password
+        if self.proxy_bypass:
+            # Playwright expects a comma-separated list; NO_PROXY already is one.
+            proxy["bypass"] = self.proxy_bypass
+        return proxy
+
+    def http_credentials(self) -> dict | None:
+        """Playwright ``http_credentials=`` context option, or None."""
+        if self.http_username is None:
+            return None
+        return {"username": self.http_username,
+                "password": self.http_password or ""}
 
 
 # Singleton config, loaded once at import.
 CONFIG = Config.from_env()
 
 _BROWSER_TYPES = ("chromium", "firefox", "webkit")
+
+_USERINFO = re.compile(r"(?<=://)[^/@]*@")
+
+
+def redact_url(url: str | None) -> str | None:
+    """Strip embedded credentials from a URL before it is displayed.
+
+    A proxy is commonly written http://id:pw@proxy.corp:8080, and both `status`
+    and `doctor` print it — neither may echo the password.
+    """
+    if not url:
+        return url
+    return _USERINFO.sub("***@", url)
 
 
 def effective_browser(raw: str | None = None) -> str:

@@ -69,13 +69,27 @@ def ensure_chromium() -> None:
     try:
         # stdout is the MCP JSON-RPC pipe once Claude Desktop spawns us —
         # install progress must never reach it.
+        #
+        # timeout is not optional: this runs BEFORE mcp.run(), and a corporate
+        # proxy that blackholes (rather than refuses) cdn.playwright.dev makes
+        # the download hang forever. Unbounded, that means the server never
+        # reaches stdio and the client only sees a server that never came up.
         subprocess.run(
             [sys.executable, "-m", "playwright", "install", name],
             check=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            timeout=CONFIG.install_timeout_s,
         )
         log.info("Playwright %s installed.", name)
+    except subprocess.TimeoutExpired:
+        log.warning(
+            "Timed out after %ss installing %s — the browser CDN is likely "
+            "blocked (corporate proxy/closed network). Install the browser out "
+            "of band and set CHROMIUM_EXECUTABLE to its path, or raise "
+            "BROWSER_INSTALL_TIMEOUT_S. Starting the server anyway.",
+            CONFIG.install_timeout_s, name,
+        )
     except Exception as exc:
         # Never let a failed auto-install crash server startup — the first
         # browser launch will surface a clear error if no binary is reachable.

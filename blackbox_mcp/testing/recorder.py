@@ -122,6 +122,7 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         pass
     c0 = len(session.buffers.console) if session else 0
     n0 = len(session.buffers.network) if session else 0
+    d0 = len(session.buffers.dialogs) if session else 0
 
     t0 = time.monotonic()
     exc: Exception | None = None
@@ -137,6 +138,7 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
 
     new_console = ([c.__dict__ for c in session.buffers.console[c0:]] if session else [])
     new_network = ([n.__dict__ for n in session.buffers.network[n0:]] if session else [])
+    new_dialogs = ([d.__dict__ for d in session.buffers.dialogs[d0:]] if session else [])
 
     global _COUNTER, _RUN_ID
     _COUNTER += 1
@@ -160,6 +162,7 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         "screenshot": shot,
         "console_errors": [e for e in new_console if e.get("level") == "error"],
         "network_errors": new_network,
+        "dialogs": new_dialogs,
         "severity": None if passed else report.classify_failure(name, exc),
         "ai_reason": reason,
         "ai_suggestion": suggestion,

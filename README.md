@@ -235,16 +235,35 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 
 ---
 
-## 🧰 MCP Tools (25)
+## 🧰 MCP Tools (30)
 
 | Group | Tools |
 |---|---|
 | Core | `navigate` · `snapshot` (a11y/dom) · `screenshot` · `interact` · `assert_` · `get_console_logs` · `get_network_errors` |
-| Extended | `wait` · `switch_frame` · `expect_dialog` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
+| Extended | `wait` · `switch_frame` · `expect_dialog` · `get_dialogs` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
+| Popups & tabs | `expect_popup` · `list_tabs` · `switch_tab` — deterministic popup handling and a way back to the opener |
+| Files | `interact(action="upload")` · `expect_download` — attachment upload, and download verified by name/extension/size |
 | Auth state | `save_state` · `load_state` · `list_states` — export login (cookies+localStorage) once, reuse headless/in CI, swap roles |
 | Network mock | `mock_route` · `unmock_route` — deterministic offline responses for flaky/unbuilt APIs |
 | Scenario & report | `run_scenario` (incl. `trace_on_failure`) · `generate_scenario` · `save_report` |
 | Library | `save_scenario` · `load_scenario` · `list_scenarios` |
+
+### 🎯 무엇을 잡고 무엇을 놓치는가
+
+결함 6종을 심은 [defect lab](examples/defect-lab/)으로 탐지 범위를 실측했다.
+**못 잡는 것까지 회귀 테스트로 고정**해 뒀다 — 커버리지를 조용히 부풀리거나 잃지 않도록.
+
+| 결함 유형 | 결과 |
+|---|---|
+| 요소 상태 (담기 후 배지 미갱신) | ✅ 탐지 |
+| 화면 전이 (입력이 조용히 사라져 체크아웃 실패) | ✅ 탐지 |
+| 미처리 JS 예외 | ✅ 탐지 (`--fail-on-js-error`로 CI 게이트) |
+| 잘못된 이미지 | ❌ 미탐지 — 시각 회귀 범위 밖 |
+| 정렬 오동작 | ❌ 미탐지 — 순서 어서션 없음 |
+| 2배 느린 렌더 | ⚠️ 측정만, 실패 아님 |
+
+기준선 계정은 20/20 통과(오탐 0). 전체 기록:
+[`docs/CASE-STUDY-defect-detection.md`](docs/CASE-STUDY-defect-detection.md)
 
 > **Every test flow ends with a report.** Ad-hoc tool calls (navigate/interact/assert…)
 > are recorded automatically, and a final `save_report` writes the JSON/MD/HTML report
@@ -327,7 +346,31 @@ Run playbook: [`HARNESS.md`](./HARNESS.md) · Agent context: [`CLAUDE.md`](./CLA
 `SCENARIO_DIR` (~/ui-blackbox/scenarios) · `SELECTOR_TIMEOUT_MS` (2000) ·
 `DEFAULT_WAIT_UNTIL` (networkidle) · `NAV_TIMEOUT_MS` (30000) ·
 `IGNORE_HTTPS_ERRORS` (false) · `REPORT_RETENTION` (keep newest N runs,
-default 100, 0=unlimited). Details in `.env.example`.
+default 100, 0=unlimited) · `VIEWPORT` (e.g. `1280x800`, `390x844` for mobile) ·
+`DOWNLOAD_DIR` (~/ui-blackbox/downloads) · `BROWSER_INSTALL_TIMEOUT_S` (300).
+Details in `.env.example`.
+
+### Closed / corporate networks (사내망)
+| Variable | Purpose |
+|---|---|
+| `PROXY_SERVER` | Proxy for **browser traffic**, e.g. `http://proxy.corp:8080`. Falls back to `HTTPS_PROXY`/`HTTP_PROXY`. Chromium ignores the OS/env proxy on some platforms and never picks up its credentials, so set this explicitly. |
+| `PROXY_USERNAME` / `PROXY_PASSWORD` | Authenticating proxy. Without them the browser raises a native auth dialog no automation can answer. |
+| `PROXY_BYPASS` | Comma list of hosts to reach directly (falls back to `NO_PROXY`). |
+| `HTTP_USERNAME` / `HTTP_PASSWORD` | HTTP Basic/Digest auth, common on internal staging. |
+| `AUTH_SERVER_ALLOWLIST` | Hosts Chromium may auto-negotiate **NTLM/Kerberos SSO** with, e.g. `*.corp.example.com`. |
+| `IGNORE_HTTPS_ERRORS` | Accept an internal CA / self-signed / SSL-inspection certificate. |
+| `CHROMIUM_EXECUTABLE` | Use a browser installed out of band when `cdn.playwright.dev` is blocked. |
+| `BROWSER_INSTALL_TIMEOUT_S` | Cap the first-run browser download (default 300s) so a blackholed CDN can't hang startup. |
+
+Verify the whole chain before writing scenarios:
+
+```bash
+ui-blackbox doctor --url https://intranet.corp.example.com
+#   network:
+#     proxy: http://proxy.corp:8080 +auth
+#     auth_server_allowlist (NTLM/Kerberos): *.corp.example.com
+#     reach https://intranet.corp.example.com: ✓ HTTP 200 “사내 포털”
+```
 
 > **Testing live/deployed sites.** ① Ad/polling-heavy sites may never reach
 > `networkidle` — navigate proceeds on timeout (`settled:false`), and
@@ -337,7 +380,11 @@ default 100, 0=unlimited). Details in `.env.example`.
 > (auto-suggested when a click is blocked). ⑤ Login/bot-walls: `use_real_browser`.
 > ⑥ Staging certs: `IGNORE_HTTPS_ERRORS=true`. ⑦ **New tabs/popups are tracked
 > automatically** (the session follows a click that opens a new window and returns to
-> the original tab when the popup closes — e.g. OAuth popups).
+> the original tab when the popup closes — e.g. OAuth popups). When the **next step
+> asserts on the popup**, use `expect_popup` instead of a bare click: Chromium only
+> announces a popup once it has committed its navigation, so a plain click races it.
+> `list_tabs` / `switch_tab` go back to the opener. ⑧ Nested iframes: chain the
+> selectors — `switch_frame("#outer >>> #inner")`.
 
 > **About bot detection.** This tool targets **your own UI / staging**. Third-party
 > sites may block automation with anti-bot measures, and bypassing those for login

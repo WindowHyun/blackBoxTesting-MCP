@@ -59,6 +59,12 @@ testpaths = ["tests"]
 markers = [
     "browser: needs a real Chromium (excluded from the fast unit lane: -m 'not browser')",
 ]
+# Dump every thread's stack when a single test runs past this many seconds.
+# A browser test that hangs in CI produces no output at all otherwise — the
+# job just sits there and the logs aren't downloadable until it ends, so the
+# one thing that identifies the culprit has to be printed by the test process
+# itself. The slowest legitimate test is well under this.
+faulthandler_timeout = 120
 
 [tool.ruff]
 target-version = "py311"

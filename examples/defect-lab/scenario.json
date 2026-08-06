@@ -1,0 +1,144 @@
+{
+  "name": "defect-lab-purchase",
+  "description": "구매 완료까지의 정상 경로를 단언한다. standard_user에선 전부 통과해야 하고, problem_user에선 결함이 있는 지점만 실패해야 한다. 두 계정에 같은 파일을 쓰는 것이 요점 — 시나리오를 바꾸면 탐지력이 아니라 시나리오를 시험하는 셈이 된다. LAB_USER로 계정을 주입한다.",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "${LAB_URL}/login.html",
+      "tag": "REQ-LOGIN-01",
+      "priority": "high"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#user-name",
+      "value": "${LAB_USER}",
+      "tag": "REQ-LOGIN-02"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#password",
+      "value": "${LAB_PASSWORD}",
+      "tag": "REQ-LOGIN-02"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#login-button",
+      "tag": "REQ-LOGIN-02",
+      "priority": "high"
+    },
+    {
+      "action": "wait",
+      "selector": ".inventory_item",
+      "timeout_ms": 4000,
+      "tag": "REQ-CATALOG-01",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "url_contains",
+      "target": "inventory.html",
+      "tag": "REQ-LOGIN-02",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "count",
+      "target": ".inventory_item",
+      "expected": "6",
+      "tag": "REQ-CATALOG-01"
+    },
+    {
+      "action": "interact",
+      "type": "select",
+      "selector": "[data-test=\"product_sort_container\"]",
+      "value": "Price (low to high)",
+      "tag": "REQ-CATALOG-02",
+      "priority": "medium"
+    },
+    {
+      "action": "assert",
+      "kind": "text_visible",
+      "target": "Sauce Labs Onesie",
+      "tag": "REQ-CATALOG-02"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#add-to-cart-backpack",
+      "tag": "REQ-CART-01",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "element_visible",
+      "target": ".shopping_cart_badge",
+      "tag": "REQ-CART-01",
+      "priority": "high"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": ".shopping_cart_link",
+      "tag": "REQ-CART-02"
+    },
+    {
+      "action": "assert",
+      "kind": "count",
+      "target": ".cart_item",
+      "expected": "1",
+      "tag": "REQ-CART-02",
+      "priority": "high"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#checkout",
+      "tag": "REQ-CHECKOUT-01"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#first-name",
+      "value": "길동",
+      "tag": "REQ-CHECKOUT-01"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#last-name",
+      "value": "홍",
+      "tag": "REQ-CHECKOUT-01",
+      "priority": "high"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#postal-code",
+      "value": "06236",
+      "tag": "REQ-CHECKOUT-01"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#continue",
+      "tag": "REQ-CHECKOUT-01"
+    },
+    {
+      "action": "assert",
+      "kind": "url_contains",
+      "target": "complete.html",
+      "tag": "REQ-CHECKOUT-02",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "text_visible",
+      "target": "Thank you for your order!",
+      "tag": "REQ-CHECKOUT-02",
+      "priority": "high"
+    }
+  ]
+}

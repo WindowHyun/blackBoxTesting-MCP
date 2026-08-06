@@ -459,6 +459,15 @@ SM-01~04와 함께(또는 직후) 구현한다.
       "priority": "high",                // 비즈니스 우선순위 passthrough(선택)
       "retries": 0,                      // retry:N 스텝의 사용된 재시도 수(통과+재시도>0 = flaky 마킹)
       "console_errors": [], "network_errors": [], // SM-06: 스텝 구간 귀속
+      // console_errors 항목은 {level,text,location,ts,source} —
+      // source="pageerror"는 **잡히지 않은 JS 예외/미처리 rejection**(앱 버그),
+      // source="console"은 의도적인 console.error 호출. Playwright는 전자를
+      // console 이벤트로 전달하지 않으므로 pageerror 리스너로만 수집된다(§13).
+      "dialogs": [                       // 스텝 구간에 발생한 네이티브 dialog
+        // expected=false = expect_dialog로 대기하지 않은 alert/confirm/prompt.
+        // 자동 dismiss되어 흐름은 이어지지만, 그 자체가 결함 신호다.
+        // {type,message,handled,expected,ts}
+      ],
       "severity": null,                  // SM-08: assertion|js_error|network|timeout
       "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
       "ai_suggestion": null              // SM-05: 실패 시 가설/수정 제안
@@ -701,6 +710,39 @@ SM-01~04와 함께(또는 직후) 구현한다.
   — 4xx/5xx는 `response`(status≥400)로 전달, `requestfailed`는 네트워크 실패 한정 ✅
 - `page.on("dialog")` / `page.expect_event("dialog")`,
   `dialog.accept(prompt_text)` · `dismiss()` · `message()` · `type()` ✅
+  > 검증(2026-08, 실측): 리스너가 **하나도 없으면** Playwright가 dialog를 자동
+  > dismiss한다 → 로드 시점 alert이 기록·실패 없이 사라졌다. 또한 `page.on`은
+  > 등록된 **모든** 리스너를 실행하므로, 상시 recorder와 expect_dialog가 각자
+  > 리스너를 걸면 먼저 등록된 recorder의 dismiss가 accept를 이긴다. → 리스너는
+  > 하나만 두고 `buffers.dialog_handler` 오버라이드 슬롯으로 결정권을 넘긴다.
+  > async 핸들러(`page.on("dialog", async fn)`)는 정상 동작함(실측).
+- `page.on("pageerror")` — **잡히지 않은 예외/미처리 promise rejection 전용**.
+  > 검증(2026-08, 실측): `null.foo()`와 `Promise.reject(...)` 모두 `console`
+  > 이벤트로는 **전달되지 않음**(버퍼 0건). pageerror 리스너가 없으면 앱이 터진
+  > 페이지가 "깨끗한 통과"로 보고된다 → listeners.attach에 상시 등록.
+- `browser_context.expect_page()` / `page.expect_popup()` — 팝업을 액션 **주위에서**
+  대기.
+  > 검증(2026-08, 실측): context `page` 이벤트는 팝업이 **navigation을 커밋한 뒤**
+  > 발화한다. 서버가 1초 걸리는 팝업에서 `click()`은 75ms에 반환했지만 `page`
+  > 이벤트는 1080ms에 도착 → click 직후의 어서션은 opener를 보고 실패한다.
+  > 짧은 유예(grace)로는 못 고치므로 `expect_popup` 스텝으로 명시 대기(§4).
+- `locator.set_input_files(paths)` — `<input type=file>` 업로드 ✅
+- `page.expect_download()` → `download.suggested_filename` · `save_as(path)` ·
+  `url` ✅. Playwright의 임시 사본은 컨텍스트 종료 시 삭제되므로 `save_as`로
+  DOWNLOAD_DIR에 보존해야 한다.
+- `locator.select_option(value)` — 위치 인자 문자열은 **value 또는 label** 매칭 ✅
+  (실측: `<option value="v2">부산</option>`에 "부산"·"v2" 모두 성공)
+- **중첩 iframe**: 셀렉터 문자열은 frame 경계를 넘지 못한다.
+  > 검증(2026-08, 실측): `page.frame_locator("#outer >> #inner")` → 0건,
+  > `page.frame_locator("#outer").frame_locator("#inner")` → 1건. 따라서 프레임
+  > 컨텍스트는 단일 문자열이 아니라 **체인(list)**으로 보관해야 한다(`>>>` 구분자).
+- `browser_type.launch(proxy={"server","username","password","bypass"})` ·
+  `new_context(http_credentials={"username","password"})` ·
+  Chromium 인자 `--auth-server-allowlist` / `--auth-negotiate-delegate-allowlist`
+  (NTLM/Kerberos SSO) — 사내망 지원의 근거 API. proxy는 **launch** 레벨,
+  http_credentials는 **context** 레벨.
+  > 실측(이 저장소 CI 환경): `HTTPS_PROXY`만 설정된 Linux에서 Chromium이 프록시를
+  > 사용하긴 하나 자격증명은 전달되지 않는다 → 인증 프록시는 `proxy=` 필수.
 - `page.get_by_role(role, name=, exact=)`, `page.get_by_text(text, exact=)` ✅
 - `page.frame_locator(selector)` (snake_case) — `FrameLocator`는 `get_by_role`/
   `get_by_text`/`get_by_test_id`/`locator` 노출, frame root에서 셀렉터 체인 동작 ✅

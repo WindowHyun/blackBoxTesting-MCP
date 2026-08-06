@@ -72,7 +72,8 @@ async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
                 res = await runner.run(steps, name=name,
                                        continue_on_fail=args.continue_on_fail,
                                        screenshot_each=args.screenshot_each,
-                                       trace_on_failure=args.trace_on_failure)
+                                       trace_on_failure=args.trace_on_failure,
+                                       fail_on_js_error=args.fail_on_js_error)
                 if res.get("trace"):
                     print(f"  trace: {res['trace']}  (playwright show-trace로 열기)")
                 files = report.save(res, formats=args.format)
@@ -166,6 +167,8 @@ def _run_parallel(refs: list[str], args) -> int:
                     cmd.append("--screenshot-each")
                 if args.trace_on_failure:
                     cmd.append("--trace-on-failure")
+                if args.fail_on_js_error:
+                    cmd.append("--fail-on-js-error")
                 proc = await asyncio.create_subprocess_exec(*cmd, env=child_env)
                 procs.append(proc)
                 try:
@@ -245,7 +248,7 @@ def _cmd_run(args) -> int:
 def _cmd_doctor(args) -> int:  # noqa: ARG001
     """Self-check: browser resolvable + output dirs writable + config echo."""
     from .bootstrap import _browser_installed
-    from .config import CONFIG, effective_browser
+    from .config import CONFIG, effective_browser, redact_url
     from .testing.report import ensure_dirs
 
     ok = True
@@ -278,8 +281,55 @@ def _cmd_doctor(args) -> int:  # noqa: ARG001
     print(f"  scenario_dir: {CONFIG.scenario_dir}")
     print(f"  headless={CONFIG.headless} channel={CONFIG.browser_channel or '-'} "
           f"cdp={CONFIG.cdp_url or '-'} stealth={CONFIG.stealth}")
+
+    # 사내망 (closed network) posture — the settings that decide whether the
+    # browser can reach anything at all. Printed always: "no proxy configured"
+    # is itself the answer when an intranet run fails to connect.
+    print("  network:")
+    print(f"    proxy: {redact_url(CONFIG.proxy_server) or '- (직접 연결)'}"
+          f"{' +auth' if CONFIG.proxy_username else ''}")
+    if CONFIG.proxy_bypass:
+        print(f"    proxy_bypass: {CONFIG.proxy_bypass}")
+    print(f"    http_credentials: {'set' if CONFIG.http_username else '-'}")
+    print(f"    auth_server_allowlist (NTLM/Kerberos): "
+          f"{CONFIG.auth_server_allowlist or '-'}")
+    print(f"    ignore_https_errors: {CONFIG.ignore_https_errors}")
+    if args is not None and getattr(args, "url", None):
+        ok &= _probe_url(args.url)
+
     print("doctor: OK" if ok else "doctor: PROBLEMS FOUND")
     return EXIT_OK if ok else EXIT_FAILED
+
+
+def _probe_url(url: str) -> bool:
+    """Launch the browser exactly as a run would and try to reach `url`.
+
+    The only check that actually proves an intranet target is reachable with
+    the configured proxy/cert/auth settings — everything above is a config
+    echo. Failures print the browser's own error (DNS, tunnel, certificate),
+    which is what tells a user which knob is wrong.
+    """
+    async def _go() -> bool:
+        from .browser.session import close_session, get_session
+        from .tools.navigate import navigate
+        try:
+            await get_session()
+            res = await navigate(url, wait_until="domcontentloaded")
+        except Exception as exc:
+            print(f"    reach {url}: ✗ {type(exc).__name__}: {exc}")
+            return False
+        finally:
+            await close_session()
+        if res.get("error"):
+            print(f"    reach {url}: ✗ {res['error']}")
+            return False
+        status = res.get("status")
+        good = status is None or status < 400
+        print(f"    reach {url}: {'✓' if good else '✗'} HTTP {status} "
+              f"“{res.get('title')}”")
+        return good
+
+    return asyncio.run(_go())
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -303,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--trace-on-failure", action="store_true",
                        help="record a Playwright trace; keep the .zip only if "
                             "the scenario fails (open with: playwright show-trace)")
+    run_p.add_argument("--fail-on-js-error", action="store_true",
+                       help="fail a step whose assertion held but whose page threw "
+                            "an uncaught JS exception (always recorded either way)")
     run_p.add_argument("--junit", metavar="PATH",
                        help="also write a JUnit XML report (sequential runs only)")
     run_p.add_argument("--parallel", type=int, default=1, metavar="N",
@@ -311,7 +364,11 @@ def main(argv: list[str] | None = None) -> int:
                        help="per-scenario watchdog for --parallel (default 600s)")
     run_p.set_defaults(func=_cmd_run)
 
-    doc_p = sub.add_parser("doctor", help="check browser/dirs/config health")
+    doc_p = sub.add_parser("doctor", help="check browser/dirs/network/config health")
+    doc_p.add_argument("--url", metavar="URL",
+                       help="also launch the browser and try to reach this URL "
+                            "with the configured proxy/cert/auth settings "
+                            "(사내망 연결 확인)")
     doc_p.set_defaults(func=_cmd_doctor)
 
     args = parser.parse_args(argv)

@@ -1,0 +1,28 @@
+* { box-sizing: border-box; }
+body { font-family: system-ui, "Segoe UI", sans-serif; margin: 0; background: #f5f6f7; color: #132; }
+.topbar { display: flex; justify-content: space-between; align-items: center;
+          padding: 14px 20px; background: #132; color: #fff; }
+.topbar .title { font-size: 18px; font-weight: 600; }
+.shopping_cart_link { position: relative; font-size: 22px; text-decoration: none; }
+.shopping_cart_badge { position: absolute; top: -6px; right: -10px; background: #e63; color: #fff;
+                       border-radius: 10px; padding: 0 6px; font-size: 12px; font-weight: 700; }
+.controls { padding: 14px 20px; display: flex; gap: 10px; }
+select, button, input { font: inherit; padding: 8px 12px; border: 1px solid #ccd; border-radius: 6px; }
+button, input[type=submit] { background: #132; color: #fff; border-color: #132; cursor: pointer; }
+.inventory_list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                  gap: 16px; padding: 0 20px 24px; }
+.inventory_item { background: #fff; border: 1px solid #e2e5e9; border-radius: 10px; padding: 14px; }
+.inventory_item_img { width: 100%; height: 120px; object-fit: contain; }
+.inventory_item_name { font-weight: 600; margin: 8px 0 4px; }
+.inventory_item_price { color: #275; font-weight: 700; margin-bottom: 10px; }
+.cart_item { background: #fff; border-bottom: 1px solid #e2e5e9; padding: 14px 20px; }
+.login_wrapper { max-width: 420px; margin: 60px auto; background: #fff; padding: 28px;
+                 border-radius: 12px; border: 1px solid #e2e5e9; }
+.login_logo { margin: 0 0 20px; }
+#login_form { display: grid; gap: 10px; }
+[data-test=error] { background: #e63; color: #fff; padding: 10px 14px; border-radius: 6px; margin: 16px 20px; }
+#checkout_form { display: grid; gap: 10px; max-width: 420px; padding: 20px; }
+.credentials { margin-top: 24px; font-size: 13px; color: #567; }
+.credentials ul { padding-left: 18px; }
+.complete { padding: 40px 20px; }
+.empty { padding: 20px; color: #567; }

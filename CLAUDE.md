@@ -49,6 +49,28 @@ GitHub Release 발행 또는 Actions `Release → Run workflow`).
 - Chromium 다운로드 ~150MB. Phase 1 착수 시 환경 가능 여부 먼저 확인.
 - `BrowserType.executable_path`는 "설치 여부"가 아니라 "기대 경로" → `os.path.exists()`로 확인.
 - 4xx/5xx는 `requestfailed`가 아니라 `response`(status≥400)로 잡힌다.
+- **잡히지 않은 JS 예외/미처리 rejection은 `console` 이벤트로 오지 않는다** — `pageerror`
+  전용. `listeners.attach`가 상시 등록하며 `source="pageerror"`로 태깅(레벨은 error라
+  기존 소비자가 그대로 집계). 이걸 빼면 앱이 터진 페이지가 "통과"로 보고된다.
+- dialog 리스너가 **하나도 없으면** Playwright가 자동 dismiss → 로드 시점 alert이 흔적
+  없이 사라진다. 그래서 상시 recorder 1개만 두고, `expect_dialog`는 자기 리스너를 걸지
+  않고 `buffers.dialog_handler` 오버라이드를 쓴다(`page.on`은 등록된 모든 리스너를
+  실행 → 먼저 등록된 recorder의 dismiss가 accept를 이긴다). 해제는 반드시 `finally`.
+- 팝업의 context `page` 이벤트는 **navigation 커밋 후**에야 발화한다(실측: click 반환
+  75ms vs 이벤트 1080ms). 그래서 click 직후 어서션은 opener를 본다 → 팝업을 검증하려면
+  `expect_popup`(액션 주위 arm) 사용. 자동 채택(`_adopt_page`)+`settle()`은 best-effort
+  보조일 뿐이며, `settle()`은 `get_session()` 1곳에서만 await한다(락 밖에서).
+- 셀렉터 문자열은 **iframe 경계를 못 넘는다**(`#outer >> #inner` = 0건). 프레임 컨텍스트는
+  `_frame_chain: list[str]`이고 `root`가 hop마다 `frame_locator()`를 건다. 사용자 표기는
+  `>>>`(Playwright의 `>>`와 충돌 방지). `_frame_selector`는 표시용 read-only 프로퍼티.
+- 프록시는 **launch** 레벨(`proxy=`), http_credentials/viewport는 **context** 레벨.
+  `_base_launch_kwargs()`/`_context_kwargs()` 한 쌍을 번들·영구프로필 양쪽에서 재사용해야
+  한다 — 한쪽에만 걸면 헤드리스에선 되고 실브라우저에선 조용히 실패한다.
+- `bootstrap`의 `playwright install`은 **timeout 필수**(`BROWSER_INSTALL_TIMEOUT_S`).
+  `mcp.run()` 이전이라, 막힌 CDN에서 무한 대기하면 클라이언트엔 "죽은 서버"로만 보인다.
+- 마스킹은 **표적**이어야 한다 — 무조건 `mask_value`를 씌우면 리포트가 "selected ***"로
+  도배돼 증거 가치를 잃는다. `interact._display_value`: 민감한 필드명이면 마스킹,
+  아니면 `scrub`(해석된 `${SECRET}`만 placeholder로 환원).
 - 출력 경로는 **홈 기준 절대경로**(`~/ui-blackbox/...`). MCP 서버 cwd가 시스템 경로일 수 있어 상대경로 저장은 막힌다(`ensure_dirs` 홈 폴백).
 - recorder 래핑은 **MCP 등록 함수만** 감싼다(모듈 함수는 unwrapped) → `run_scenario` 내부 호출은 이중 기록 안 됨. 래퍼는 반환 어노테이션을 떼서 `Image` 스키마 오류를 피한다.
 - 브라우저 CDN(`cdn.playwright.dev`) 차단 환경: `CHROMIUM_EXECUTABLE`/사전설치 자동감지로 우회.

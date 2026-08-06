@@ -1,0 +1,103 @@
+{
+  "name": "saucedemo-login-negative",
+  "description": "로그인 실패 경로. 세 건 모두 '올바른 에러가 뜨는 것'이 통과 조건이므로, 전부 통과해야 정상이다. --continue-on-fail로 실행해 세 건을 한 리포트에 모은다.",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "https://www.saucedemo.com/",
+      "expect_status": 200,
+      "tag": "REQ-LOGIN-03"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#login-button",
+      "tag": "REQ-LOGIN-03"
+    },
+    {
+      "action": "assert",
+      "kind": "text_visible",
+      "target": "Username is required",
+      "tag": "REQ-LOGIN-03",
+      "priority": "medium"
+    },
+    {
+      "action": "navigate",
+      "url": "https://www.saucedemo.com/",
+      "tag": "REQ-LOGIN-04"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#user-name",
+      "value": "standard_user",
+      "tag": "REQ-LOGIN-04"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#password",
+      "value": "wrong-password",
+      "tag": "REQ-LOGIN-04"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#login-button",
+      "tag": "REQ-LOGIN-04"
+    },
+    {
+      "action": "assert",
+      "kind": "text_visible",
+      "target": "Username and password do not match any user in this service",
+      "tag": "REQ-LOGIN-04",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "url_is",
+      "target": "https://www.saucedemo.com/",
+      "tag": "REQ-LOGIN-04",
+      "priority": "high"
+    },
+    {
+      "action": "navigate",
+      "url": "https://www.saucedemo.com/",
+      "tag": "REQ-LOGIN-05"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#user-name",
+      "value": "locked_out_user",
+      "tag": "REQ-LOGIN-05"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#password",
+      "value": "${SAUCE_PASSWORD}",
+      "tag": "REQ-LOGIN-05"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#login-button",
+      "tag": "REQ-LOGIN-05"
+    },
+    {
+      "action": "assert",
+      "kind": "text_visible",
+      "target": "Sorry, this user has been locked out",
+      "tag": "REQ-LOGIN-05",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "url_is",
+      "target": "https://www.saucedemo.com/",
+      "tag": "REQ-LOGIN-05",
+      "priority": "high"
+    }
+  ]
+}
