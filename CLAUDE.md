@@ -26,7 +26,7 @@ python -m venv .venv
 - `blackbox_mcp/cli.py` — CI 진입점(`ui-blackbox run/doctor`): MCP 없이 runner/report 직접 호출, exit code+JUnit, `--parallel`은 서브프로세스 격리
 - `blackbox_mcp/tools/` — **MCP Tool = 파일 1개**. `_registry.py`의 `@tool`로 등록(`@prompt`=슬래시 명령은 `_prompts.py`). register_all이 액션 도구를 recorder로 래핑
 - `blackbox_mcp/browser/` — `session.py`(싱글톤 + 4 모드: 번들/채널·스텔스/영구프로필/CDP — DESIGN §3.7), `listeners.py`(콘솔/네트워크 버퍼), `locator.py`(D2 체인)
-- `blackbox_mcp/testing/` — `runner.py`(시나리오+trace_on_failure), `report.py`(JSON/MD/HTML+회귀+리테인션), `recorder.py`(액션 자동 기록→save_report), `library.py`, `secrets.py`(마스킹)
+- `blackbox_mcp/testing/` — `runner.py`(시나리오+trace_on_failure), `report.py`(JSON/MD/HTML+회귀+리테인션), `recorder.py`(액션 자동 기록→save_report), `library.py`, `secrets.py`(마스킹), `smoke.py`(사이트 무관 헬스체크 스텝 합성 — `ui-blackbox smoke`)
 - 확장 도구: `tools/state.py`(로그인 상태 저장/로드 — headless 재사용·역할 전환), `tools/mock.py`(네트워크 모킹 — 컨텍스트 수명, reset 후 재장착)
 - `tests/` — 브라우저 없는 단위 + `file://` 픽스처 통합. 브라우저 필요 테스트는 `browser` 마커(자동 부여) — 고속 레인: `-m "not browser"`
 
@@ -85,6 +85,8 @@ GitHub Release 발행 또는 Actions `Release → Run workflow`).
 - CLI `--parallel` 자식은 `REPORT_RETENTION=0`(부모가 1회 정리), 시그널사는 error, `--timeout` 워치독. stdout이 MCP 파이프가 아니라 print 자유(서버와 달리).
 - navigate 판정은 **상태코드 기반**(`status>=400` 실패, `None`=file://·타임아웃은 통과, 스텝 `expect_status`로 정확 일치 검증). runner·recorder 양쪽 동일.
 - D2 bare-string 체인은 testid→**role+name(흔한 role 순회)**→text — 단, 공백 포함 CSS 신호(`#form input`, `div > a`)는 CSS 프로브가 선행(0건이면 체인 계속 → `Order #123` 같은 텍스트는 텍스트 티어). CSS 즉시 확정은 `# [ ] >` 또는 선행 `.` **이고 공백 없음**일 때만. `locate()`(sync)는 보수적 — 공백 있으면 텍스트. `resolved_by`는 `role=button`처럼 구체 표기.
+- **헬스형 assert kind**(`page_rendered`/`no_js_errors`/`no_console_errors`/`no_failed_requests`/`no_broken_images`)는 `target`이 없다 — 필수 필드 검사는 `runner.missing_fields()`(kind 인지, 순수 함수). 판정 범위는 `nav_marks`(직전 navigate 시점 버퍼 인덱스)부터 — 버퍼는 세션 누적이라 이게 없으면 크롤 2번째 페이지가 1번째 예외를 뒤집어쓴다. `no_console_errors`는 `source=="console"`만 세어 `no_js_errors`(pageerror)와 **서로소** — 예외 1건이 체크 2개를 깨지 않게.
+- `smoke`의 동일 출처 판정은 **Python**(`smoke.same_origin`) — `location.origin`이 file://에선 문자열 `"null"`이라 JS 비교는 로컬 정적 빌드에서 조용히 0건. file://은 시드 디렉토리 하위로만 스코프.
 - 도구별 체인(DESIGN §4): element_visible은 `resolve(visible_only=True)`(숨은 testid가 가시 매치를 가리지 않게), count는 `resolve_count_population`(testid/role 티어 배제 — 공백 구조 문자열은 CSS 매치 있으면 CSS·없으면 텍스트), wait는 **폴링 재해석** + 단일 결정 전략 프로브 오류는 즉시 실패(`is_single_strategy`).
 - `BROWSER` 오타(chrome 등)는 `config.effective_browser()`로 chromium 보정 — 세션 런치·bootstrap 설치 대상·doctor·리포트 meta가 **같은 보정값**을 쓴다(호출부는 모듈 로컬 `CONFIG.browser`를 인자로 전달).
 - `secrets.scrub`은 긴 값부터 치환(부분문자열 secret 잔여 노출 방지). HTML 리포트 스크린샷 임베드는 report_dir 하위 경로만.

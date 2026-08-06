@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Smoke — broken page</title>
+</head>
+<body>
+  <h1>Broken page</h1>
+  <p>Every site-agnostic health check has something to find here.</p>
+
+  <!-- no_broken_images: the file does not exist, so naturalWidth stays 0 -->
+  <img src="./definitely-missing-image.png" alt="missing">
+
+  <!-- no_failed_requests: a 4xx/failed subresource -->
+  <script src="./definitely-missing-script.js"></script>
+
+  <script>
+    // no_console_errors
+    console.error('smoke fixture: console error');
+    // no_js_errors — uncaught, reaches pageerror (not console)
+    setTimeout(function () { throw new Error('smoke fixture: uncaught boom'); }, 0);
+  </script>
+</body>
+</html>

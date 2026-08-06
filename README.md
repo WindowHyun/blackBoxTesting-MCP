@@ -285,13 +285,45 @@ ui-blackbox run a b c --junit results.xml       # suite + JUnit for CI
 ui-blackbox run a b c --parallel 3              # one isolated subprocess each
 ui-blackbox run a b c --parallel 3 --timeout 300  # per-scenario watchdog (sec)
 ui-blackbox run smoke --trace-on-failure        # keep a Playwright trace.zip only on failure
+ui-blackbox smoke https://example.com --crawl 20  # health-check any site, no scenario
 ui-blackbox doctor                              # browser/dirs/config self-check
 ```
+
+### 🌐 `smoke` — any URL, no scenario, no selectors
+
+Every other mode needs a scenario, and a scenario needs selectors, and
+selectors are site-specific. `smoke` checks only what is true of **every**
+site, so it runs on a URL alone:
+
+```bash
+ui-blackbox smoke https://example.com                  # one page
+ui-blackbox smoke https://example.com --crawl 20       # + 20 same-origin links
+ui-blackbox smoke https://a.com https://b.com --junit results.xml
+ui-blackbox smoke https://example.com --strict         # also fail on console.error
+ui-blackbox smoke https://example.com --ignore-url 'googletagmanager|hotjar'
+ui-blackbox smoke file:///srv/build/index.html --crawl 10   # a local static build
+```
+
+| Check | Catches |
+|---|---|
+| `page_rendered` | the **white screen** — HTTP 200 but nothing painted (SPA that died mounting) |
+| `no_js_errors` | uncaught exceptions / unhandled rejections (`pageerror`) |
+| `no_failed_requests` | 4xx·5xx subresources, DNS/TLS/connection failures |
+| `no_broken_images` | `<img>` that resolved to nothing (`naturalWidth === 0`) |
+| `no_console_errors` | `console.error` output — **`--strict` only** (noisy on real sites) |
+
+One page = one report = one JUnit testsuite, so a red page names itself in CI.
+Errors are attributed to the page that produced them, not to whatever page came
+after. These are ordinary assert kinds, so hand-written scenarios can use them
+too — drop `{"action": "assert", "kind": "no_js_errors"}` after any step.
+
+Exit `0` clean · `1` a check failed · `2` usage/infra error.
 
 GitHub Actions sketch:
 ```yaml
 - run: pip install . && playwright install chromium
 - run: ui-blackbox run smoke_login --junit results.xml
+- run: ui-blackbox smoke https://staging.example.com --crawl 30 --junit smoke.xml
 - uses: actions/upload-artifact@v4
   with: { name: ui-reports, path: ~/ui-blackbox/reports }
 ```

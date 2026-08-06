@@ -326,8 +326,16 @@ API:
   > `locator.aria_snapshot()` / `expect().to_match_aria_snapshot()` 권장.
 - **interact (CT-04):** action ∈ {click, type, hover, select, press}.
   `type`/`select`/`press`는 value 사용. 셀렉터는 §4 체인.
-- **assert_ (CT-05):** kind ∈ {text_visible, element_visible, url_is,
-  url_contains, count}. count는 expected=숫자와 일치 검사.
+- **assert_ (CT-05):** 두 계열.
+  - *타깃형* kind ∈ {text_visible, element_visible, url_is, url_contains, count}
+    — `target` 필수. count는 expected=숫자와 일치 검사.
+  - *헬스형* kind ∈ {page_rendered, no_js_errors, no_console_errors,
+    no_failed_requests, no_broken_images} — **`target` 없음**. 이벤트 버퍼와
+    DOM 로드 상태만 읽으므로 사이트 지식이 필요 없다(§4 셀렉터 체인 비경유).
+    판정 범위는 **직전 navigate 시점의 버퍼 인덱스**(`nav_marks`)부터 — 버퍼는
+    세션 단위로 누적되므로, 이게 없으면 크롤 2번째 페이지가 1번째 페이지의
+    예외를 뒤집어쓴다. 스텝의 `ignore`(정규식 배열)로 서드파티 노이즈 제외.
+    `ui-blackbox smoke`가 이 kind들로 조립된다(§10.3).
 - **wait (CT-08):** ms 주어지면 고정 대기, selector 주어지면 등장/텍스트 변경 대기.
 - **expect_dialog (CT-10):** `page.on("dialog", ...)`로 핸들러를 arm 하거나
   `page.expect_event("dialog")` 컨텍스트로 대기 → `dialog.message()`로 텍스트
@@ -573,6 +581,24 @@ SM-01~04와 함께(또는 직후) 구현한다.
   자식 서브프로세스를 kill(브라우저 고아 방지). `--junit`은 순차 실행 전용.
 - 시나리오 하나가 예외로 죽어도(브라우저 기동 실패·디스크 풀 등) 합성 error 결과로
   기록하고 스위트를 계속 — 완료 결과·JUnit이 유실되지 않는다.
+- `ui-blackbox smoke <URL> ...` — **시나리오 없이** 임의 사이트 헬스체크.
+  다른 모든 모드는 시나리오를 요구하고 시나리오는 셀렉터를 요구하며 셀렉터는
+  사이트마다 다르다(saucedemo 스위트가 `data-test` 값 하나 개명에 깨졌다). 그래서
+  이 커맨드는 **모든 사이트에 공통으로 참인 것만** 검사한다 — 헬스형 assert
+  kind(§5 assert_)로 스텝을 즉석 합성해 기존 runner에 태우므로 리포트·JUnit·
+  리테인션·시크릿 스크럽·trace가 그대로 적용된다.
+  - 기본 체크: page_rendered · no_js_errors · no_failed_requests · no_broken_images.
+    `--strict`가 no_console_errors 추가(실사이트에서 서드파티 노이즈가 커서 기본 제외).
+  - `--crawl N` — 방문한 페이지에서 발견한 **동일 출처** 링크를 너비 우선으로 N개까지
+    추가 검사. 총 방문은 `시드 수 + N`으로 상한. 동일 출처 판정은 Python 측
+    (`smoke.same_origin`) — `location.origin`이 file:// 에서 문자열 `"null"`이라
+    JS 비교는 로컬 정적 빌드에서 조용히 0건이 된다. file://은 시드의 디렉토리
+    하위로만 스코프(파일시스템 배회 방지).
+  - `--ignore-url REGEX`(반복 가능) — 애널리틱스 비콘 같은 노이즈를 URL 정규식으로
+    억제. 체크를 끄는 대신 제외하는 쪽 — 진짜 신호는 남는다.
+  - **페이지 1개 = 시나리오 1개 = 리포트 1개 = JUnit testsuite 1개.** CI에서 어떤
+    페이지의 어떤 체크가 깨졌는지 이름으로 바로 드러난다. `continue_on_fail`은 강제
+    — 첫 실패에서 멈추면 JS 예외 뒤의 깨진 이미지가 가려진다.
 - `ui-blackbox doctor` — 브라우저 해석 가능 여부·출력 디렉토리 쓰기 가능·유효 설정
   자가진단(설치 문제 셀프서비스 디버깅).
 

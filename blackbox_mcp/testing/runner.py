@@ -23,7 +23,7 @@ from typing import Any
 
 from ..browser import get_session
 from ..config import CONFIG, effective_browser
-from ..tools.assertion import assert_
+from ..tools.assertion import HEALTH_KINDS, assert_, assert_health
 from ..tools.dialog import expect_dialog
 from ..tools.download import expect_download
 from ..tools.frame import switch_frame
@@ -85,7 +85,42 @@ def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None
         }))
 
 
-async def _dispatch(step: dict) -> dict:
+# A failed health kind needs a different next move than a failed selector —
+# "verify the target" is useless when there is no target.
+_HEALTH_HINTS = {
+    "no_js_errors": "미처리 JS 예외 — 콘솔 스택의 첫 프레임부터 확인. 서드파티 스크립트가 "
+                    "원인이면 --ignore-url로 제외",
+    "no_console_errors": "console.error 출력 — 앱 로그인지 서드파티인지 location으로 구분",
+    "no_failed_requests": "4xx/5xx 또는 연결 실패 — 엔드포인트/인증/CORS 확인. 애널리틱스 "
+                          "비콘이면 --ignore-url로 제외",
+    "page_rendered": "그려진 요소가 없음(백색 화면) — 번들 로드 실패나 렌더 중 예외 의심. "
+                     "no_js_errors/no_failed_requests 결과를 함께 볼 것",
+    "no_broken_images": "이미지가 로드되지 않음(naturalWidth=0) — 경로/권한/핫링크 차단 확인",
+}
+
+
+_REQUIRED = {"navigate": ["url"], "interact": ["selector"],
+             "assert": ["kind"], "assert_": ["kind"]}
+
+
+def missing_fields(step: dict) -> list[str]:
+    """Required fields absent from a step (empty when it is well formed).
+
+    Clear errors for malformed steps (common with LLM-authored scenarios) —
+    better than a bare KeyError surfaced as a generic exception. Pure, so the
+    kind-aware `target` rule below is pinned without launching a browser.
+    """
+    action = step.get("action", "")
+    missing = [k for k in _REQUIRED.get(action, []) if k not in step]
+    # `target` is required only for the targeted kinds — the health kinds
+    # (no_js_errors, page_rendered, …) deliberately take none.
+    if (not missing and action in ("assert", "assert_")
+            and step["kind"] not in HEALTH_KINDS and "target" not in step):
+        return ["target"]
+    return missing
+
+
+async def _dispatch(step: dict, nav_marks: dict | None = None) -> dict:
     """Execute a single step; return partial result fields (no I/O on buffers)."""
     action = step.get("action", "")
     out: dict[str, Any] = {
@@ -93,11 +128,7 @@ async def _dispatch(step: dict) -> dict:
         "resolved_by": None, "ai_reason": "", "ai_suggestion": None,
     }
 
-    # Clear errors for malformed steps (common with LLM-authored scenarios) —
-    # better than a bare KeyError surfaced as a generic exception.
-    _required = {"navigate": ["url"], "interact": ["selector"],
-                 "assert": ["kind", "target"], "assert_": ["kind", "target"]}
-    missing = [k for k in _required.get(action, []) if k not in step]
+    missing = missing_fields(step)
     if missing:
         out.update(actual=f"missing required field(s): {', '.join(missing)}",
                    passed=False, ai_reason="malformed step",
@@ -152,12 +183,18 @@ async def _dispatch(step: dict) -> dict:
                                     "the literal ${...} placeholder was typed")
 
     elif action in ("assert", "assert_"):
-        res = await assert_(step["kind"], step["target"], step.get("expected"))
-        out.update(expected=step.get("expected") or step["kind"], actual=res.get("actual"),
+        kind = step["kind"]
+        if kind in HEALTH_KINDS:
+            res = await assert_health(kind, nav_marks, step.get("ignore"))
+        else:
+            res = await assert_(kind, step["target"], step.get("expected"))
+        out.update(expected=step.get("expected") or kind, actual=res.get("actual"),
                    passed=bool(res.get("passed")))
-        out["ai_reason"] = f"{step['kind']} {'held' if res.get('passed') else 'did not hold'}"
+        out["ai_reason"] = f"{kind} {'held' if res.get('passed') else 'did not hold'}"
         if not res.get("passed"):
-            out["ai_suggestion"] = f"expected {step['kind']} on '{step['target']}' — verify the target"
+            out["ai_suggestion"] = (
+                _HEALTH_HINTS.get(kind)
+                or f"expected {kind} on '{step.get('target')}' — verify the target")
 
     elif action == "snapshot":
         snap = await snapshot(step.get("mode", "a11y"), step.get("focus"), step.get("depth"))
@@ -326,10 +363,17 @@ async def run(
         except Exception:
             tracing = False
 
+    # Buffer positions at the most recent navigate, so the health kinds judge
+    # only the current page. Without this a crawl blames every later page for
+    # the first page's exception (buffers accumulate across a session).
+    nav_marks = {"console": 0, "network": 0, "dialogs": 0}
+
     for idx, step in enumerate(steps, start=1):
         c0 = len(session.buffers.console)
         n0 = len(session.buffers.network)
         d0 = len(session.buffers.dialogs)
+        if step.get("action") == "navigate":
+            nav_marks = {"console": c0, "network": n0, "dialogs": d0}
         s0 = time.monotonic()
         exc: Exception | None = None
         # Flaky-step handling: `retry: N` re-dispatches up to N extra times
@@ -340,7 +384,7 @@ async def run(
         for attempt in range(attempts):
             exc = None
             try:
-                fields = await _dispatch(step)
+                fields = await _dispatch(step, nav_marks)
             except Exception as e:  # a step blew up unexpectedly
                 exc = e
                 fields = {"expected": None, "actual": f"{type(e).__name__}: {e}",

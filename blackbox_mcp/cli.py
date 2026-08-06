@@ -259,6 +259,77 @@ def _cmd_run(args) -> int:
     return EXIT_OK if failed == 0 else EXIT_FAILED
 
 
+async def _run_smoke(args) -> list[dict]:
+    """Smoke every seed URL, then breadth-first through discovered same-origin
+    links until the crawl budget runs out. One page = one scenario = one report
+    and one JUnit testsuite, so a red page names itself in CI."""
+    from .browser.session import close_session, get_session
+    from .testing import report, runner, smoke
+
+    checks = smoke.STRICT_CHECKS if args.strict else smoke.DEFAULT_CHECKS
+    max_pages = len(args.url) + max(0, args.crawl)
+    queue: list[str] = list(args.url)
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    try:
+        while queue and len(seen) < max_pages:
+            url = queue.pop(0)
+            if url in seen:
+                continue
+            seen.add(url)
+            name = smoke.scenario_name(url)
+            steps = smoke.smoke_steps(
+                url, checks=checks, ignore=args.ignore_url,
+                screenshot=not args.no_screenshot, expect_status=args.expect_status)
+            print(f"▶ {name}  ({url})")
+            try:
+                # continue_on_fail is forced: the point of a smoke run is to
+                # collect every finding on the page. Stopping at the first one
+                # would hide the broken images behind the JS error.
+                res = await runner.run(steps, name=name, description=f"smoke: {url}",
+                                       continue_on_fail=True,
+                                       trace_on_failure=args.trace_on_failure)
+                s = res["summary"]
+                mark = "PASS" if s["failed"] == 0 else "FAIL"
+                print(f"  {mark} {s['passed']}/{s['total']}")
+                for st in res.get("steps", []):
+                    if not st.get("passed") and not st.get("skipped"):
+                        print(f"    ✗ {st.get('expected')}: {st.get('actual')}")
+                for fmt, p in report.save(res, formats=args.format).items():
+                    print(f"  report[{fmt}]: {p}")
+                results.append(res)
+            except Exception as exc:
+                print(f"  ERROR {type(exc).__name__}: {exc}", file=sys.stderr)
+                results.append(_errored_result(name, exc))
+                continue
+
+            room = max_pages - len(seen) - len(queue)
+            if room > 0:
+                session = await get_session()
+                queue.extend(l for l in await smoke.same_origin_links(session, url, room)
+                             if l not in seen and l not in queue)
+    finally:
+        await close_session()
+    return results
+
+
+def _cmd_smoke(args) -> int:
+    from .bootstrap import ensure_chromium
+    ensure_chromium()
+    try:
+        results = asyncio.run(_run_smoke(args))
+    except Exception as exc:
+        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    if args.junit:
+        _write_junit(results, args.junit)
+    print(_totals_line(results))
+    failed = sum(r["summary"]["failed"] for r in results)
+    return EXIT_OK if failed == 0 else EXIT_FAILED
+
+
 def _cmd_doctor(args) -> int:  # noqa: ARG001
     """Self-check: browser resolvable + output dirs writable + config echo."""
     from .bootstrap import _browser_installed
@@ -377,6 +448,31 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--timeout", type=float, default=600.0, metavar="SEC",
                        help="per-scenario watchdog for --parallel (default 600s)")
     run_p.set_defaults(func=_cmd_run)
+
+    smoke_p = sub.add_parser(
+        "smoke", help="health-check any URL — no scenario, no selectors")
+    smoke_p.add_argument("url", nargs="+", help="one or more page URLs")
+    smoke_p.add_argument("--crawl", type=int, default=0, metavar="N",
+                         help="also check up to N same-origin links found on the "
+                              "visited pages (default 0)")
+    smoke_p.add_argument("--strict", action="store_true",
+                         help="also fail on console.error output (off by default: "
+                              "third-party scripts make it noisy on real sites)")
+    smoke_p.add_argument("--ignore-url", action="append", default=[], metavar="REGEX",
+                         help="suppress failed requests / errors whose URL matches "
+                              "(repeatable) — e.g. analytics beacons")
+    smoke_p.add_argument("--expect-status", type=int, default=None, metavar="CODE",
+                         help="require this exact HTTP status on load")
+    smoke_p.add_argument("--no-screenshot", action="store_true",
+                         help="skip the per-page screenshot")
+    smoke_p.add_argument("--format", default="all",
+                         choices=["json", "md", "html", "all"],
+                         help="report formats to write (default all)")
+    smoke_p.add_argument("--trace-on-failure", action="store_true",
+                         help="keep a Playwright trace for pages that fail")
+    smoke_p.add_argument("--junit", metavar="PATH",
+                         help="also write JUnit XML for CI")
+    smoke_p.set_defaults(func=_cmd_smoke)
 
     doc_p = sub.add_parser("doctor", help="check browser/dirs/network/config health")
     doc_p.add_argument("--url", metavar="URL",
