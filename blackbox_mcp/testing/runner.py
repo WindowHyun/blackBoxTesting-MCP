@@ -36,7 +36,7 @@ from ..tools.snapshot import snapshot
 from ..tools.state import load_state, save_state
 from ..tools.tabs import switch_tab
 from ..tools.wait import wait
-from . import report, secrets
+from . import applog, diagnose, memory, report, secrets
 
 
 def empty_result(name: str) -> dict[str, Any]:
@@ -295,6 +295,8 @@ async def run(
     screenshot_each: bool = False,
     trace_on_failure: bool = False,
     fail_on_js_error: bool = False,
+    app_log: str | None = None,
+    snapshot_each: bool = False,
 ) -> dict[str, Any]:
     """Execute steps and return a structured result (DESIGN §6.1)."""
     session = await get_session()
@@ -331,6 +333,9 @@ async def run(
         n0 = len(session.buffers.network)
         d0 = len(session.buffers.dialogs)
         s0 = time.monotonic()
+        # Wall clock, not monotonic: app-log correlation compares against
+        # timestamps written by another process (applog.attach).
+        wall0 = time.time()
         exc: Exception | None = None
         # Flaky-step handling: `retry: N` re-dispatches up to N extra times
         # (short backoff). A pass on any attempt counts, but is marked below
@@ -401,6 +406,8 @@ async def run(
             "actual": fields.get("actual"),
             "passed": passed,
             "duration_ms": duration_ms,
+            "started_at": wall0,
+            "ended_at": time.time(),
             "screenshot": shot,
             "page_url": page_url,
             "tag": step.get("tag"),            # 요구사항/이슈 연결용 passthrough
@@ -413,6 +420,9 @@ async def run(
                          if not passed else None),
             "ai_reason": reason,
             "ai_suggestion": fields.get("ai_suggestion"),
+            # Per-step page structure, for reading the FLOW rather than one
+            # failure. Only when asked: an a11y tree per step is large.
+            "snapshot": await _step_snapshot(step) if snapshot_each else None,
         }))
 
         if not passed and not continue_on_fail:
@@ -428,7 +438,17 @@ async def run(
         result["trace"] = await _stop_tracing(
             session, failed=result["summary"]["failed"] > 0, run_tag=run_tag)
 
+    # Order matters. App-log lines are evidence the classifier reads, so they
+    # must be attached before diagnosis; memory annotation must run after the
+    # steps are final but before the store is updated, so "seen_before" counts
+    # prior runs and a first failure reads as new rather than recurring.
+    log_source = app_log if app_log is not None else CONFIG.app_log
+    if log_source:
+        applog.attach(result, log_source)
+
     result["a11y_findings"] = await _a11y_audit(session)   # SM-09
+    memory.annotate(result)                                # 실패 기억
+    result["diagnosis"] = diagnose.diagnose_result(result)  # 원인 분류 + 수정 가능 여부
     report.compute_regression(result)                      # SM-07
     # Records are already scrubbed at append time, so the run's resolved secrets
     # can be dropped now — bounds growth and stops cross-scenario over-scrub (L1).
@@ -472,6 +492,18 @@ async def _stop_tracing(session, *, failed: bool, run_tag: str) -> str | None:
         return str(path)
     except Exception:
         return None  # context swapped mid-run (reset_session) etc.
+
+
+async def _step_snapshot(step: dict) -> str | None:
+    """Compact page outline for the step just executed (flow reading).
+
+    dom mode, not a11y: an ARIA tree per step would dominate the report, while
+    the tag/testid/text outline is enough to follow what screen the flow was on.
+    """
+    try:
+        return await snapshot(mode="dom", focus=step.get("snapshot_focus"))
+    except Exception:
+        return None
 
 
 async def _a11y_audit(session) -> list[dict]:

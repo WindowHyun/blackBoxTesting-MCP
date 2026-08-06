@@ -224,6 +224,7 @@ the request.
 | `/ui-login` | task, url | **Switch to real Chrome (persistent login)** then test a site that needs auth |
 | `/ui-generate` | description, url, name | Analyze a page → generate & save a reusable scenario |
 | `/ui-sync` | name, url | Change detection: diff a saved scenario against the current page, update & re-run |
+| `/ui-loop` | name, app_log | **Autonomous loop, one cycle**: run → detect & recall → trace cause → dump the flow → propose a repair (gated) → verify regression |
 
 Example: `/ui-test` → `open example.com, click the login button, take a screenshot`
 
@@ -233,9 +234,33 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 - *"Compared to yesterday, what broke in that last test?"* (regression)
 - *"Were there any console errors or 4xx responses?"*
 
+### 🔁 The autonomous loop (`/ui-loop`)
+
+One cycle chains everything above, with one hard rule at its centre.
+
+| Stage | What runs |
+|---|---|
+| 1–2. prompt → automate | `load_scenario` → `run_scenario(continue_on_fail, snapshot_each, app_log)` |
+| 3. detect + **recall** | failed steps carry `memory.status` = `new` / `recurring` / `regressed` (`get_failure_memory`) |
+| 4. trace the cause | console+`pageerror` · network · dialogs · **`app_log` lines from the step's own time window** · screenshot → `diagnose_run` |
+| 5. read the flow | per-step page outline (`snapshot_each`) + step screenshots |
+| 6. repair — **gated** | `app_broken` / `environment` / `unknown` → **refuses**. Only `ui_changed` / `scenario_bug` reach `propose_repair`, which returns candidates and writes nothing |
+| 7. verify | re-run → `regression` diff; the closed failure is marked resolved on the next clean run |
+
+> **Why the gate exists.** A loop that repairs whatever is red converges on a
+> green suite that asserts nothing. When the page threw or the server 5xx'd,
+> rewriting the assertion until it passes deletes the defect. So the cause is
+> classified from evidence *before* anything is proposed, and `propose_repair`
+> refuses outright on anything but a genuine UI change.
+>
+> It also states its own blind spot: an element that still exists but whose
+> assertion no longer holds ("the cart badge stopped updating") is
+> structurally identical to a rename. That case is returned as
+> `confidence: medium` + `requires_human_review: true` — never auto-applied.
+
 ---
 
-## 🧰 MCP Tools (30)
+## 🧰 MCP Tools (33)
 
 | Group | Tools |
 |---|---|
@@ -243,6 +268,7 @@ Example: `/ui-test` → `open example.com, click the login button, take a screen
 | Extended | `wait` · `switch_frame` · `expect_dialog` · `get_dialogs` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
 | Popups & tabs | `expect_popup` · `list_tabs` · `switch_tab` — deterministic popup handling and a way back to the opener |
 | Files | `interact(action="upload")` · `expect_download` — attachment upload, and download verified by name/extension/size |
+| Autonomous loop | `get_failure_memory` · `diagnose_run` · `propose_repair` — is this failure new or chronic, what caused it, and is fixing the *test* even legitimate |
 | Auth state | `save_state` · `load_state` · `list_states` — export login (cookies+localStorage) once, reuse headless/in CI, swap roles |
 | Network mock | `mock_route` · `unmock_route` — deterministic offline responses for flaky/unbuilt APIs |
 | Scenario & report | `run_scenario` (incl. `trace_on_failure`) · `generate_scenario` · `save_report` |
@@ -347,7 +373,8 @@ Run playbook: [`HARNESS.md`](./HARNESS.md) · Agent context: [`CLAUDE.md`](./CLA
 `DEFAULT_WAIT_UNTIL` (networkidle) · `NAV_TIMEOUT_MS` (30000) ·
 `IGNORE_HTTPS_ERRORS` (false) · `REPORT_RETENTION` (keep newest N runs,
 default 100, 0=unlimited) · `VIEWPORT` (e.g. `1280x800`, `390x844` for mobile) ·
-`DOWNLOAD_DIR` (~/ui-blackbox/downloads) · `BROWSER_INSTALL_TIMEOUT_S` (300).
+`DOWNLOAD_DIR` (~/ui-blackbox/downloads) · `BROWSER_INSTALL_TIMEOUT_S` (300) ·
+`APP_LOG` (server/app log file correlated to the step that was running).
 Details in `.env.example`.
 
 ### Closed / corporate networks (사내망)

@@ -32,6 +32,7 @@ _TOOL_MODULES = (
     "state",
     "mock",
     "scenario",
+    "loop",
     "savereport",
     "generate",
     "library",

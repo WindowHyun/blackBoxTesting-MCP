@@ -127,6 +127,10 @@ class Config:
     install_timeout_s: int
     # Where expect_download saves files.
     download_dir: Path
+    # Application/server log to correlate against failing steps. The browser
+    # can only see the app from outside; when a step fails because the SERVER
+    # threw, the reason lives here and nowhere the tool can otherwise reach.
+    app_log: str | None
 
     @staticmethod
     def from_env() -> "Config":
@@ -157,6 +161,7 @@ class Config:
             viewport=_as_viewport(os.getenv("VIEWPORT")),
             install_timeout_s=_as_int(os.getenv("BROWSER_INSTALL_TIMEOUT_S"), 300),
             download_dir=_resolve_dir(os.getenv("DOWNLOAD_DIR"), "downloads"),
+            app_log=(os.getenv("APP_LOG") or None),
         )
 
     # ── derived launch/context options ───────────────────────────

@@ -468,11 +468,32 @@ SM-01~04와 함께(또는 직후) 구현한다.
         // 자동 dismiss되어 흐름은 이어지지만, 그 자체가 결함 신호다.
         // {type,message,handled,expected,ts}
       ],
+      "started_at": 1785915561.9,        // epoch초 — 앱 로그 상관(applog)의 기준
+      "ended_at": 1785915562.3,
+      "app_log": [                       // APP_LOG/app_log 지정 시, 이 스텝 실행
+        // 구간에 앱/서버가 남긴 오류 줄(스택 포함). 브라우저가 볼 수 없는 절반.
+      ],
+      "snapshot": null,                  // snapshot_each=true일 때 스텝별 화면 개요
+      "fingerprint": "a1b2c3d4e5f6a7b8", // 실패 기억 키(memory) — 실패 스텝만
+      "memory": {                        // 실패 스텝만. 이 실패를 전에 봤는가?
+        "status": "new",                 // new | recurring | regressed
+        "seen_before": 0, "first_seen": null, "last_seen": null
+      },
       "severity": null,                  // SM-08: assertion|js_error|network|timeout
       "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
       "ai_suggestion": null              // SM-05: 실패 시 가설/수정 제안
     }
   ],
+  "diagnosis": {                         // 실패 원인 분류 + 테스트 수정 허용 여부
+    "verdict": "앱 결함 1건 — 테스트를 고치지 말 것.",
+    "causes": {"app_broken": 1, "ui_changed": 2},
+    "findings": [{
+      "step": 5, "cause": "app_broken", "confidence": "high",
+      "evidence": ["미처리 JS 예외 1건: …"],
+      "test_fix_allowed": false,         // 게이트: false면 propose_repair가 거부
+      "requires_human_review": false     // confidence<high면 true
+    }]
+  },
   "a11y_findings": [],                   // SM-09: role/label 누락 등
   "regression": {                        // SM-07: 직전 실행 대비
     "previous_run": "2026-06-23T18:00:00",

@@ -13,7 +13,11 @@ from ._registry import tool
                   "run fails (open with `playwright show-trace`). "
                   "fail_on_js_error fails a step whose assertion held but whose "
                   "page threw an uncaught JS exception (default off — the error "
-                  "is always recorded either way).")
+                  "is always recorded either way). app_log correlates a server/app "
+                  "log file's lines to the step that was running when they were "
+                  "written. snapshot_each records a page outline per step (flow "
+                  "reading). The result carries a 'diagnosis' with per-failure "
+                  "cause classification.")
 async def run_scenario(
     steps: list[dict],
     name: str = "scenario",
@@ -24,11 +28,14 @@ async def run_scenario(
     screenshot_each: bool = False,
     trace_on_failure: bool = False,
     fail_on_js_error: bool = False,
+    app_log: str | None = None,
+    snapshot_each: bool = False,
 ) -> dict:
     result = await runner.run(
         steps, name=name, description=description,
         continue_on_fail=continue_on_fail, screenshot_each=screenshot_each,
         trace_on_failure=trace_on_failure, fail_on_js_error=fail_on_js_error,
+        app_log=app_log, snapshot_each=snapshot_each,
     )
     if save_report:
         result["report_files"] = report.save(result, formats=report_format)

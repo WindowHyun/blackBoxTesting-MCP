@@ -4,6 +4,7 @@ what a closed network actually depends on.
 """
 from __future__ import annotations
 
+import dataclasses
 import subprocess
 
 import pytest
@@ -12,20 +13,29 @@ from blackbox_mcp import bootstrap, config
 from blackbox_mcp.browser import session as session_mod
 
 
+# Every behaviour knob these tests reason about, pinned to a neutral value so a
+# machine that happens to export HTTPS_PROXY (or any other knob) can't change
+# what they assert. Paths are inherited from the real CONFIG — harmless here.
+_NEUTRAL = dict(
+    headless=True, browser="chromium", chromium_executable=None,
+    browser_channel=None, cdp_url=None, stealth=False,
+    selector_timeout_ms=2000, default_wait_until="networkidle",
+    nav_timeout_ms=30000, ignore_https_errors=False, report_retention=0,
+    proxy_server=None, proxy_username=None, proxy_password=None,
+    proxy_bypass=None, http_username=None, http_password=None,
+    auth_server_allowlist=None, viewport=None, install_timeout_s=300,
+    app_log=None,
+)
+
+
 def _cfg(**overrides):
-    base = dict(
-        headless=True, browser="chromium", chromium_executable=None,
-        browser_channel=None, cdp_url=None, stealth=False,
-        report_dir=config.CONFIG.report_dir, scenario_dir=config.CONFIG.scenario_dir,
-        selector_timeout_ms=2000, default_wait_until="networkidle",
-        nav_timeout_ms=30000, ignore_https_errors=False, report_retention=0,
-        proxy_server=None, proxy_username=None, proxy_password=None,
-        proxy_bypass=None, http_username=None, http_password=None,
-        auth_server_allowlist=None, viewport=None, install_timeout_s=300,
-        download_dir=config.CONFIG.download_dir,
-    )
-    base.update(overrides)
-    return config.Config(**base)
+    """A Config derived from the real one, not rebuilt field by field.
+
+    Constructing Config(**every_field) meant that adding ONE field to Config
+    broke every test in this file with a TypeError that says nothing about the
+    actual change. replace() only touches what we name.
+    """
+    return dataclasses.replace(config.CONFIG, **{**_NEUTRAL, **overrides})
 
 
 # ── proxy ────────────────────────────────────────────────────────

@@ -90,4 +90,14 @@ GitHub Release 발행 또는 Actions `Release → Run workflow`).
 - `secrets.scrub`은 긴 값부터 치환(부분문자열 secret 잔여 노출 방지). HTML 리포트 스크린샷 임베드는 report_dir 하위 경로만.
 - `ai_reason`/`ai_suggestion`은 러너에선 **규칙 기반**(리포트 각주로 명시) — 대화형(Claude)에선 호스트 LLM이 보강. 필드명은 스키마(DESIGN §6.1)라 유지.
 - 서버는 **단일 테넌트**(프로세스당 세션 1개·전역 recorder). 병렬은 CLI 프로세스 분리로만. 공유 서버는 스코프 밖(아키텍처 재작업 필요).
+- 자율 루프(`/ui-loop`)의 **게이트는 `testing/diagnose.py`**: app_broken/environment/
+  unknown은 `test_fix_allowed=False`라 `propose_repair`가 거부한다. 빨간 걸 무조건
+  고치는 루프는 아무것도 검증하지 않는 green 스위트로 수렴한다. 분류를 느슨하게
+  바꾸려면 `tests/test_diagnose.py`부터 읽을 것 — 특히 "요소는 있는데 단언이 깨진"
+  경우는 UI 변경과 기능 결함이 구조적으로 구분되지 않아 medium+사람 확인으로 고정.
+- 실패 기억(`testing/memory.py`)의 fingerprint 구분자는 **NUL**(공백이면 `"a b"+"c"`와
+  `"a"+"b c"`가 충돌). 정규화로 포트/타임스탬프/숫자를 지워야 같은 실패가 매번
+  "새 실패"로 보이지 않는다. `annotate`는 저장 **전에** 읽어야 첫 실패가 new로 나온다.
+- 앱 로그 상관은 스텝의 `started_at`/`ended_at`(**wall clock**, monotonic 아님)을 쓴다 —
+  다른 프로세스가 찍은 타임스탬프와 비교해야 하기 때문.
 - 린트 게이트: `ruff check blackbox_mcp`·`mypy blackbox_mcp` 둘 다 CI 차단(현재 clean). 세션의 Playwright 속성은 `Any`로 타입(옵셔널-init — 생존은 `is_alive()`가 런타임 보장). mypy 메이저는 pyproject에서 `<2` 캡.

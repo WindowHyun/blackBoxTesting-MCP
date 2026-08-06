@@ -33,6 +33,34 @@ def _display_value(selector: str, action: str, value: str | None) -> str | None:
     return scrub(value)
 
 
+async def _read_back(locator, expected: str, timeout_ms: int) -> str | None:
+    """None when the field holds what we typed; a description otherwise.
+
+    Only compares for elements that HAVE a value (input/textarea/select).
+    contenteditable and custom widgets return no input_value, and a widget we
+    cannot read is not evidence of a defect — stay silent rather than invent a
+    failure.
+    """
+    if not expected:
+        return None
+    try:
+        actual = await locator.input_value(timeout=timeout_ms)
+    except Exception:
+        return None            # not a value-bearing element; nothing to verify
+    if actual == expected:
+        return None
+    shown_expected = mask_value(expected) if _looks_secret(expected) else expected
+    shown_actual = mask_value(actual) if actual and _looks_secret(expected) else actual
+    return (f"기대 {shown_expected!r} · 실제 {shown_actual!r} "
+            f"(필드가 입력을 버리거나 변형함)")
+
+
+def _looks_secret(value: str) -> bool:
+    """True when the typed value came from a resolved ${SECRET}."""
+    from ..testing.secrets import _RESOLVED_SECRETS
+    return value in _RESOLVED_SECRETS
+
+
 def _upload_paths(value: str) -> tuple[list[str], str | None]:
     """Split a comma-separated file list and verify each path exists."""
     paths = [p.strip() for p in value.split(",") if p.strip()]
@@ -92,6 +120,17 @@ async def interact(action: str, selector: str, value: str | None = None) -> dict
         elif action == "type":
             await locator.fill(value_resolved or "", timeout=t)
             detail = "typed"
+            # Read back what the field actually holds. fill() reports success as
+            # soon as it dispatched the input, so a field that silently discards
+            # keystrokes (a masked/validated input with a buggy handler) passes
+            # here and only surfaces two steps later when the form refuses to
+            # submit — pointing the loop at the wrong step. Verifying at the
+            # source moves the failure to its cause.
+            readback = await _read_back(locator, value_resolved or "", t)
+            if readback is not None:
+                return {"ok": False, "action": action, "selector": selector,
+                        "resolved_by": resolved_by,
+                        "error": f"입력이 유지되지 않음: {readback}"}
         elif action == "select":
             # A bare string matches by value OR label, so "부산" and "v2" both
             # work on <option value="v2">부산</option> — QA writes what it sees.

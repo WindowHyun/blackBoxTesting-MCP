@@ -18,7 +18,9 @@ _ONLY = ("**ui-blackbox MCP 서버의 도구만** 사용해. 다른 브라우저
          "expect_dialog · reset_session · use_real_browser · dismiss_banners · "
          "save_state · load_state · list_states · mock_route · unmock_route · "
          "run_scenario · save_report · generate_scenario · save_scenario · "
-         "load_scenario · list_scenarios · status.")
+         "load_scenario · list_scenarios · status · "
+         "expect_popup · list_tabs · switch_tab · expect_download · get_dialogs · "
+         "get_failure_memory · diagnose_run · propose_repair.")
 
 # Observation → tool selection matrix (qa-autopilot pattern): tells the host
 # LLM which escalation each symptom calls for, instead of trial and error.
@@ -105,3 +107,76 @@ def ui_sync(name: str, url: str = "") -> str:
             f"동의를 받아 `save_scenario(name, steps, overwrite=True)`로 갱신한다.\n"
             f"5. 갱신했다면 `run_scenario`로 재실행해 green을 확인하고 리포트를 남긴다.\n\n"
             f"시나리오 이름: {name}")
+
+
+@prompt(name="ui-loop",
+        description="자율 루프: 실행 → 실패 감지/기억 → 원인 추적 → 플로우 덤프 → "
+                    "수정 제안(승인 후 반영) → 회귀 검증")
+def ui_loop(name: str, app_log: str = "") -> str:
+    """The seven stages, wired so the unsafe one cannot fire by accident.
+
+    Stage 6 is the whole reason this prompt is explicit rather than left to
+    improvisation: a loop that repairs whatever is red converges on a green
+    suite that asserts nothing. The classification gate is stated as a hard
+    rule here so the host LLM does not reason its way past it.
+    """
+    log_arg = f", app_log='{app_log}'" if app_log else ""
+    log_note = (f"\n   - 서버 로그 `{app_log}`의 줄이 스텝별로 붙는다(app_log 필드)."
+                if app_log else
+                "\n   - 서버 로그를 붙이려면 app_log='<경로>'로 다시 호출할 것"
+                "(브라우저만으로는 서버가 던진 예외를 볼 수 없다).")
+    return (
+        f"{_ONLY}\n\n"
+        f"시나리오 '{name}'에 대해 **자율 테스트 루프 한 바퀴**를 돌려줘. "
+        f"각 단계의 결과를 보고하고, 6단계는 반드시 승인을 받고 진행해.\n\n"
+
+        f"**1~2. 실행**\n"
+        f"   `load_scenario('{name}')` → `run_scenario(steps, name='{name}', "
+        f"continue_on_fail=True, snapshot_each=True{log_arg})`\n"
+        f"   - continue_on_fail: 첫 실패에서 멈추면 결함을 하나씩만 보게 된다.\n"
+        f"   - snapshot_each: 스텝별 페이지 개요가 남아 플로우를 읽을 수 있다.{log_note}\n\n"
+
+        f"**3. 실패 감지 / 기억**\n"
+        f"   결과의 `summary`와 실패 스텝을 정리하고, `get_failure_memory('{name}')`로 "
+        f"이력을 대조해. 각 실패의 `memory.status`를 보고해:\n"
+        f"   - `new` — 처음 보는 실패. 원인 추적이 필요하다.\n"
+        f"   - `recurring` — 만성. 이미 아는 문제이니 처음부터 다시 진단하지 말고 "
+        f"기존 결론을 재확인만 해.\n"
+        f"   - `regressed` — 고쳤다가 재발. **이전 수정이 유지되지 않았다는 뜻**이라 "
+        f"가장 우선순위가 높다.\n\n"
+
+        f"**4. 원인 추적**\n"
+        f"   `diagnose_run()`으로 실패를 원인별로 분류해. 각 실패의 근거"
+        f"(console/pageerror · network · dialogs · app_log · 스크린샷 · page_url)를 "
+        f"인용해서 설명하고, 분류가 타당한지 검토해. 분류가 틀렸다고 판단하면 "
+        f"근거를 들어 반박하고 사람에게 확인을 요청해.\n\n"
+
+        f"**5. 플로우 이해**\n"
+        f"   스텝별 `snapshot`과 스크린샷을 순서대로 읽어 **어떤 화면에서 무엇이 "
+        f"어긋났는지** 한 문단으로 설명해. 실패 스텝만이 아니라 그 직전 스텝의 화면을 "
+        f"같이 봐야 원인이 보인다.\n\n"
+
+        f"**6. 자가 수정 — 여기서 규칙을 지켜**\n"
+        f"   `diagnose_run`의 `cause`에 따라 행동이 완전히 다르다:\n"
+        f"   - `app_broken` → **테스트를 절대 고치지 마.** 앱이 예외를 던졌거나 서버가 "
+        f"5xx를 반환한 것이다. 테스트를 고치면 결함을 덮는다. 재현 절차와 증거를 정리해 "
+        f"보고하고 여기서 멈춰.\n"
+        f"   - `environment` → 접근 설정 문제(프록시·인증서·DNS). 테스트도 앱도 아니다. "
+        f"`doctor --url`로 확인할 것을 안내하고 멈춰.\n"
+        f"   - `unknown` → 자동 판단 불가. 사람에게 확인을 요청하고 멈춰.\n"
+        f"   - `scenario_bug` → 스텝 정의 오류. 스키마에 맞게 고쳐 제안해.\n"
+        f"   - `ui_changed` → **이 경우에만** `propose_repair(selector=..., "
+        f"cause='ui_changed')`로 현재 페이지의 대체 후보를 받아, D2 우선순위"
+        f"(testid → role+name → text → css)에 맞는 새 스텝을 구성해.\n"
+        f"   어느 경우든 **먼저 diff를 보여주고 동의를 받은 뒤에만** "
+        f"`save_scenario('{name}', steps, overwrite=True)`로 저장해. "
+        f"동의 없이 저장하지 마.\n\n"
+
+        f"**7. 회귀 검증**\n"
+        f"   수정했다면 `run_scenario`를 다시 실행해 green을 확인하고, 리포트의 "
+        f"`regression`으로 **다른 스텝이 깨지지 않았는지** 확인해. 통과했다면 다음 "
+        f"실행에서 해당 실패가 `resolved`로 닫힌다.\n"
+        f"   수정하지 않았다면(앱 결함/환경/불명) 그 사실과 근거를 결론으로 남겨.\n\n"
+
+        f"마지막에 **한 줄 결론**을 줘: 무엇이 깨졌고 · 원인이 어느 쪽이며 · "
+        f"무엇을 했고 · 사람이 무엇을 해야 하는지.")
