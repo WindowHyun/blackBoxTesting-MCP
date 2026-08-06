@@ -25,13 +25,16 @@ from ..browser import get_session
 from ..config import CONFIG, effective_browser
 from ..tools.assertion import assert_
 from ..tools.dialog import expect_dialog
+from ..tools.download import expect_download
 from ..tools.frame import switch_frame
 from ..tools.interact import interact
 from ..tools.navigate import navigate
 from ..tools.mock import mock_route, unmock_route
+from ..tools.popup import expect_popup
 from ..tools.session import reset_session
 from ..tools.snapshot import snapshot
 from ..tools.state import load_state, save_state
+from ..tools.tabs import switch_tab
 from ..tools.wait import wait
 from . import report, secrets
 
@@ -75,6 +78,7 @@ def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None
             "retries": 0,
             "console_errors": [],
             "network_errors": [],
+            "dialogs": [],
             "severity": None,
             "ai_reason": "이전 스텝 실패로 미실행",
             "ai_suggestion": None,
@@ -104,6 +108,15 @@ async def _dispatch(step: dict) -> dict:
         res = await navigate(secrets.resolve(step["url"]), step.get("wait_until"))
         status = res.get("status")
         expect = step.get("expect_status")  # opt-in: assert an exact status
+        if res.get("error"):
+            # DNS / refused / TLS / proxy failure — the page never loaded, so a
+            # status-based verdict would wrongly read the absent status as "fine".
+            out.update(expected=(f"HTTP {expect}" if expect is not None else "도착 (2xx/3xx)"),
+                       actual=res["error"], passed=False,
+                       ai_reason="navigation failed before a response",
+                       ai_suggestion="확인: URL/DNS, 프록시(PROXY_SERVER), 인증서"
+                                     "(IGNORE_HTTPS_ERRORS), 사내망 접근 권한")
+            return out
         if expect is not None:
             ok = status == expect
             reason = f"expected HTTP {expect}, got {status}"
@@ -152,14 +165,70 @@ async def _dispatch(step: dict) -> dict:
                    ai_reason="captured page snapshot")
 
     elif action == "wait":
-        res = await wait(step.get("ms"), step.get("selector"))
+        # timeout_ms must ride along: a slow-by-design page (or a sluggish
+        # intranet server) needs a longer budget than the 10s default, and
+        # dropping the field silently capped every wait at 10s.
+        res = await wait(step.get("ms"), step.get("selector"),
+                         step.get("timeout_ms", 10000))
         out.update(expected="wait", actual=res.get("waited"), passed=bool(res.get("ok")),
                    ai_reason=f"waited {res.get('waited')}")
+        if not res.get("ok"):
+            out["ai_suggestion"] = res.get("error") or "대기 조건이 시간 내에 충족되지 않음"
 
     elif action == "switch_frame":
         res = await switch_frame(step.get("selector"))
         out.update(expected="frame switch", actual=res.get("context"),
                    passed=bool(res.get("ok")), ai_reason=f"context → {res.get('context')}")
+        if res.get("matched") is False:
+            miss = res.get("missing_at") or {}
+            out["ai_suggestion"] = (
+                f"iframe not found at depth {miss.get('depth')}: "
+                f"{miss.get('selector')!r} — 중첩 iframe은 '#outer >>> #inner'로 체인")
+
+    elif action == "expect_popup":
+        if "trigger" not in step:
+            out.update(actual="missing required field(s): trigger", passed=False,
+                       ai_reason="malformed step",
+                       ai_suggestion="add 'trigger' to the expect_popup step")
+        else:
+            res = await expect_popup(step["trigger"], expect_url=step.get("expect_url"),
+                                     timeout_ms=step.get("timeout_ms", 30000))
+            ok = bool(res.get("passed"))
+            out.update(expected=step.get("expect_url") or "popup",
+                       actual=res.get("url") or res.get("error"), passed=ok,
+                       resolved_by=res.get("resolved_by"),
+                       ai_reason="popup opened" if ok else "popup not opened as expected")
+            if not ok:
+                out["ai_suggestion"] = ("트리거가 새 창/탭을 여는지 확인 "
+                                        "(팝업 차단·target=_blank 여부)")
+
+    elif action == "switch_tab":
+        res = await switch_tab(step.get("index", 0))
+        out.update(expected="tab switch", actual=res.get("url") or res.get("error"),
+                   passed=bool(res.get("ok")), ai_reason=f"tab → {step.get('index', 0)}")
+
+    elif action == "expect_download":
+        if "trigger" not in step:
+            out.update(actual="missing required field(s): trigger", passed=False,
+                       ai_reason="malformed step",
+                       ai_suggestion="add 'trigger' to the expect_download step")
+        else:
+            res = await expect_download(
+                step["trigger"], save_as=step.get("save_as"),
+                expect_name=step.get("expect_name"),
+                expect_extension=step.get("expect_extension"),
+                min_bytes=step.get("min_bytes", 1),
+                timeout_ms=step.get("timeout_ms", 30000))
+            ok = bool(res.get("passed"))
+            out.update(expected=(step.get("expect_name") or step.get("expect_extension")
+                                 or "download"),
+                       actual=(f"{res.get('filename')} ({res.get('size_bytes')}B)" if ok
+                               else res.get("error")),
+                       passed=ok, resolved_by=res.get("resolved_by"),
+                       ai_reason="download verified" if ok else "download not verified")
+            if not ok:
+                out["ai_suggestion"] = ("트리거가 실제로 파일을 내려받는지, 서버가 "
+                                        "에러 페이지를 대신 반환하지 않는지 확인")
 
     elif action == "reset_session":
         res = await reset_session()
@@ -225,6 +294,7 @@ async def run(
     continue_on_fail: bool = False,
     screenshot_each: bool = False,
     trace_on_failure: bool = False,
+    fail_on_js_error: bool = False,
 ) -> dict[str, Any]:
     """Execute steps and return a structured result (DESIGN §6.1)."""
     session = await get_session()
@@ -259,6 +329,7 @@ async def run(
     for idx, step in enumerate(steps, start=1):
         c0 = len(session.buffers.console)
         n0 = len(session.buffers.network)
+        d0 = len(session.buffers.dialogs)
         s0 = time.monotonic()
         exc: Exception | None = None
         # Flaky-step handling: `retry: N` re-dispatches up to N extra times
@@ -284,6 +355,22 @@ async def run(
         passed = bool(fields["passed"])
         new_console = [c.__dict__ for c in session.buffers.console[c0:]]
         new_network = [n.__dict__ for n in session.buffers.network[n0:]]
+        new_dialogs = [d.__dict__ for d in session.buffers.dialogs[d0:]]
+
+        # An uncaught exception is a defect even when the step's own assertion
+        # held: the page threw, the UI just happened to still satisfy this
+        # check. Capturing it without letting it affect the verdict means CI
+        # stays green on a broken page — opt in to make it fail.
+        js_errors = [c for c in new_console if c.get("source") == "pageerror"]
+        failed_by_js = bool(fail_on_js_error and passed and js_errors)
+        if failed_by_js:
+            passed = False
+            fields["actual"] = (f"{fields.get('actual')} · 미처리 JS 예외 "
+                                f"{len(js_errors)}건")
+            fields["ai_reason"] = (f"단언은 통과했으나 미처리 JS 예외 발생: "
+                                   f"{js_errors[0]['text'][:100]}")
+            fields["ai_suggestion"] = ("페이지가 예외를 던졌다 — 단언만으로는 "
+                                       "드러나지 않는 결함")
 
         shot = None
         if not passed or screenshot_each or fields.get("force_screenshot"):
@@ -297,6 +384,12 @@ async def run(
         reason = fields.get("ai_reason", "")
         if passed and retries_used:
             reason += f" · passed after {retries_used} retry(s) — flaky?"
+        # An unexpected native dialog is a finding in its own right: the step
+        # "passed" only because Playwright's auto-dismiss unblocked the page.
+        surprise = [d for d in new_dialogs if not d.get("expected")]
+        if surprise:
+            reason += (f" · 예상치 못한 {surprise[0]['type']} 발생: "
+                       f"{surprise[0]['message'][:80]!r} (자동 dismiss)")
 
         result["steps"].append(secrets.scrub_record({
             "step": idx,
@@ -315,7 +408,9 @@ async def run(
             "retries": retries_used,
             "console_errors": [e for e in new_console if e.get("level") == "error"],
             "network_errors": new_network,
-            "severity": _severity(step.get("action", ""), exc) if not passed else None,
+            "dialogs": new_dialogs,
+            "severity": (_severity(step.get("action", ""), exc, failed_by_js)
+                         if not passed else None),
             "ai_reason": reason,
             "ai_suggestion": fields.get("ai_suggestion"),
         }))

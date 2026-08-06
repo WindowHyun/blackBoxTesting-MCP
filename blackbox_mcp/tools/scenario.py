@@ -10,7 +10,10 @@ from ._registry import tool
                   "failure; save_report writes JSON/MD/HTML under REPORT_DIR "
                   "(report_format ∈ json|md|html|both|all). trace_on_failure "
                   "records a Playwright trace and keeps the .zip only when the "
-                  "run fails (open with `playwright show-trace`).")
+                  "run fails (open with `playwright show-trace`). "
+                  "fail_on_js_error fails a step whose assertion held but whose "
+                  "page threw an uncaught JS exception (default off — the error "
+                  "is always recorded either way).")
 async def run_scenario(
     steps: list[dict],
     name: str = "scenario",
@@ -20,11 +23,12 @@ async def run_scenario(
     report_format: str = "both",
     screenshot_each: bool = False,
     trace_on_failure: bool = False,
+    fail_on_js_error: bool = False,
 ) -> dict:
     result = await runner.run(
         steps, name=name, description=description,
         continue_on_fail=continue_on_fail, screenshot_each=screenshot_each,
-        trace_on_failure=trace_on_failure,
+        trace_on_failure=trace_on_failure, fail_on_js_error=fail_on_js_error,
     )
     if save_report:
         result["report_files"] = report.save(result, formats=report_format)

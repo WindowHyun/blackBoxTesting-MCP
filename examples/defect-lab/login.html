@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Defect Lab — 로그인</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<main class="login_wrapper">
+  <h1 class="login_logo">Defect Lab</h1>
+
+  <form id="login_form" autocomplete="off">
+    <input id="user-name" name="user-name" placeholder="Username" aria-label="Username">
+    <input id="password" name="password" type="password" placeholder="Password" aria-label="Password">
+    <input type="submit" id="login-button" value="Login">
+  </form>
+
+  <h3 data-test="error" id="error" hidden></h3>
+
+  <section class="credentials">
+    <p><b>사용 가능한 계정</b> — 비밀번호는 모두 <code>secret_sauce</code></p>
+    <ul>
+      <li><code>standard_user</code> — 결함 없음 (기준선)</li>
+      <li><code>problem_user</code> — 결함 5종 주입</li>
+      <li><code>performance_glitch_user</code> — 목록이 늦게 뜸</li>
+      <li><code>locked_out_user</code> — 잠긴 계정</li>
+    </ul>
+  </section>
+</main>
+
+<script src="lab.js"></script>
+<script>
+const USERS = {
+  standard_user: "standard",
+  problem_user: "problem",
+  performance_glitch_user: "slow",
+  locked_out_user: "locked",
+};
+
+function fail(message) {
+  const el = document.getElementById("error");
+  el.textContent = "Epic sadface: " + message;
+  el.hidden = false;
+}
+
+document.getElementById("login_form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const user = document.getElementById("user-name").value.trim();
+  const password = document.getElementById("password").value;
+
+  if (!user) return fail("Username is required");
+  if (!password) return fail("Password is required");
+  if (password !== "secret_sauce" || !(user in USERS)) {
+    return fail("Username and password do not match any user in this service");
+  }
+  if (user === "locked_out_user") {
+    return fail("Sorry, this user has been locked out.");
+  }
+  location.href = "inventory.html?user=" + USERS[user];
+});
+</script>
+</body>
+</html>

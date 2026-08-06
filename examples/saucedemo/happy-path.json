@@ -1,0 +1,163 @@
+{
+  "name": "saucedemo-happy-path",
+  "description": "standard_user 기준 구매 완료까지의 정상 경로. 이 시나리오는 '올바른 동작'을 단언하며, 결함 계정(problem-user.json)에서 같은 단언이 실패하는 것을 대조군으로 삼는다.",
+  "steps": [
+    {
+      "action": "navigate",
+      "url": "https://www.saucedemo.com/",
+      "expect_status": 200,
+      "tag": "REQ-LOGIN-01",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "element_visible",
+      "target": "#login-button",
+      "tag": "REQ-LOGIN-01"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#user-name",
+      "value": "standard_user",
+      "tag": "REQ-LOGIN-02"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#password",
+      "value": "${SAUCE_PASSWORD}",
+      "tag": "REQ-LOGIN-02"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#login-button",
+      "tag": "REQ-LOGIN-02",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "url_contains",
+      "target": "inventory.html",
+      "tag": "REQ-LOGIN-02",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "count",
+      "target": ".inventory_item",
+      "expected": "6",
+      "tag": "REQ-CATALOG-01"
+    },
+    {
+      "action": "interact",
+      "type": "select",
+      "selector": "[data-test=\"product_sort_container\"]",
+      "value": "Price (low to high)",
+      "tag": "REQ-CATALOG-02",
+      "priority": "medium"
+    },
+    {
+      "action": "assert",
+      "kind": "count",
+      "target": ".inventory_item",
+      "expected": "6",
+      "tag": "REQ-CATALOG-02"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#add-to-cart-sauce-labs-backpack",
+      "tag": "REQ-CART-01",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "element_visible",
+      "target": ".shopping_cart_badge",
+      "tag": "REQ-CART-01"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": ".shopping_cart_link",
+      "tag": "REQ-CART-02"
+    },
+    {
+      "action": "assert",
+      "kind": "url_contains",
+      "target": "cart.html",
+      "tag": "REQ-CART-02"
+    },
+    {
+      "action": "assert",
+      "kind": "count",
+      "target": ".cart_item",
+      "expected": "1",
+      "tag": "REQ-CART-02",
+      "priority": "high"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#checkout",
+      "tag": "REQ-CHECKOUT-01"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#first-name",
+      "value": "길동",
+      "tag": "REQ-CHECKOUT-01"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#last-name",
+      "value": "홍",
+      "tag": "REQ-CHECKOUT-01",
+      "priority": "high"
+    },
+    {
+      "action": "interact",
+      "type": "type",
+      "selector": "#postal-code",
+      "value": "06236",
+      "tag": "REQ-CHECKOUT-01"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#continue",
+      "tag": "REQ-CHECKOUT-01"
+    },
+    {
+      "action": "assert",
+      "kind": "url_contains",
+      "target": "checkout-step-two.html",
+      "tag": "REQ-CHECKOUT-02",
+      "priority": "high"
+    },
+    {
+      "action": "interact",
+      "type": "click",
+      "selector": "#finish",
+      "tag": "REQ-CHECKOUT-03"
+    },
+    {
+      "action": "assert",
+      "kind": "url_contains",
+      "target": "checkout-complete.html",
+      "tag": "REQ-CHECKOUT-03",
+      "priority": "high"
+    },
+    {
+      "action": "assert",
+      "kind": "text_visible",
+      "target": "Thank you for your order!",
+      "tag": "REQ-CHECKOUT-03",
+      "priority": "high"
+    }
+  ]
+}

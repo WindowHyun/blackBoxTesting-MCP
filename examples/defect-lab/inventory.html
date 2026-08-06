@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Defect Lab — 상품 목록</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="lab.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="title">Products</span>
+  <a class="shopping_cart_link" id="cart_link" href="#">
+    🛒<span class="shopping_cart_badge" id="cart_badge" hidden>0</span>
+  </a>
+</header>
+
+<div class="controls">
+  <select data-test="product_sort_container" id="sort" aria-label="Sort products">
+    <option value="az">Name (A to Z)</option>
+    <option value="za">Name (Z to A)</option>
+    <option value="lohi">Price (low to high)</option>
+    <option value="hilo">Price (high to low)</option>
+  </select>
+</div>
+
+<main class="inventory_list" id="list"></main>
+
+<script src="lab.js"></script>
+<script>
+const P = profile();
+let items = PRODUCTS.slice();
+let cart = Number(qs("items", 0));
+
+function render() {
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+  items.forEach((p) => {
+    // D-1: every image points at the same wrong asset. Structurally valid —
+    // the <img> exists, has alt text, and loads — so only a human (or visual
+    // regression) can tell it is the wrong picture.
+    const src = P.wrongImages ? "img/wrong.svg" : p.img;
+    const el = document.createElement("div");
+    el.className = "inventory_item";
+    el.innerHTML =
+      '<img class="inventory_item_img" src="' + src + '" alt="' + p.name + '">' +
+      '<div class="inventory_item_name">' + p.name + "</div>" +
+      '<div class="inventory_item_price">' + money(p.price) + "</div>" +
+      '<button class="btn_inventory" id="add-to-cart-' + p.id + '">Add to cart</button>';
+    el.querySelector("button").addEventListener("click", () => addToCart(p.id));
+    list.appendChild(el);
+  });
+}
+
+function addToCart(id) {
+  cart += 1;
+  // D-4: the item is added, but the badge is never refreshed — the classic
+  // "state changed, UI didn't" defect.
+  if (P.badgeNoUpdate) return;
+  const badge = document.getElementById("cart_badge");
+  badge.textContent = String(cart);
+  badge.hidden = false;
+}
+
+document.getElementById("sort").addEventListener("change", (e) => {
+  // D-3: the control accepts the selection and fires change, but nothing is
+  // reordered. The action "succeeds"; only the resulting order is wrong.
+  if (P.sortIsNoop) return;
+  const by = e.target.value;
+  const cmp = {
+    az: (a, b) => a.name.localeCompare(b.name),
+    za: (a, b) => b.name.localeCompare(a.name),
+    lohi: (a, b) => a.price - b.price,
+    hilo: (a, b) => b.price - a.price,
+  }[by];
+  items.sort(cmp);
+  render();
+});
+
+document.getElementById("cart_link").addEventListener("click", (e) => {
+  e.preventDefault();
+  location.href = carry("cart.html", { items: cart });
+});
+
+function boot() {
+  render();
+  // D-5: an uncaught TypeError after render. The page still looks fine, which
+  // is exactly why a screenshot-only check would pass it.
+  if (P.throwsOnLoad) {
+    setTimeout(() => { window.__missing.render(); }, 30);
+  }
+}
+
+// D-6: the list arrives late. Nothing is broken, it is just slow.
+if (P.delayMs) setTimeout(boot, P.delayMs); else boot();
+</script>
+</body>
+</html>
