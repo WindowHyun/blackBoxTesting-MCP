@@ -27,6 +27,7 @@ from ..tools.assertion import assert_
 from ..tools.dialog import expect_dialog
 from ..tools.download import expect_download
 from ..tools.frame import switch_frame
+from ..tools.images import capture_images
 from ..tools.interact import interact
 from ..tools.navigate import navigate
 from ..tools.mock import mock_route, unmock_route
@@ -156,8 +157,37 @@ async def _dispatch(step: dict) -> dict:
         out.update(expected=step.get("expected") or step["kind"], actual=res.get("actual"),
                    passed=bool(res.get("passed")))
         out["ai_reason"] = f"{step['kind']} {'held' if res.get('passed') else 'did not hold'}"
+        out["resolved_by"] = res.get("resolved_by")
         if not res.get("passed"):
-            out["ai_suggestion"] = f"expected {step['kind']} on '{step['target']}' — verify the target"
+            # The presence probe decides whether a repair is even legitimate,
+            # so it has to survive into the step record (diagnose reads it).
+            out["probe"] = res.get("probe")
+            probe = res.get("probe") or {}
+            if probe.get("element_present") is True:
+                out["ai_suggestion"] = (
+                    f"'{step['target']}'는 페이지에 존재하지만(총 "
+                    f"{probe.get('element_count')}개, 보이는 것 "
+                    f"{probe.get('visible_count')}개) 기대가 성립하지 않음 — "
+                    "셀렉터 문제가 아니라 동작이 바뀐 것")
+            elif probe.get("element_present") is False:
+                out["ai_suggestion"] = (
+                    f"'{step['target']}'가 페이지에 아예 없음 — 이동/개명 가능성")
+            else:
+                out["ai_suggestion"] = (
+                    f"expected {step['kind']} on '{step['target']}' — verify the target")
+
+    elif action == "capture_images":
+        res = await capture_images(step.get("selector"), step.get("limit", 12),
+                                   name=step.get("name", "images"))
+        ok = bool(res.get("ok"))
+        out.update(expected="이미지 증거", passed=ok,
+                   actual=(f"{res.get('count')}개 캡처"
+                           + (f" · {'; '.join(res['findings'])}" if res.get("findings")
+                              else "")) if ok else res.get("error"),
+                   ai_reason="이미지 캡처(자동 판정 아님 — 사람 확인용)",
+                   images=res.get("images") or [])
+        if res.get("findings"):
+            out["ai_suggestion"] = "리포트의 이미지 증거를 사람이 확인할 것"
 
     elif action == "snapshot":
         snap = await snapshot(step.get("mode", "a11y"), step.get("focus"), step.get("depth"))
@@ -416,6 +446,10 @@ async def run(
             "console_errors": [e for e in new_console if e.get("level") == "error"],
             "network_errors": new_network,
             "dialogs": new_dialogs,
+            # Presence probe from a failed element assertion — renamed vs broken.
+            "probe": fields.get("probe"),
+            # Captured <img> evidence (capture_images step) — human verifies.
+            "images": fields.get("images") or [],
             "severity": (_severity(step.get("action", ""), exc, failed_by_js)
                          if not passed else None),
             "ai_reason": reason,

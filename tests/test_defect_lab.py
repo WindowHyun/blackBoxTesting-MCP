@@ -5,7 +5,7 @@ to catch. Asserting the misses matters as much as asserting the hits: it pins
 the tool's real coverage so a future change cannot quietly claim more (or lose
 what works) without this file failing.
 
-See docs/CASE-STUDY-saucedemo.md for the write-up.
+See docs/CASE-STUDY-defect-detection.md for the write-up.
 """
 from __future__ import annotations
 
@@ -127,20 +127,61 @@ async def test_fail_on_js_error_makes_it_fatal(session, lab_env, monkeypatch):
     assert not failed_by_js[0]["passed"]
 
 
-# ── what the tool does NOT catch (the honest half) ───────────────
-async def test_wrong_images_are_missed(session, lab_env, monkeypatch):
-    """D-1. Every product shows the same wrong picture. The <img> is present,
-    named and loads, so no structural assertion can see it — visual regression
-    is out of scope (ROADMAP P6). Pinned so the gap stays visible."""
+async def test_broken_sort_is_caught_by_the_order_assertion(session, lab_env,
+                                                            monkeypatch):
+    """D-3. The select succeeds and fires change; nothing reorders. order_asc
+    reads the rendered prices and sees the sequence is not ascending — the
+    이전의 사각지대를 닫은 지점."""
     result = await _run("problem_user", monkeypatch)
+    assert "REQ-CATALOG-02" in _failed_tags(result)
+
+    sort_step = next(s for s in result["steps"]
+                     if not s["passed"] and s.get("tag") == "REQ-CATALOG-02")
+    assert sort_step["actual"].count("$") >= 3, sort_step["actual"]
+
+
+async def test_broken_sort_is_not_offered_as_a_test_fix(session, lab_env, monkeypatch):
+    """The prices are all still on the page — the selector is fine, the SORT is
+    broken. Rewriting the assertion would delete the defect."""
+    result = await _run("problem_user", monkeypatch)
+    finding = next(f for f in result["diagnosis"]["findings"]
+                   if f["tag"] == "REQ-CATALOG-02")
+    assert finding["cause"] == "app_behavior"
+    assert finding["test_fix_allowed"] is False
+
+
+# ── image evidence: captured for a human, never auto-judged ──────
+async def test_wrong_images_are_surfaced_not_judged(session, lab_env, monkeypatch):
+    """D-1. Every product shows the same wrong picture. No assertion can see
+    that — the <img> exists, loads and has alt text. So the step CAPTURES them
+    (passing, because judging is not its job) and flags the one fact that is
+    checkable: they all resolve to a single src."""
+    result = await _run("problem_user", monkeypatch)
+    img_step = next(s for s in result["steps"] if s["action"] == "capture_images")
+
+    assert img_step["passed"], "이미지 수집은 판정이 아니므로 실패시키면 안 된다"
+    assert len(img_step["images"]) == 6
+    assert all(i.get("screenshot") for i in img_step["images"]), "캡처가 비었다"
+    assert "같은 이미지" in img_step["actual"]
+    assert "REQ-CATALOG-03" not in _failed_tags(result)
+
+
+async def test_healthy_images_raise_no_flag(session, lab_env, monkeypatch):
+    result = await _run("standard_user", monkeypatch)
+    img_step = next(s for s in result["steps"] if s["action"] == "capture_images")
+    assert img_step["passed"]
+    assert "같은 이미지" not in (img_step["actual"] or "")
+
+
+# ── what the tool still does NOT catch (the honest half) ─────────
+async def test_image_content_is_still_never_auto_judged(session, lab_env, monkeypatch):
+    """The pictures are wrong, and nothing in the run says 'wrong picture' —
+    only 'here they are, look'. Pinned so a later change cannot quietly claim
+    visual regression it does not have."""
+    result = await _run("problem_user", monkeypatch)
+    blob = json.dumps(result, ensure_ascii=False)
     assert "REQ-CATALOG-01" not in _failed_tags(result)
-
-
-async def test_broken_sort_is_missed(session, lab_env, monkeypatch):
-    """D-3. The select succeeds and fires change; nothing reorders. There is no
-    assertion kind for 'the Nth item is X', so ordering cannot be verified."""
-    result = await _run("problem_user", monkeypatch)
-    assert "REQ-CATALOG-02" not in _failed_tags(result)
+    assert "사람이 확인" in blob
 
 
 async def test_slow_page_passes_but_is_visibly_slower(session, lab_env, monkeypatch):

@@ -422,6 +422,13 @@ display:inline-block}
 color:var(--ink3);border:1px solid var(--border);padding:2px 6px;border-radius:4px;margin-left:6px}
 .sev{display:block;font:10px/1 'IBM Plex Mono',monospace;color:var(--ink4);margin-top:5px}
 .time{display:block;font-size:11px;color:var(--ink4);margin-top:5px}
+.imgnote{margin-top:10px;font-size:12px;color:#a66;font-weight:600}
+.imgrow{display:flex;flex-wrap:wrap;gap:10px;margin-top:6px}
+.imgev{margin:0;width:132px}
+.imgshot{width:132px;height:96px;object-fit:contain;background:#fff;
+  border:1px solid var(--border);border-radius:6px;display:block}
+.imgev figcaption{font-size:11px;color:var(--muted);word-break:break-all;margin-top:4px}
+.imgev .alt{color:#888}
 .thumb{margin-top:10px;border:1px solid var(--border);border-radius:6px;max-height:130px;
 display:block}
 ul.list{margin:0;padding-left:18px}ul.list li{margin:3px 0;font-size:13px;color:var(--ink2)}
@@ -514,6 +521,26 @@ def _step_html(st: dict, report_dir: Path) -> str:
         errs += (f'<div class="{kind}">{label}: {html.escape(str(dl.get("type")))} '
                  f'“{html.escape(_short(dl.get("message"), 120))}” '
                  f'→ {html.escape(str(dl.get("handled")))}</div>')
+    # Image evidence: the whole point is that a human LOOKS, so the pictures go
+    # inline at a size you can actually judge, next to their src.
+    imgs = ""
+    for im in st.get("images", []):
+        thumb = ""
+        if im.get("screenshot"):
+            data = _b64(report_dir / im["screenshot"], report_dir)
+            if data:
+                uri = f"data:image/png;base64,{data}"
+                thumb = f'<a href="{uri}" target="_blank"><img class="imgshot" src="{uri}"></a>'
+        flags = " ⚠ 로드 실패" if im.get("broken") else ""
+        imgs += (f'<figure class="imgev">{thumb}'
+                 f'<figcaption>{html.escape(_short(im.get("src"), 46))}{flags}<br>'
+                 f'<span class="alt">alt: {html.escape(str(im.get("alt")) or "—")}</span>'
+                 f'</figcaption></figure>')
+    if imgs:
+        imgs = ('<div class="imgnote">이미지 증거 — 올바른 그림인지는 '
+                '<b>사람이 확인</b>합니다 (자동 판정 아님)</div>'
+                f'<div class="imgrow">{imgs}</div>')
+
     rb = (f'<span class="rb">{html.escape(str(st["resolved_by"]))}</span>'
           if st.get("resolved_by") else "")
     tag = (f'<span class="tagchip">{html.escape(str(st["tag"]))}</span>'
@@ -534,7 +561,7 @@ def _step_html(st: dict, report_dir: Path) -> str:
           &nbsp;·&nbsp; <b>실제</b> {html.escape(_short(st.get('actual'),70))}</div>
         {purl}
         <div class="reason">{html.escape(str(st.get('ai_reason') or ''))}</div>
-        {sugg}{errs}{thumb}
+        {sugg}{errs}{imgs}{thumb}
       </div>
       <div class="right">
         <span class="verdict {vclass}">{verdict}</span>

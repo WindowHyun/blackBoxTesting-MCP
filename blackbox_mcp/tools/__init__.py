@@ -16,6 +16,7 @@ _TOOL_MODULES = (
     "navigate",
     "snapshot",
     "screenshot",
+    "images",
     "interact",
     "assertion",
     "console",

@@ -35,16 +35,41 @@ LAB_USER=problem_user  ui-blackbox run examples/defect-lab/scenario.json --conti
 
 | # | 심은 결함 | 예측 | **실제** | 근거 |
 |---|---|---|---|---|
-| D-1 | 상품 이미지가 전부 동일한 엉뚱한 이미지 | 미탐지 | ❌ **미탐지** | `<img>`가 존재·로드·alt 정상. 구조적 단언으로는 볼 수 없다 |
+| D-1 | 상품 이미지가 전부 동일한 엉뚱한 이미지 | 미탐지 | ⚠️ **노출**(자동 판정 아님) | `capture_images`가 6장을 캡처해 리포트에 남기고 "같은 src 6개"를 표시. **올바른 그림인지는 사람이 확인** |
 | D-2 | 체크아웃 성(姓) 입력이 조용히 사라짐 | 탐지 | ✅ **탐지** | step19/20 실패 (`url_contains`, `text_visible`) |
-| D-3 | 정렬 드롭다운이 아무것도 안 함 | 부분 | ❌ **미탐지** | 예측이 낙관적이었다 (아래 참조) |
+| D-3 | 정렬 드롭다운이 아무것도 안 함 | 부분 | ✅ **탐지** | `order_asc`가 렌더된 가격 순서를 읽어 실패. 게다가 요소는 전부 존재하므로 `app_behavior`로 분류돼 **테스트 수정이 거부**된다 |
 | D-4 | 담기는 되지만 배지가 갱신 안 됨 | 탐지 | ✅ **탐지** | step11 실패 (`element_visible`) |
 | D-5 | 미처리 JS 예외 | 탐지 | ✅ **탐지** | `source="pageerror"`로 기록 |
 | D-6 | 목록이 늦게 뜸 | 관찰만 | ⚠️ **관찰만** | 통과하되 2.1배 느림이 `duration_ms`에 남음 |
 
-**예측 6건 중 5건 적중.** 빗나간 D-3은 낙관 방향이었다 — "부분 탐지"로 적었지만 실제로는
-전혀 못 잡는다. `select` 액션은 성공하고 change 이벤트도 뜨므로 도구 입장에선 정상이며,
-"N번째 항목이 X인가"를 물을 어서션 종류가 없어서 순서를 검증할 방법 자체가 없다.
+**최초 예측 6건 중 5건 적중.** 빗나간 D-3은 낙관 방향이었다 — 당시엔 순서를 물을 어서션이
+없어 전혀 못 잡았다.
+
+**그 뒤 세 가지를 보강해 재측정했다**(아래 "2차"), 결과는 탐지 4 · 노출 1 · 관찰만 1이다.
+
+### 2차 — 보강 후
+
+| 보강 | 결과 |
+|---|---|
+| `order_asc`/`order_desc`/`text_sequence` 어서션 | D-3 **미탐지 → 탐지** |
+| `capture_images`(캡처+리포트 노출, 자동 판정 없음) | D-1 **미탐지 → 노출**(사람 확인) |
+| 실패 시점 요소 존재 탐침(`probe`) | "요소는 있는데 단언이 깨짐"을 `app_behavior`로 분리 |
+
+세 번째가 가장 중요하다. 이전에는 배지 미갱신(D-4)과 정렬 오동작(D-3)이 모두
+`ui_changed` + `test_fix_allowed=true`로 분류됐다 — 즉 **자율 루프가 이 결함들을
+"셀렉터를 고쳐" 통과시킬 수 있었다**. 이제 실패 시점에 요소 존재를 실제로 확인해,
+있으면 `app_behavior`(수정 거부) · 없으면 `ui_changed`(수정 허용)로 갈린다.
+
+실측(`problem_user`):
+
+```
+step 7 order_asc   $29.99 | $9.99 | $15.99 …   cause=app_behavior  fix_allowed=False
+       probe={'element_present': True, 'element_count': 6, 'visible_count': 6}
+step10 element_visible .shopping_cart_badge    cause=app_behavior  fix_allowed=False
+       probe={'element_present': True, 'element_count': 1, 'visible_count': 0}
+```
+
+`standard_user`는 그대로 전부 통과(오탐 0).
 
 산출물: [`examples/defect-lab/reports/`](../examples/defect-lab/reports/)
 (`standard_user.html` / `problem_user.html` — 스크린샷 임베드된 자기완결 HTML)

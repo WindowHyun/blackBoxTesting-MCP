@@ -260,7 +260,7 @@ One cycle chains everything above, with one hard rule at its centre.
 
 ---
 
-## 🧰 MCP Tools (33)
+## 🧰 MCP Tools (34)
 
 | Group | Tools |
 |---|---|
@@ -268,6 +268,7 @@ One cycle chains everything above, with one hard rule at its centre.
 | Extended | `wait` · `switch_frame` · `expect_dialog` · `get_dialogs` · `reset_session` · `use_real_browser` · `dismiss_banners` · `status` |
 | Popups & tabs | `expect_popup` · `list_tabs` · `switch_tab` — deterministic popup handling and a way back to the opener |
 | Files | `interact(action="upload")` · `expect_download` — attachment upload, and download verified by name/extension/size |
+| Evidence | `capture_images` — capture every `<img>` into the report so a human can judge the picture; flags broken loads and several images sharing one src |
 | Autonomous loop | `get_failure_memory` · `diagnose_run` · `propose_repair` — is this failure new or chronic, what caused it, and is fixing the *test* even legitimate |
 | Auth state | `save_state` · `load_state` · `list_states` — export login (cookies+localStorage) once, reuse headless/in CI, swap roles |
 | Network mock | `mock_route` · `unmock_route` — deterministic offline responses for flaky/unbuilt APIs |
@@ -284,8 +285,9 @@ One cycle chains everything above, with one hard rule at its centre.
 | 요소 상태 (담기 후 배지 미갱신) | ✅ 탐지 |
 | 화면 전이 (입력이 조용히 사라져 체크아웃 실패) | ✅ 탐지 |
 | 미처리 JS 예외 | ✅ 탐지 (`--fail-on-js-error`로 CI 게이트) |
-| 잘못된 이미지 | ❌ 미탐지 — 시각 회귀 범위 밖 |
-| 정렬 오동작 | ❌ 미탐지 — 순서 어서션 없음 |
+| 요소는 있는데 단언이 깨짐 (배지 미갱신) | ✅ 탐지 + **테스트 수정 거부**(동작 결함) |
+| 정렬 오동작 | ✅ 탐지 (`order_asc`/`order_desc`/`text_sequence`) |
+| 잘못된 이미지 | ⚠️ **캡처해 노출 → 사람이 확인**. 로드 실패·중복 src는 자동 표시 |
 | 2배 느린 렌더 | ⚠️ 측정만, 실패 아님 |
 
 기준선 계정은 20/20 통과(오탐 0). 전체 기록:

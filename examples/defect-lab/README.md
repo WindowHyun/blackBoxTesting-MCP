@@ -27,9 +27,9 @@ LAB_USER=problem_user  ui-blackbox run examples/defect-lab/scenario.json --conti
 | 계정 | 결함 | 탐지 여부 |
 |---|---|---|
 | `standard_user` | 없음 (기준선) | 20/20 통과 |
-| `problem_user` | D-1 모든 상품 이미지가 동일한 엉뚱한 그림 | ❌ 미탐지 (시각 회귀 범위 밖) |
-| | D-2 체크아웃 성(姓) 입력이 조용히 사라짐 | ✅ 탐지 |
-| | D-3 정렬 드롭다운이 아무것도 안 함 | ❌ 미탐지 (순서 어서션 없음) |
+| `problem_user` | D-1 모든 상품 이미지가 동일한 엉뚱한 그림 | ⚠️ **노출** — `capture_images`가 캡처+"같은 src 6개" 표시, 판정은 사람이 |
+| | D-2 체크아웃 성(姓) 입력이 조용히 사라짐 | ✅ 탐지 (입력 직후 read-back) |
+| | D-3 정렬 드롭다운이 아무것도 안 함 | ✅ 탐지 (`order_asc`) |
 | | D-4 담기는 되지만 배지 미갱신 | ✅ 탐지 |
 | | D-5 미처리 JS 예외 | ✅ 탐지 (`source="pageerror"`) |
 | `performance_glitch_user` | D-6 목록이 1.5초 늦게 렌더 | ⚠️ 관찰만 (임계값 어서션 없음) |
@@ -48,3 +48,15 @@ LAB_USER=problem_user  ui-blackbox run examples/defect-lab/scenario.json --conti
 `lab.js`의 `PROFILES.problem`에 플래그를 넣고 해당 페이지에서 분기한 뒤,
 `tests/test_defect_lab.py`에 **탐지되든 안 되든** 단언을 추가한다. 미탐지도 고정해야
 나중에 조용히 커버리지를 잃거나 부풀리지 않는다.
+
+## 분류가 왜 중요한가
+
+D-3(정렬)과 D-4(배지)는 둘 다 **요소가 멀쩡히 존재하는데 기대만 깨진** 경우다.
+셀렉터를 고치면 통과시킬 수 있으므로, 분류 없이 자동 수정하는 루프는 이 결함들을
+스위트에서 지워버린다. 그래서 실패 시점에 요소 존재를 탐침해(`probe`)
+`app_behavior`로 분류하고 **테스트 수정을 거부**한다:
+
+```
+step 7 order_asc  cause=app_behavior fix_allowed=False
+       probe={'element_present': True, 'element_count': 6, 'visible_count': 6}
+```

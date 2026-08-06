@@ -474,6 +474,15 @@ SM-01~04와 함께(또는 직후) 구현한다.
         // 구간에 앱/서버가 남긴 오류 줄(스택 포함). 브라우저가 볼 수 없는 절반.
       ],
       "snapshot": null,                  // snapshot_each=true일 때 스텝별 화면 개요
+      "probe": {                         // 실패한 요소 단언에만. 진단의 핵심 근거.
+        // 요소가 "없다"(개명/이동 → 테스트 갱신 정당)와 "있는데 기대가 안 선다"
+        // (동작 변경/결함 → 테스트 수정 금지)를 가르는 유일한 사실.
+        "element_present": true, "element_count": 1, "visible_count": 0
+      },
+      "images": [                        // capture_images 스텝의 이미지 증거
+        // {index,src,alt,natural_width,natural_height,displayed,broken,screenshot}
+        // 올바른 그림인지는 판정하지 않는다 — 리포트에 노출해 사람이 확인.
+      ],
       "fingerprint": "a1b2c3d4e5f6a7b8", // 실패 기억 키(memory) — 실패 스텝만
       "memory": {                        // 실패 스텝만. 이 실패를 전에 봤는가?
         "status": "new",                 // new | recurring | regressed

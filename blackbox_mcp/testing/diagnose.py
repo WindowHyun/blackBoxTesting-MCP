@@ -8,6 +8,10 @@ be classified, and only one class is ever eligible for a test-side fix.
 
     app_broken    the page threw / the server 5xx'd / the app logged a stack
                   trace. NEVER touch the test. Report it.
+    app_behavior  the element is present and the selector still matches, but
+                  the assertion no longer holds. The app's behaviour changed.
+                  NEVER auto-fix: "make it pass" here deletes the finding. A
+                  human decides whether the new behaviour is the intended one.
     environment   the target was unreachable (DNS, TLS, proxy, refused). Not
                   a test defect and not an app defect — fix the environment.
     scenario_bug  the step itself is malformed (missing field, unknown verb).
@@ -27,6 +31,7 @@ from __future__ import annotations
 import re
 
 APP_BROKEN = "app_broken"
+APP_BEHAVIOR = "app_behavior"
 ENVIRONMENT = "environment"
 SCENARIO_BUG = "scenario_bug"
 UI_CHANGED = "ui_changed"
@@ -109,10 +114,37 @@ def classify(step: dict) -> dict:
     # target was reachable, and the step is well-formed — yet the check did not
     # hold. That is the signature of a UI that moved.
     is_assertion = str(step.get("severity")) == "assertion"
-    # Only an explicit locator failure counts as "the element is gone". An
-    # assertion simply returning False does NOT: `element_visible → False` is
-    # produced both by a renamed element and by one the app failed to render,
-    # and treating that as high confidence is how a loop deletes a real defect.
+
+    # The presence probe, captured at failure time by assert_. This is the one
+    # fact that separates the two cases a structural signal cannot:
+    #   absent  → the thing was renamed/removed → the test may be updated
+    #   present → it is right there and no longer behaves → the APP changed,
+    #             and rewriting the assertion would delete the finding
+    probe = step.get("probe") or {}
+    present = probe.get("element_present")
+
+    if present is True:
+        evidence.append(
+            f"대상이 페이지에 존재함 (총 {probe.get('element_count')}개, 보이는 것 "
+            f"{probe.get('visible_count')}개) — 셀렉터는 여전히 맞는다")
+        if probe.get("visible_count") == 0 and probe.get("element_count"):
+            evidence.append("DOM에는 있으나 하나도 보이지 않음 — 렌더/표시 로직 쪽")
+        return _verdict(APP_BEHAVIOR, "high", evidence,
+                        "요소는 있는데 기대가 성립하지 않는다 = 동작이 바뀌었거나 깨진 것. "
+                        "셀렉터 문제가 아니므로 테스트를 고쳐 통과시키면 결함을 덮는다. "
+                        "명세가 바뀐 것이라면 사람이 확인한 뒤 기대값을 갱신할 것.")
+
+    if present is False:
+        evidence.append(f"대상 '{step.get('selector_input')}'가 페이지에 아예 없음")
+        if step.get("resolved_by"):
+            evidence.append(f"직전 매칭 전략: {step['resolved_by']}")
+        return _verdict(UI_CHANGED, "high", evidence,
+                        "요소가 페이지에서 사라졌다 — 이동/개명으로 보인다. "
+                        "셀렉터 갱신이 정당한 경우.")
+
+    # No probe (interact failures, url assertions, older reports): fall back to
+    # the message. An explicit locator timeout is the only high-confidence
+    # "it's gone" signal available here.
     looks_missing = bool(_NOT_FOUND.search(actual))
 
     if is_assertion or looks_missing:
@@ -213,6 +245,9 @@ def _overall(causes: dict[str, int]) -> str:
     if causes.get(APP_BROKEN):
         return (f"앱 결함 {causes[APP_BROKEN]}건 — 테스트를 고치지 말 것. "
                 "개발에 보고하고 수정 후 재검증.")
+    if causes.get(APP_BEHAVIOR):
+        return (f"동작 변경/결함 {causes[APP_BEHAVIOR]}건 — 요소는 그대로인데 기대가 "
+                "성립하지 않는다. 의도된 변경인지 사람이 판단할 것.")
     if causes.get(ENVIRONMENT):
         return f"환경 문제 {causes[ENVIRONMENT]}건 — 접근 설정부터 해결."
     if causes.get(UNKNOWN):
