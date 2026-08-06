@@ -40,3 +40,19 @@ def test_errored_result_shape():
                             "pass_rate": 0.0}
     assert r["steps"][0]["severity"] == "error"
     assert "browser gone" in r["steps"][0]["actual"]
+
+
+# Fail-fast skips must not be rolled up as passes: an unreachable first step
+# left 22 steps un-run and the old `total - failed` form printed "22/23 passed".
+def test_totals_line_counts_skipped_as_not_passed():
+    results = [{"summary": {"total": 23, "passed": 0, "failed": 1, "skipped": 22}}]
+    assert cli._totals_line(results) == "total: 0/23 passed (22 skipped)"
+
+
+def test_totals_line_sums_across_scenarios_and_omits_zero_skips():
+    results = [{"summary": {"total": 3, "passed": 3, "failed": 0, "skipped": 0}},
+               {"summary": {"total": 4, "passed": 1, "failed": 1, "skipped": 2}}]
+    assert cli._totals_line(results) == "total: 4/7 passed (2 skipped)"
+
+    clean = [{"summary": {"total": 2, "passed": 2, "failed": 0, "skipped": 0}}]
+    assert cli._totals_line(clean) == "total: 2/2 passed"

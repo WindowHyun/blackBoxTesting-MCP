@@ -101,6 +101,21 @@ def _xml_safe(value) -> str:
     return _XML_ILLEGAL.sub("", str(value))
 
 
+def _totals_line(results: list[dict]) -> str:
+    """Console roll-up across scenarios.
+
+    Sums ``passed`` rather than deriving it as ``total - failed``: fail-fast
+    stops at the first failure and records the rest as ``skipped``, so the
+    derived form reports never-run steps as passing (a fully failed 23-step
+    run printed "22/23 passed"). The skipped count is surfaced too, so a
+    truncated run can't read as a nearly-green one."""
+    passed = sum(r["summary"]["passed"] for r in results)
+    total = sum(r["summary"]["total"] for r in results)
+    skipped = sum(r["summary"].get("skipped", 0) for r in results)
+    return (f"total: {passed}/{total} passed"
+            + (f" ({skipped} skipped)" if skipped else ""))
+
+
 def _write_junit(results: list[dict], path: str) -> None:
     """JUnit XML (one testsuite per scenario) — natively parsed by CI systems."""
     import xml.etree.ElementTree as ET
@@ -237,8 +252,7 @@ def _cmd_run(args) -> int:
     if args.junit:
         _write_junit(results, args.junit)
     failed = sum(r["summary"]["failed"] for r in results)
-    total = sum(r["summary"]["total"] for r in results)
-    print(f"total: {total - failed}/{total} passed")
+    print(_totals_line(results))
     return EXIT_OK if failed == 0 else EXIT_FAILED
 
 
