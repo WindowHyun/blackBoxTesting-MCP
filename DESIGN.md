@@ -706,6 +706,21 @@ SM-01~04와 함께(또는 직후) 구현한다.
 - `aria_snapshot` 옵션: `mode("ai"/"default")`·`depth`(**≥1.59**), `boxes`(**≥1.60**),
   `timeout`(≥1.49) — Q1 트리밍에 활용, pyproject 핀 `>=1.60` 전제 ✅
 - `page.goto(url, wait_until=...)` 값: `load`/`domcontentloaded`/`networkidle`/`commit` ✅
+  > 검증(2026-08, 실측): `goto` 타임아웃은 **정반대 두 상황을 같은 예외로** 던진다 —
+  > (a) 문서는 커밋됐고 settle 조건(networkidle)만 못 맞춤, (b) 서버가 응답을 아예
+  > 안 해 이전 페이지에 머무름. TCP accept 후 무응답인 서버로 측정 시 `goto`는
+  > 3s 뒤 TimeoutError, `page.url`은 `about:blank`, `title()`은 Chromium 자리표시자
+  > "Loading http://…" → status=None을 "도달"로 읽어 **죽은 서버가 통과**로 보고됐다.
+  > 커밋 판정은 **main frame의 `framenavigated`** 이벤트로 한다: URL 비교는 같은
+  > URL 재이동·리다이렉트·해시 이동에서 틀린다. (navigate가 액션 주위에 리스너를
+  > 걸고 `finally`에서 `remove_listener` — 매 스텝 호출되므로 누수 금지.)
+- `page.evaluate(...)`에는 **timeout 파라미터가 없다** — locator/action API와 달리
+  무한 대기한다.
+  > 검증(2026-08, 실측): navigation이 pending인 페이지에서 `page.evaluate`는 25s가
+  > 지나도 반환도 예외도 없었다(같은 페이지에서 `page.screenshot`은 자체 timeout으로
+  > 정상 탈출). 예외가 없으므로 `try/except`는 방어가 되지 못한다 → 페이지 레벨
+  > evaluate는 전부 `browser/probe.safe_evaluate`(asyncio.wait_for)를 경유한다.
+  > 미적용 시 매 런 끝의 a11y 감사가 런 전체(=MCP 툴 호출)를 영구 정지시킨다.
 - `page.on("console")`, `page.on("response")`, `page.on("requestfailed")` ✅
   — 4xx/5xx는 `response`(status≥400)로 전달, `requestfailed`는 네트워크 실패 한정 ✅
 - `page.on("dialog")` / `page.expect_event("dialog")`,
@@ -744,6 +759,11 @@ SM-01~04와 함께(또는 직후) 구현한다.
   > 실측(이 저장소 CI 환경): `HTTPS_PROXY`만 설정된 Linux에서 Chromium이 프록시를
   > 사용하긴 하나 자격증명은 전달되지 않는다 → 인증 프록시는 `proxy=` 필수.
 - `page.get_by_role(role, name=, exact=)`, `page.get_by_text(text, exact=)` ✅
+  > 검증(2026-08, 실측): `name=`의 기본값은 `exact=False` = **부분 일치·대소문자
+  > 무시**다. `dismiss_banners`의 라벨 "확인"이 `<button>주문 확인</button>`에
+  > 매칭돼 실제로 주문이 제출됐다(픽스처 측정). `exact=True`는 **대소문자 구분**이라
+  > 라벨마다 표기 변형이 필요 → 전체 일치는 `name=re.compile(r"^\s*라벨\s*$", re.I)`
+  > 로 건다(Playwright는 `name`에 컴파일된 정규식을 허용).
 - `page.frame_locator(selector)` (snake_case) — `FrameLocator`는 `get_by_role`/
   `get_by_text`/`get_by_test_id`/`locator` 노출, frame root에서 셀렉터 체인 동작 ✅
 - `page.wait_for_selector(...)`, `page.wait_for_timeout(ms)`, `page.expect_console_message(...)` ✅

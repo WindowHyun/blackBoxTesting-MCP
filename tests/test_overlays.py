@@ -6,8 +6,10 @@ from blackbox_mcp.tools.assertion import assert_
 
 
 async def test_dismiss_clicks_consent_button(session):
+    # position:fixed like a real consent banner — dismiss_banners only clicks
+    # controls inside an overlay, so an in-page button can't be mistaken for one.
     await session.page.set_content(
-        "<div id='banner'>쿠키 사용 동의"
+        "<div id='banner' style='position:fixed;bottom:0'>쿠키 사용 동의"
         "<button onclick=\"document.getElementById('banner').remove()\">모두 동의</button>"
         "</div><button data-testid='real'>로그인</button>"
     )

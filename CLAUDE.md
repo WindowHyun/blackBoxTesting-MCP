@@ -49,6 +49,20 @@ GitHub Release 발행 또는 Actions `Release → Run workflow`).
 - Chromium 다운로드 ~150MB. Phase 1 착수 시 환경 가능 여부 먼저 확인.
 - `BrowserType.executable_path`는 "설치 여부"가 아니라 "기대 경로" → `os.path.exists()`로 확인.
 - 4xx/5xx는 `requestfailed`가 아니라 `response`(status≥400)로 잡힌다.
+- **`goto` 타임아웃 ≠ 실패, ≠ 성공** — "커밋됐고 networkidle만 초과"와 "서버가 응답
+  없음"이 같은 예외로 온다. 커밋 판정은 main frame `framenavigated`(URL 비교는 같은
+  URL 재이동·리다이렉트에서 틀림). 미커밋은 `error`로 반환하고, `navigate` 결과의
+  `error`는 runner·recorder **양쪽**에서 실패로 판정해야 한다 — 한쪽만 고치면 대화형
+  흐름에서 죽은 서버가 계속 통과한다.
+- **`page.evaluate`에는 timeout이 없다** — pending navigation 페이지에서 반환도 예외도
+  없이 영구 정지(실측 25s+). `try/except`는 방어가 안 되므로 페이지 레벨 evaluate는
+  반드시 `browser/probe.safe_evaluate` 경유(locator.evaluate는 자체 timeout으로 안전).
+- 이벤트 버퍼 스텝 귀속은 **`buffers.mark()`/`since()`** 로만 — `len()` 슬라이싱은 캡
+  (1000건) 도달 후 길이가 고정돼 그 스텝의 이벤트가 **전부** 사라진다(= `--fail-on-js-error`
+  무력화). `clear()`는 dropped 카운터에 흡수시켜 커서 의미를 유지한다.
+- `get_by_role(name=...)`는 기본이 **부분 일치**다 — "확인"이 "주문 확인"에 매칭돼
+  `dismiss_banners`가 주문을 제출했다. 전체 일치는 `re.compile(r"^\s*라벨\s*$", re.I)`,
+  그리고 자동 클릭은 오버레이(fixed/sticky/dialog/aria-modal/z-index≥100) 안으로 한정.
 - **잡히지 않은 JS 예외/미처리 rejection은 `console` 이벤트로 오지 않는다** — `pageerror`
   전용. `listeners.attach`가 상시 등록하며 `source="pageerror"`로 태깅(레벨은 error라
   기존 소비자가 그대로 집계). 이걸 빼면 앱이 터진 페이지가 "통과"로 보고된다.

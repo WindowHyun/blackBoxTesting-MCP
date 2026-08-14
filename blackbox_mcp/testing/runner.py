@@ -22,6 +22,7 @@ from datetime import datetime
 from typing import Any
 
 from ..browser import get_session
+from ..browser.probe import safe_evaluate
 from ..config import CONFIG, effective_browser
 from ..tools.assertion import assert_
 from ..tools.dialog import expect_dialog
@@ -327,9 +328,8 @@ async def run(
             tracing = False
 
     for idx, step in enumerate(steps, start=1):
-        c0 = len(session.buffers.console)
-        n0 = len(session.buffers.network)
-        d0 = len(session.buffers.dialogs)
+        # Attribution cursor, not a length — see EventBuffers.mark().
+        buf_mark = session.buffers.mark()
         s0 = time.monotonic()
         exc: Exception | None = None
         # Flaky-step handling: `retry: N` re-dispatches up to N extra times
@@ -353,9 +353,10 @@ async def run(
 
         duration_ms = int((time.monotonic() - s0) * 1000)
         passed = bool(fields["passed"])
-        new_console = [c.__dict__ for c in session.buffers.console[c0:]]
-        new_network = [n.__dict__ for n in session.buffers.network[n0:]]
-        new_dialogs = [d.__dict__ for d in session.buffers.dialogs[d0:]]
+        con, net, dia = session.buffers.since(buf_mark)
+        new_console = [c.__dict__ for c in con]
+        new_network = [n.__dict__ for n in net]
+        new_dialogs = [d.__dict__ for d in dia]
 
         # An uncaught exception is a defect even when the step's own assertion
         # held: the page threw, the UI just happened to still satisfy this
@@ -475,11 +476,13 @@ async def _stop_tracing(session, *, failed: bool, run_tag: str) -> str | None:
 
 
 async def _a11y_audit(session) -> list[dict]:
-    """SM-09: cheap accessibility findings as a by-product of the page state."""
-    try:
-        return await session.page.evaluate(_A11Y_JS)
-    except Exception:
-        return []
+    """SM-09: cheap accessibility findings as a by-product of the page state.
+
+    Bounded: this runs at the end of EVERY run, and page.evaluate on a page
+    whose navigation never answered blocks forever without raising — which
+    used to hang the whole run (and the MCP tool call) here. See browser.probe.
+    """
+    return await safe_evaluate(session.page, _A11Y_JS, default=[])
 
 
 def _meta(session) -> dict[str, Any]:

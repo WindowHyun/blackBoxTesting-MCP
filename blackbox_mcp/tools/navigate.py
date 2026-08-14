@@ -18,18 +18,48 @@ async def navigate(url: str, wait_until: str | None = None) -> dict:
     # A top-level navigation invalidates any iframe we'd switched into.
     session.set_frame(None)
     wu = wait_until or CONFIG.default_wait_until
+    page = session.page
+
+    # Did the browser actually commit a new document? A goto() timeout covers
+    # two opposite outcomes — "the DOM is there, only networkidle timed out"
+    # (fine, proceed) and "the server never answered, we are still on the old
+    # page" (the site is down) — and they are indistinguishable from the
+    # exception alone. Reporting the second as a pass meant a scenario went
+    # green against a dead server, with the report itself printing
+    # "navigated to about:blank".
+    #
+    # framenavigated on the MAIN frame is the commit signal: it fires exactly
+    # when a new document is committed, so it stays right where comparing URLs
+    # does not (re-navigating to the URL already loaded, redirects, hash-only
+    # navigations). Sub-frame events say nothing about the top-level document.
+    committed = False
+
+    def _on_frame_navigated(frame) -> None:
+        nonlocal committed
+        if frame is page.main_frame:
+            committed = True
+
+    page.on("framenavigated", _on_frame_navigated)
 
     settled = True
     try:
-        response = await session.page.goto(
-            url, wait_until=wu, timeout=CONFIG.nav_timeout_ms
-        )
+        response = await page.goto(url, wait_until=wu, timeout=CONFIG.nav_timeout_ms)
     except PlaywrightTimeoutError:
-        # The navigation almost certainly committed (DOM is there); only the
-        # "settled" condition (e.g. networkidle on an ad-heavy page) timed out.
-        # Proceed with the current page state rather than failing the step.
         response = None
         settled = False
+        if not committed:
+            return {
+                "title": None,
+                "url": page.url,
+                "status": None,
+                "settled": False,
+                "wait_until": wu,
+                "error": scrub(
+                    f"navigation did not commit within {CONFIG.nav_timeout_ms}ms — "
+                    f"no response from the server (still at {page.url})"),
+            }
+        # Committed: the DOM is there and only the settle condition (e.g.
+        # networkidle on an ad-heavy page) ran out. Proceed with the page.
     except Exception as exc:
         # A hard navigation failure — DNS, refused connection, bad certificate,
         # proxy tunnel error: exactly the class of problem a closed corporate
@@ -38,16 +68,23 @@ async def navigate(url: str, wait_until: str | None = None) -> dict:
         # here surfaced as an opaque MCP tool error with no page context.
         return {
             "title": None,
-            "url": session.page.url,
+            "url": page.url,
             "status": None,
             "settled": False,
             "wait_until": wu,
             "error": scrub(f"{type(exc).__name__}: {exc}"),
         }
+    finally:
+        # Never leave the probe attached: navigate runs on every step of every
+        # scenario, and the listeners would pile up on the same page.
+        try:
+            page.remove_listener("framenavigated", _on_frame_navigated)
+        except Exception:
+            pass
 
     return {
-        "title": await session.page.title(),
-        "url": session.page.url,
+        "title": await page.title(),
+        "url": page.url,
         "status": response.status if response else None,
         "settled": settled,
         "wait_until": wu,

@@ -49,10 +49,18 @@ class NetworkEntry:
 
 
 # Cap so a chatty page (SPA polling, ad errors) can't grow memory without
-# bound on a long-lived session; the newest entries win. Step attribution in
-# runner/recorder slices by index, so a trim mid-step can at worst drop a few
-# old entries from that step's slice — never mis-attribute new ones.
+# bound on a long-lived session; the newest entries win. Step attribution goes
+# through mark()/since(), which counts total appends — see mark() for why
+# slicing by len() silently lost every event once this cap was reached.
 _MAX_EVENTS = 1000
+
+
+@dataclass(frozen=True)
+class BufferMark:
+    """A cursor into the three append streams — see :meth:`EventBuffers.mark`."""
+    console: int
+    network: int
+    dialogs: int
 
 
 @dataclass
@@ -60,6 +68,11 @@ class EventBuffers:
     console: list[ConsoleEntry] = field(default_factory=list)
     network: list[NetworkEntry] = field(default_factory=list)
     dialogs: list[DialogEntry] = field(default_factory=list)
+    # How many entries the cap has evicted from the front of each list. Added
+    # to len() they give the total ever appended, which is what mark() needs.
+    console_dropped: int = 0
+    network_dropped: int = 0
+    dialogs_dropped: int = 0
     # Set by expect_dialog for the duration of one triggering action. When set,
     # the recorder below hands the dialog to it instead of dismissing.
     #
@@ -71,20 +84,67 @@ class EventBuffers:
 
     def add_console(self, entry: ConsoleEntry) -> None:
         self.console.append(entry)
-        if len(self.console) > _MAX_EVENTS:
-            del self.console[:-_MAX_EVENTS]
+        overflow = len(self.console) - _MAX_EVENTS
+        if overflow > 0:
+            del self.console[:overflow]
+            self.console_dropped += overflow
 
     def add_network(self, entry: NetworkEntry) -> None:
         self.network.append(entry)
-        if len(self.network) > _MAX_EVENTS:
-            del self.network[:-_MAX_EVENTS]
+        overflow = len(self.network) - _MAX_EVENTS
+        if overflow > 0:
+            del self.network[:overflow]
+            self.network_dropped += overflow
 
     def add_dialog(self, entry: DialogEntry) -> None:
         self.dialogs.append(entry)
-        if len(self.dialogs) > _MAX_EVENTS:
-            del self.dialogs[:-_MAX_EVENTS]
+        overflow = len(self.dialogs) - _MAX_EVENTS
+        if overflow > 0:
+            del self.dialogs[:overflow]
+            self.dialogs_dropped += overflow
+
+    def mark(self) -> BufferMark:
+        """Cursor for "everything from here on", stable across cap-trimming.
+
+        Step attribution used to record ``len(console)`` and slice ``[c0:]``
+        afterwards. That silently broke at the cap: once a buffer holds
+        _MAX_EVENTS entries its length never grows again — each append evicts
+        one from the front — so ``c0`` always equalled the final length and the
+        slice was always EMPTY. On a chatty SPA every console error, network
+        error and dialog raised during a step vanished from the report, and
+        --fail-on-js-error stopped failing anything. Counting total appends
+        instead is unaffected by eviction.
+        """
+        return BufferMark(
+            console=self.console_dropped + len(self.console),
+            network=self.network_dropped + len(self.network),
+            dialogs=self.dialogs_dropped + len(self.dialogs),
+        )
+
+    def since(self, mark: BufferMark) -> tuple[list[ConsoleEntry], list[NetworkEntry],
+                                               list[DialogEntry]]:
+        """Entries appended after ``mark``.
+
+        If the step itself produced more than _MAX_EVENTS entries, the oldest of
+        them have been evicted and cannot be reported — but what remains is
+        still attributed to the right step, which is the part that matters.
+        """
+        return (
+            self.console[max(0, mark.console - self.console_dropped):],
+            self.network[max(0, mark.network - self.network_dropped):],
+            self.dialogs[max(0, mark.dialogs - self.dialogs_dropped):],
+        )
 
     def clear(self) -> None:
+        # A clear is an eviction of everything, so the dropped counters absorb
+        # the discarded entries rather than resetting. That keeps a mark taken
+        # before the clear meaningful: it still resolves to "whatever was
+        # appended after it and still exists" — so a step that resets the
+        # session mid-flight still gets the errors the fresh page then raised,
+        # instead of silently reporting none.
+        self.console_dropped += len(self.console)
+        self.network_dropped += len(self.network)
+        self.dialogs_dropped += len(self.dialogs)
         self.console.clear()
         self.network.clear()
         self.dialogs.clear()

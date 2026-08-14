@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ko">
+<head><meta charset="utf-8"><title>Banner Fixture</title>
+<style>
+  #cookie { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px;
+            background: #eee; border-top: 1px solid #ccc; }
+</style>
+</head>
+<body>
+  <!-- a realistic consent banner: fixed, above the page -->
+  <div id="cookie">
+    쿠키 사용에 동의해 주세요.
+    <button onclick="document.getElementById('cookie').remove()">모두 동의</button>
+  </div>
+
+  <!-- ordinary in-page business controls that must NEVER be auto-clicked -->
+  <main>
+    <button id="order" onclick="document.title='ORDER SUBMITTED'">주문 확인</button>
+    <button id="del" onclick="document.title='DELETED'">삭제 확인</button>
+    <button id="plain" onclick="document.title='PLAIN CONFIRM'">확인</button>
+    <button data-testid="real">로그인</button>
+  </main>
+</body>
+</html>

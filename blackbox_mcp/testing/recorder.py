@@ -53,6 +53,16 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
 
     if name == "navigate":
         r = result or {}
+        if r.get("error"):
+            # DNS / refused / TLS / proxy failure, or a navigation that never
+            # committed: the page never loaded, so there is no status to judge
+            # and "status is None" below would read the absent status as fine.
+            # Same verdict the runner reaches — an ad-hoc flow must not report
+            # a dead server as a pass either.
+            return ("도착 (2xx/3xx)", r["error"], False, None,
+                    "navigation failed before a response",
+                    "확인: URL/DNS, 프록시(PROXY_SERVER), 인증서"
+                    "(IGNORE_HTTPS_ERRORS), 사내망 접근 권한")
         status = r.get("status")
         # None on file:// or a settle-timeout (no response) — reachable; a real
         # 4xx/5xx is a failed load, not a pass.
@@ -120,9 +130,8 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         session = await get_session()
     except Exception:
         pass
-    c0 = len(session.buffers.console) if session else 0
-    n0 = len(session.buffers.network) if session else 0
-    d0 = len(session.buffers.dialogs) if session else 0
+    # Attribution cursor, not a length — see EventBuffers.mark().
+    buf_mark = session.buffers.mark() if session else None
 
     t0 = time.monotonic()
     exc: Exception | None = None
@@ -136,9 +145,13 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     expected, actual, passed, resolved_by, reason, suggestion = _interpret(
         name, kwargs, result, exc)
 
-    new_console = ([c.__dict__ for c in session.buffers.console[c0:]] if session else [])
-    new_network = ([n.__dict__ for n in session.buffers.network[n0:]] if session else [])
-    new_dialogs = ([d.__dict__ for d in session.buffers.dialogs[d0:]] if session else [])
+    if session is not None and buf_mark is not None:
+        con, net, dia = session.buffers.since(buf_mark)
+        new_console = [c.__dict__ for c in con]
+        new_network = [n.__dict__ for n in net]
+        new_dialogs = [d.__dict__ for d in dia]
+    else:
+        new_console, new_network, new_dialogs = [], [], []
 
     global _COUNTER, _RUN_ID
     _COUNTER += 1

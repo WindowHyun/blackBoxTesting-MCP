@@ -17,6 +17,7 @@ import json
 from mcp.server.fastmcp import Context
 
 from ..browser import get_session
+from ..browser.probe import safe_evaluate
 from ..tools.navigate import navigate
 from ._registry import tool
 
@@ -113,7 +114,8 @@ async def generate_scenario(description: str, url: str,
                             ctx: Context | None = None) -> dict:
     session = await get_session()
     await navigate(url)
-    raw = await session.page.evaluate(_COLLECT_JS)
+    # Bounded: an unresponsive page must not wedge the tool call forever.
+    raw = await safe_evaluate(session.page, _COLLECT_JS, default=[])
 
     elements = []
     for el in raw:
