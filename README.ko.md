@@ -261,9 +261,17 @@ ui-blackbox run ./steps.json --format all       # 스텝 .json 파일
 ui-blackbox run a b c --junit results.xml       # 스위트 + CI용 JUnit
 ui-blackbox run a b c --parallel 3              # 시나리오당 격리 서브프로세스
 ui-blackbox run a b c --parallel 3 --timeout 300  # 시나리오당 워치독(초)
+ui-blackbox run a b c --no-isolate               # 상태를 이어가는 하나의 흐름으로 실행
 ui-blackbox run smoke --trace-on-failure        # 실패한 실행만 Playwright trace.zip 보존
 ui-blackbox doctor                              # 브라우저/디렉토리/설정 자가진단
 ```
+
+**시나리오 격리.** 스위트의 각 시나리오는 깨끗한 브라우저 컨텍스트에서 시작한다 —
+쿠키·`localStorage`·모킹이 다음 시나리오로 새지 않으므로 순차 실행이 `--parallel`과
+같은 의미를 갖는다. 로그인 한 번 후 나머지를 이어 돌리는 식으로 **의도적으로 하나의
+흐름**으로 작성한 스위트라면 `--no-isolate`를 쓴다. 실 브라우저 모드
+(`use_real_browser` / `BROWSER_CDP`)는 어느 쪽이든 로그인이 유지된다 — 그쪽에선
+콘솔/네트워크 버퍼만 비운다.
 
 GitHub Actions 예시:
 ```yaml

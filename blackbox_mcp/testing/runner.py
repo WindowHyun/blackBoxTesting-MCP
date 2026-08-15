@@ -96,7 +96,11 @@ async def _dispatch(step: dict) -> dict:
 
     # Clear errors for malformed steps (common with LLM-authored scenarios) —
     # better than a bare KeyError surfaced as a generic exception.
-    _required = {"navigate": ["url"], "interact": ["selector"],
+    # 'type' carries the interact verb (click/type/select/...). Without it the
+    # step used to reach interact() as action=None and come back "unknown
+    # action; expected one of [...]", which reads like a bad verb rather than a
+    # missing field.
+    _required = {"navigate": ["url"], "interact": ["selector", "type"],
                  "assert": ["kind", "target"], "assert_": ["kind", "target"]}
     missing = [k for k in _required.get(action, []) if k not in step]
     if missing:
@@ -513,6 +517,12 @@ def _meta(session) -> dict[str, Any]:
         "browser_version": browser_version,
         "viewport": viewport,
         "headless": CONFIG.headless,
-        "executable": CONFIG.chromium_executable or "bundled",
+        # What actually launched, not what was configured: the launch chain
+        # falls back silently past a stale CHROMIUM_EXECUTABLE or an
+        # uninstalled channel, and a run that reports the configured path in
+        # that case names a binary it never used. getattr keeps stub sessions
+        # in tests working.
+        "executable": (getattr(session, "launched_via", None)
+                       or CONFIG.chromium_executable or "bundled"),
         "credentials_masked": True,
     }

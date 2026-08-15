@@ -97,6 +97,13 @@ GitHub Release 발행 또는 Actions `Release → Run workflow`).
 - 리포트↔스크린샷은 **동일 `run_id` 공유**(`result["run_id"]`, `save()`가 파일명에 재사용) → 리테인션이 run 단위로 함께 보관/삭제(DESIGN §7.2). 스크린샷 태그는 `{run_id}_{name}` — id를 앞에 둬 `_STAMP_RE`가 name의 숫자에 오염되지 않는다.
 - `register_all`은 멱등(중복 등록 방지 가드). scrub 레지스트리(`secrets._RESOLVED_SECRETS`)는 flow 경계(`recorder.reset`·`runner.run` 종료)에서 clear — 레코드는 append 시점에 이미 스크럽됨.
 - CLI `--parallel` 자식은 `REPORT_RETENTION=0`(부모가 1회 정리), 시그널사는 error, `--timeout` 워치독. stdout이 MCP 파이프가 아니라 print 자유(서버와 달리).
+- CLI 스위트는 시나리오마다 컨텍스트를 리셋한다(기본) — 순차와 `--parallel`의 의미를
+  일치시키기 위함. 예외는 `--no-isolate`. 예제 시나리오는 `reset_session` 없이
+  navigate로 시작하므로 이 격리가 없으면 두 번째 시나리오가 앞 계정으로 돌아간다.
+- 리포트 meta의 `executable`은 **실제 런치된 것**(`session.launched_via`) — CONFIG는
+  "요청한 값"이라 stale `CHROMIUM_EXECUTABLE`/미설치 channel이 조용히 폴백되면 거짓말이 된다.
+- recorder에 도구를 추가하면 `RECORDABLE` + `_interpret` 분기를 **함께** 넣을 것 —
+  분기가 없으면 제네릭 폴백이 `passed=True`로 기록해 실패한 다운로드가 통과로 남는다.
 - navigate 판정은 **상태코드 기반**(`status>=400` 실패, `None`=file://·타임아웃은 통과, 스텝 `expect_status`로 정확 일치 검증). runner·recorder 양쪽 동일.
 - D2 bare-string 체인은 testid→**role+name(흔한 role 순회)**→text — 단, 공백 포함 CSS 신호(`#form input`, `div > a`)는 CSS 프로브가 선행(0건이면 체인 계속 → `Order #123` 같은 텍스트는 텍스트 티어). CSS 즉시 확정은 `# [ ] >` 또는 선행 `.` **이고 공백 없음**일 때만. `locate()`(sync)는 보수적 — 공백 있으면 텍스트. `resolved_by`는 `role=button`처럼 구체 표기.
 - 도구별 체인(DESIGN §4): element_visible은 `resolve(visible_only=True)`(숨은 testid가 가시 매치를 가리지 않게), count는 `resolve_count_population`(testid/role 티어 배제 — 공백 구조 문자열은 CSS 매치 있으면 CSS·없으면 텍스트), wait는 **폴링 재해석** + 단일 결정 전략 프로브 오류는 즉시 실패(`is_single_strategy`).

@@ -284,9 +284,17 @@ ui-blackbox run ./steps.json --format all       # a steps .json file
 ui-blackbox run a b c --junit results.xml       # suite + JUnit for CI
 ui-blackbox run a b c --parallel 3              # one isolated subprocess each
 ui-blackbox run a b c --parallel 3 --timeout 300  # per-scenario watchdog (sec)
+ui-blackbox run a b c --no-isolate               # one continuing flow, state kept
 ui-blackbox run smoke --trace-on-failure        # keep a Playwright trace.zip only on failure
 ui-blackbox doctor                              # browser/dirs/config self-check
 ```
+
+**Scenario isolation.** Each scenario in a suite starts from a clean browser
+context — cookies, `localStorage` and mocks do not leak into the next one, so a
+sequential run means the same thing as `--parallel`. Pass `--no-isolate` when a
+suite is deliberately written as one continuing flow (log in once, then run the
+rest). Real-browser modes (`use_real_browser` / `BROWSER_CDP`) keep their login
+either way — there only the console/network buffers are cleared.
 
 GitHub Actions sketch:
 ```yaml

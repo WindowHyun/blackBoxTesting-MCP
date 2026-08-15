@@ -57,6 +57,30 @@ def _errored_result(name: str, exc: Exception) -> dict:
                        "ai_suggestion": str(exc)[:160], "duration_ms": 0}]}
 
 
+async def _isolate_between_scenarios() -> None:
+    """Wipe cookies/storage so the next scenario starts clean.
+
+    ``--parallel`` gives each scenario its own process (and so its own browser),
+    but the sequential path shared one context across the whole suite — the
+    same command meant two different things depending on the flag, and state
+    leaked forward. The repo's own examples show the cost: every saucedemo
+    scenario begins with a plain navigate + login, so running two of them in
+    one command left the second logged in as the first one's user and testing
+    the wrong account.
+
+    Real-browser modes (persistent profile / CDP) only clear buffers here —
+    reset() deliberately preserves a logged-in browser the user owns.
+    """
+    from .browser import get_session
+
+    try:
+        session = await get_session()
+        await session.reset()
+    except Exception as exc:   # a dead browser is the next run's problem
+        print(f"  warn: 시나리오 간 초기화 실패 ({type(exc).__name__}: {exc})",
+              file=sys.stderr)
+
+
 async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
     """Run scenarios sequentially in one browser session; always clean up.
     A scenario that raises is recorded as an errored result and the suite
@@ -66,7 +90,9 @@ async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
 
     results: list[dict] = []
     try:
-        for name, steps in items:
+        for i, (name, steps) in enumerate(items):
+            if i and not args.no_isolate:
+                await _isolate_between_scenarios()
             print(f"▶ {name} ({len(steps)} steps)")
             try:
                 res = await runner.run(steps, name=name,
@@ -356,6 +382,11 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--fail-on-js-error", action="store_true",
                        help="fail a step whose assertion held but whose page threw "
                             "an uncaught JS exception (always recorded either way)")
+    run_p.add_argument("--no-isolate", action="store_true",
+                       help="keep cookies/storage between scenarios in a "
+                            "sequential run (default: each scenario starts from "
+                            "a clean context, matching --parallel). Use when a "
+                            "suite is deliberately written as one continuing flow.")
     run_p.add_argument("--junit", metavar="PATH",
                        help="also write a JUnit XML report (sequential runs only)")
     run_p.add_argument("--parallel", type=int, default=1, metavar="N",

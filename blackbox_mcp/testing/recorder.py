@@ -17,6 +17,11 @@ RECORDABLE = {
     "navigate", "interact", "assert_", "screenshot", "wait",
     "switch_frame", "expect_dialog", "reset_session", "use_real_browser",
     "dismiss_banners", "save_state", "load_state", "mock_route", "unmock_route",
+    # Verification steps, not just navigation: expect_popup/expect_download each
+    # carry a pass/fail verdict of their own, and leaving them out meant an
+    # ad-hoc flow that verified an 엑셀 download produced a report with no trace
+    # of it. switch_tab rides along so the report shows where the flow moved.
+    "expect_popup", "expect_download", "switch_tab",
 }
 
 # Safety cap so a long-lived server can't grow the log without bound.
@@ -112,6 +117,30 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
         return (name, r.get("path") or r.get("error"), ok, None,
                 f"{name} {'ok' if ok else 'failed'}",
                 None if ok else "state file missing or real-browser mode")
+    if name == "expect_popup":
+        r = result or {}
+        ok = bool(r.get("passed"))
+        return (kwargs.get("expect_url") or "popup", r.get("url") or r.get("error"),
+                ok, r.get("resolved_by"),
+                "popup opened" if ok else "popup not opened as expected",
+                None if ok else "트리거가 새 창/탭을 여는지 확인 (팝업 차단·target=_blank)")
+    if name == "expect_download":
+        r = result or {}
+        ok = bool(r.get("passed"))
+        return ((kwargs.get("expect_name") or kwargs.get("expect_extension")
+                 or "download"),
+                (f"{r.get('filename')} ({r.get('size_bytes')}B)" if ok
+                 else r.get("error")),
+                ok, r.get("resolved_by"),
+                "download verified" if ok else "download not verified",
+                None if ok else "트리거가 실제로 파일을 내려받는지, 서버가 에러 "
+                                "페이지를 대신 반환하지 않는지 확인")
+    if name == "switch_tab":
+        r = result or {}
+        ok = bool(r.get("ok"))
+        return ("tab switch", r.get("url") or r.get("error"), ok, None,
+                f"tab → {kwargs.get('index', 0)}",
+                None if ok else "list_tabs로 열린 탭 인덱스를 확인")
     if name in ("mock_route", "unmock_route"):
         r = result or {}
         ok = bool(r.get("ok"))
@@ -166,7 +195,10 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         "step": idx,
         "action": name,
         "raw": secrets.mask_step(dict(kwargs)),
-        "selector_input": kwargs.get("selector") or kwargs.get("target"),
+        # 'trigger' is what expect_popup/expect_download/expect_dialog click —
+        # without it those steps show a blank target in the report.
+        "selector_input": (kwargs.get("selector") or kwargs.get("target")
+                           or kwargs.get("trigger")),
         "resolved_by": resolved_by,
         "expected": expected,
         "actual": actual,

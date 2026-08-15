@@ -121,6 +121,12 @@ class BrowserSession:
         self._cdp = False          # attached to a user-owned browser via CDP
         self._persistent = False   # launched a real browser with a saved profile
         self._persistent_opts: dict | None = None
+        # What the launch fallback chain actually used ("bundled", a channel, an
+        # executable path, or "cdp"). Reported as the run's engine: CONFIG says
+        # what was *asked for*, and a stale CHROMIUM_EXECUTABLE or a missing
+        # channel falls through silently — a report claiming reproducibility
+        # must name the binary that ran, not the one that was configured.
+        self._launched_via: str | None = None
         # Current iframe context for CT-09 as a chain (outer → inner); empty ==
         # main page. A list, not a single selector: nested iframes are only
         # reachable by chaining frame_locator() calls — no selector string can
@@ -151,6 +157,7 @@ class BrowserSession:
             try:
                 self._browser = await self._pw.chromium.connect_over_cdp(CONFIG.cdp_url)
                 self._cdp = True
+                self._launched_via = "cdp"
                 self._context = (self._browser.contexts[0] if self._browser.contexts
                                  else await self._browser.new_context())
                 self._page = (self._context.pages[0] if self._context.pages
@@ -193,6 +200,7 @@ class BrowserSession:
                 log.warning("launch attempt %s failed: %s", extra or "bundled", exc)
         if self._browser is None:
             raise RuntimeError(f"failed to launch {CONFIG.browser}: {last_err}")
+        self._launched_via = used
         await self._new_context()
         log.info(
             "BrowserSession started (%s via %s, headless=%s, stealth=%s)",
@@ -311,6 +319,7 @@ class BrowserSession:
         self._page = (self._context.pages[0] if self._context.pages
                       else await self._context.new_page())
         self._persistent, self._cdp = True, False
+        self._launched_via = used
         self._frame_chain = []
         self.buffers.clear()
         self._watch_page(self._page)
@@ -345,6 +354,7 @@ class BrowserSession:
                     pass
         self._browser = self._context = self._page = None
         self._cdp = self._persistent = False
+        self._launched_via = None
 
     async def restart(self) -> None:
         """Recover from a browser crash (NFR Reliability, < 5s).
@@ -393,8 +403,15 @@ class BrowserSession:
         finally:
             self._pw = self._browser = self._context = self._page = None
             self._cdp = self._persistent = False
+            self._launched_via = None
 
     # ── accessors ────────────────────────────────────────────────
+    @property
+    def launched_via(self) -> str | None:
+        """The browser the fallback chain actually launched — see _launched_via.
+        None before start() (or after close)."""
+        return self._launched_via
+
     def is_alive(self) -> bool:
         """True if the browser is still usable (NFR crash detection).
 

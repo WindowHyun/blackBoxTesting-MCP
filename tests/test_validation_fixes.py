@@ -9,6 +9,15 @@ P0-2  the end-of-run a11y audit hung forever on an unresponsive page — no
 P1-3  once an event buffer hit its 1000-entry cap, every console/network/dialog
       event raised during a step disappeared from the report
 P1-4  dismiss_banners clicked "주문 확인" because "확인" matched as a substring
+P2-6  expect_popup/expect_download/switch_tab were missing from the recorder, so
+      an ad-hoc flow that verified a download reported no trace of it
+P2-7  report meta named the CONFIGURED browser binary, not the one the launch
+      fallback chain actually used
+P2-8  an interact step missing 'type' failed with "unknown action" instead of
+      naming the missing field
+
+(P2-5, CLI suite isolation, is covered in test_cli_isolation.py — it needs a
+real suite run.)
 """
 from __future__ import annotations
 
@@ -289,3 +298,131 @@ async def test_dismiss_banners_handles_a_dialog_role_modal(session):
         "</div>")
     r = await dismiss_banners()
     assert any("수락" in d for d in r["dismissed"])
+
+
+# ── P2-6: verification tools reach the ad-hoc report ─────────────
+def test_verification_tools_are_recordable():
+    """A flow that verifies a popup or a download must leave a trace in the
+    report save_report writes — these three were silently unrecorded."""
+    from blackbox_mcp.testing import recorder
+
+    assert {"expect_popup", "expect_download", "switch_tab"} <= recorder.RECORDABLE
+
+
+def test_failed_download_records_as_a_failure():
+    """The generic fallback branch marked every unknown tool passed=True, so a
+    download that never arrived would have been recorded as a passing step."""
+    from blackbox_mcp.testing import recorder
+
+    result = {"passed": False, "resolved_by": "testid", "path": None,
+              "error": "no download within 30000ms (TimeoutError)"}
+    expected, actual, passed, resolved_by, reason, suggestion = recorder._interpret(
+        "expect_download", {"expect_extension": ".xlsx"}, result, None)
+
+    assert passed is False
+    assert expected == ".xlsx"
+    assert "no download" in actual
+    assert resolved_by == "testid"
+    assert suggestion
+
+
+def test_successful_download_records_filename_and_size():
+    from blackbox_mcp.testing import recorder
+
+    result = {"passed": True, "resolved_by": "role=button",
+              "filename": "report.xlsx", "size_bytes": 2048}
+    _, actual, passed, _, reason, suggestion = recorder._interpret(
+        "expect_download", {}, result, None)
+
+    assert passed is True
+    assert actual == "report.xlsx (2048B)"
+    assert suggestion is None
+
+
+def test_failed_popup_records_as_a_failure():
+    from blackbox_mcp.testing import recorder
+
+    result = {"passed": False, "url": None, "error": "no popup opened within 30000ms"}
+    _, actual, passed, _, _, suggestion = recorder._interpret(
+        "expect_popup", {"expect_url": "/terms"}, result, None)
+
+    assert passed is False
+    assert "no popup" in actual
+    assert suggestion
+
+
+def test_switch_tab_records_its_verdict():
+    from blackbox_mcp.testing import recorder
+
+    ok = recorder._interpret("switch_tab", {"index": 1},
+                             {"ok": True, "index": 1, "url": "http://x/"}, None)
+    assert ok[2] is True and ok[1] == "http://x/"
+
+    bad = recorder._interpret("switch_tab", {"index": 9},
+                              {"ok": False, "error": "tab 9 out of range"}, None)
+    assert bad[2] is False and "out of range" in bad[1]
+
+
+# ── P2-7: meta names the binary that actually ran ────────────────
+class _StubSession:
+    """Enough of a session for _meta; the rest is caught by its try/excepts."""
+
+    def __init__(self, launched_via=None):
+        if launched_via is not None:
+            self.launched_via = launched_via
+
+
+def test_meta_reports_the_binary_that_actually_launched(monkeypatch):
+    """A stale CHROMIUM_EXECUTABLE falls through to the bundled browser; the
+    report used to name the stale path anyway and call itself reproducible."""
+    from blackbox_mcp.testing import runner
+
+    monkeypatch.setattr(runner, "CONFIG", dataclasses.replace(
+        CONFIG, chromium_executable="/gone/chrome"))
+
+    assert runner._meta(_StubSession("bundled"))["executable"] == "bundled"
+    assert runner._meta(_StubSession("chrome"))["executable"] == "chrome"
+
+
+def test_meta_falls_back_when_the_session_never_started(monkeypatch):
+    from blackbox_mcp.testing import runner
+
+    monkeypatch.setattr(runner, "CONFIG", dataclasses.replace(
+        CONFIG, chromium_executable="/opt/chrome"))
+    assert runner._meta(_StubSession())["executable"] == "/opt/chrome"
+
+
+async def test_session_records_how_it_launched(session):
+    """The real chain sets it — not just the stub."""
+    assert session.launched_via in ("bundled", CONFIG.chromium_executable,
+                                    CONFIG.browser_channel, "cdp")
+    assert session.launched_via
+
+
+# ── P2-8: a missing interact verb names itself ───────────────────
+async def test_interact_step_without_type_names_the_missing_field():
+    """No browser needed: malformed steps are rejected before dispatch."""
+    from blackbox_mcp.testing import runner
+
+    out = await runner._dispatch({"action": "interact", "selector": "#login"})
+    assert out["passed"] is False
+    assert "type" in out["actual"]
+    assert out["ai_reason"] == "malformed step"
+
+
+async def test_interact_step_with_type_still_dispatches(monkeypatch):
+    """Tightening the required set must not start rejecting valid steps."""
+    from blackbox_mcp.testing import runner
+
+    seen: dict = {}
+
+    async def _fake_interact(action, selector, value=None):
+        seen.update(action=action, selector=selector, value=value)
+        return {"ok": True, "detail": "clicked", "resolved_by": "css"}
+
+    monkeypatch.setattr(runner, "interact", _fake_interact)
+    out = await runner._dispatch({"action": "interact", "selector": "#login",
+                                  "type": "click"})
+
+    assert out["passed"] is True
+    assert seen == {"action": "click", "selector": "#login", "value": None}
