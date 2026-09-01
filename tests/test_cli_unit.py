@@ -40,3 +40,36 @@ def test_errored_result_shape():
                             "pass_rate": 0.0}
     assert r["steps"][0]["severity"] == "error"
     assert "browser gone" in r["steps"][0]["actual"]
+
+
+# P0-03 — skipped steps must never be counted as passes in the suite total
+def test_suite_line_does_not_count_skipped_as_passed():
+    # 4 steps: 1 passed, 1 failed, 2 never ran (early stop)
+    results = [{"summary": {"total": 4, "passed": 1, "failed": 1, "skipped": 2,
+                            "pass_rate": 0.5}}]
+    line = cli._suite_line(results)
+    assert line.startswith("total: 1/4 passed")   # NOT 3/4 (total - failed)
+    assert "1 failed" in line
+    assert "2 skipped" in line
+
+
+def test_suite_line_is_terse_when_all_green():
+    results = [{"summary": {"total": 3, "passed": 3, "failed": 0, "skipped": 0,
+                            "pass_rate": 1.0}}]
+    assert cli._suite_line(results) == "total: 3/3 passed"
+
+
+def test_suite_line_aggregates_across_scenarios():
+    results = [
+        {"summary": {"total": 2, "passed": 2, "failed": 0, "skipped": 0}},
+        {"summary": {"total": 5, "passed": 1, "failed": 1, "skipped": 3}},
+    ]
+    line = cli._suite_line(results)
+    assert line.startswith("total: 3/7 passed")
+    assert "1 failed" in line and "3 skipped" in line
+
+
+def test_suite_line_tolerates_errored_result_shape():
+    # _errored_result is built by hand; the line must not KeyError on it
+    line = cli._suite_line([cli._errored_result("boom", RuntimeError("x"))])
+    assert line.startswith("total: 0/1 passed")

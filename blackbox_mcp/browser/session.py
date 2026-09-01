@@ -485,7 +485,14 @@ class BrowserSession:
         fail on any remote server. This handler is sync (Playwright event
         callback), so it parks the load wait in a task that ``settle()`` awaits
         at the start of the next tool call.
+
+        No-ops when the page is already active: expect_popup adopts explicitly
+        (it has to, since the context listener is off in CDP mode) on top of
+        the listener's adoption, so the same popup was adopted twice — logged
+        twice, and a second _page_ready task replaced and orphaned the first.
         """
+        if page is self._page:
+            return
         self._page = page
         self._frame_chain = []
         self._watch_page(page)
@@ -527,14 +534,25 @@ class BrowserSession:
             log.debug("popup did not settle within %ss", _POPUP_SETTLE_S)
 
     # ── tabs / windows ───────────────────────────────────────────
-    def list_pages(self) -> list[dict]:
-        """Open tabs in the current context, with the active one flagged."""
+    def open_pages(self) -> list:
+        """The context's still-open pages, in age order.
+
+        The single source of tab indices. list_pages() used to number the
+        UNFILTERED context.pages while switch_page() indexed the filtered
+        list, so the two disagreed the moment a closed page was still present
+        — "tab 2" from list_tabs could select tab 1, or be out of range.
+        Playwright currently removes a page from context.pages before it emits
+        `close`, which is why the mismatch never fired; that is its invariant
+        to keep, not ours to depend on.
+        """
         if self._context is None:
             return []
+        return [p for p in self._context.pages if not p.is_closed()]
+
+    def list_pages(self) -> list[dict]:
+        """Open tabs in the current context, with the active one flagged."""
         out: list[dict] = []
-        for i, p in enumerate(self._context.pages):
-            if p.is_closed():
-                continue
+        for i, p in enumerate(self.open_pages()):
             try:
                 url = p.url
             except Exception:
@@ -546,7 +564,7 @@ class BrowserSession:
         """Make an open tab the active one (explicit counterpart to auto-adopt)."""
         if self._context is None:
             raise RuntimeError("BrowserSession not started.")
-        pages = [p for p in self._context.pages if not p.is_closed()]
+        pages = self.open_pages()
         if not pages:
             raise RuntimeError("no open tabs")
         if not 0 <= index < len(pages):
@@ -560,7 +578,7 @@ class BrowserSession:
         """When the active page closes (popup done, tab closed), fall back to a
         still-open page so the flow continues instead of dying on a dead page."""
         if self._page is page and self._context is not None:
-            others = [p for p in self._context.pages if not p.is_closed()]
+            others = self.open_pages()
             if others:
                 # oldest remaining page = the original tab the flow came from
                 self._page = others[0]

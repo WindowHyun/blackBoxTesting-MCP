@@ -85,7 +85,45 @@ def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None
         }))
 
 
+def _resolve_step(step: dict) -> tuple[dict, list[str]]:
+    """Substitute ``${VAR}`` in every string field of a step.
+
+    Resolution used to happen at two call sites only — ``navigate.url`` and
+    ``interact.value`` — so an assert target, wait selector, popup expect_url,
+    mock pattern or dialog text kept the literal ``"${VAR}"`` and could never
+    match. The unresolved-var warning came from those same two sites, so a
+    typo'd ``${BAES_URL}`` failed with no hint at all.
+
+    Returns a COPY plus the vars that had no environment value. The report's
+    ``raw``/``selector_input`` are built from the ORIGINAL step, so what lands
+    on disk is still the placeholder, never a resolved secret.
+    """
+    out: dict[str, Any] = {}
+    missing: list[str] = []
+    for key, value in step.items():
+        if isinstance(value, str):
+            for name in secrets.unresolved_vars(value):
+                if name not in missing:
+                    missing.append(name)
+            out[key] = secrets.resolve(value)
+        else:
+            out[key] = value
+    return out, missing
+
+
 async def _dispatch(step: dict) -> dict:
+    """Resolve ``${VAR}`` across the step, run it, and annotate missing vars."""
+    resolved, missing = _resolve_step(step)
+    out = await _dispatch_resolved(resolved)
+    if missing:
+        note = (f"env var(s) not set: {', '.join(missing)} — "
+                "the literal ${...} placeholder was used")
+        prev = out.get("ai_suggestion")
+        out["ai_suggestion"] = f"{prev} · {note}" if prev else note
+    return out
+
+
+async def _dispatch_resolved(step: dict) -> dict:
     """Execute a single step; return partial result fields (no I/O on buffers)."""
     action = step.get("action", "")
     out: dict[str, Any] = {
@@ -105,7 +143,7 @@ async def _dispatch(step: dict) -> dict:
         return out
 
     if action == "navigate":
-        res = await navigate(secrets.resolve(step["url"]), step.get("wait_until"))
+        res = await navigate(step["url"], step.get("wait_until"))
         status = res.get("status")
         expect = step.get("expect_status")  # opt-in: assert an exact status
         if res.get("error"):
@@ -133,23 +171,16 @@ async def _dispatch(step: dict) -> dict:
                    passed=ok, ai_reason=reason, ai_suggestion=suggestion)
         if not res.get("settled"):
             out["ai_reason"] += " · load not settled (proceeded on timeout)"
-        missing_vars = secrets.unresolved_vars(step["url"])
-        if missing_vars:
-            out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
-                                    "the literal ${...} placeholder was used")
 
     elif action == "interact":
         res = await interact(step.get("type"), step["selector"], step.get("value"))
         out.update(expected=f"{step.get('type')} ok", actual=res.get("detail") or res.get("error"),
-                   passed=bool(res.get("ok")), resolved_by=res.get("resolved_by"))
+                   passed=bool(res.get("ok")), resolved_by=res.get("resolved_by"),
+                   sensitive=bool(res.get("sensitive")))
         out["ai_reason"] = (f"{step.get('type')} via {res.get('resolved_by')} selector"
                             if res.get("ok") else "action failed")
         if not res.get("ok"):
             out["ai_suggestion"] = "element not found or not actionable — selector may have changed"
-        missing_vars = secrets.unresolved_vars(step.get("value") or "")
-        if missing_vars:
-            out["ai_suggestion"] = (f"env var(s) not set: {', '.join(missing_vars)} — "
-                                    "the literal ${...} placeholder was typed")
 
     elif action in ("assert", "assert_"):
         res = await assert_(step["kind"], step["target"], step.get("expected"))
@@ -394,7 +425,7 @@ async def run(
         result["steps"].append(secrets.scrub_record({
             "step": idx,
             "action": step.get("action"),
-            "raw": secrets.mask_step(step),
+            "raw": secrets.mask_step(step, sensitive_value=fields.get("sensitive", False)),
             "selector_input": step.get("selector") or step.get("target"),
             "resolved_by": fields.get("resolved_by"),
             "expected": fields.get("expected"),

@@ -67,13 +67,35 @@ def test_prompt_primers_reference_real_tools():
     from blackbox_mcp.tools._registry import _PENDING
 
     real = {p.name or p.fn.__name__ for p in _PENDING}
-    text = _prompts._ONLY + _prompts._MATRIX
+    only = _prompts._only()
+    text = only + _prompts._MATRIX
     named = set(re.findall(r"`([a-z_]+)`", text)) | {
-        t.strip() for t in re.findall(r"[:·] ([a-z_ ·]+)", _prompts._ONLY)
+        t.strip() for t in re.findall(r"[:·] ([a-z_ ·]+)", only)
         for t in t.split("·")}
     step_fields = {"expect_status"}  # scenario step field, not a tool
     unknown = {n for n in named if n and " " not in n} - real - step_fields
     assert not unknown, f"prompts reference nonexistent tools: {unknown}"
+
+
+def test_prompt_primer_lists_every_registered_tool():
+    """The other direction (P1-05). The primer says to use ONLY the tools it
+    lists, so a tool missing from the list is a tool the host LLM is told not
+    to use — expect_popup / expect_download / switch_tab / list_tabs /
+    get_dialogs had all fallen out of the hand-written literal."""
+    import blackbox_mcp.tools as tools
+    tools._import_all()
+    from blackbox_mcp.tools import _prompts
+    from blackbox_mcp.tools._registry import _PENDING
+
+    real = {p.name or p.fn.__name__ for p in _PENDING}
+    only = _prompts._only()
+    absent = {n for n in real if n not in only}
+    assert not absent, f"registered but not offered to the host LLM: {sorted(absent)}"
+    # the primer must actually carry a list, not just the preamble
+    assert "사용 가능한 도구:" in only
+    for prompt_fn in (_prompts.ui_test, _prompts.ui_scenario, _prompts.ui_login):
+        rendered = prompt_fn("x")
+        assert "expect_download" in rendered
 
 
 def test_locator_prefix_parsing():

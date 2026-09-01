@@ -8,6 +8,7 @@ tool *functions* (not the wrapped MCP entrypoints), so it never double-records.
 from __future__ import annotations
 
 import time
+from datetime import datetime
 
 from . import report, secrets
 
@@ -15,7 +16,8 @@ from . import report, secrets
 # and intentionally excluded so they don't add noise to the report.)
 RECORDABLE = {
     "navigate", "interact", "assert_", "screenshot", "wait",
-    "switch_frame", "expect_dialog", "reset_session", "use_real_browser",
+    "switch_frame", "expect_dialog", "expect_popup", "expect_download",
+    "switch_tab", "reset_session", "use_real_browser",
     "dismiss_banners", "save_state", "load_state", "mock_route", "unmock_route",
 }
 
@@ -29,13 +31,19 @@ _COUNTER = 0
 # Per-recording-session run id, shared by this session's screenshots and (via
 # build_result → save) its report files, so retention keeps them together.
 _RUN_ID: str | None = None
+# Wall clock of the FIRST recorded call in this flow. save_report used to stamp
+# the report with runner._meta's started_at, i.e. the moment the report was
+# saved, and with no duration at all — the header read "· 0 ms ·" on every
+# ad-hoc report even though each step's duration was recorded.
+_STARTED_AT: datetime | None = None
 
 
 def reset() -> None:
-    global _COUNTER, _RUN_ID
+    global _COUNTER, _RUN_ID, _STARTED_AT
     _LOG.clear()
     _COUNTER = 0
     _RUN_ID = None
+    _STARTED_AT = None
     # A flow boundary is also the scrub-registry boundary: values re-register
     # on the next resolve(), so this only bounds growth/cross-flow bleed.
     secrets.clear_registry()
@@ -108,7 +116,47 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
         return (name, r.get("pattern") or f"active={r.get('active')}", ok, None,
                 f"{name} {'ok' if ok else 'failed'}",
                 None if ok else r.get("error"))
-    return (name, str(result)[:60], True, None, name, None)
+    if name == "expect_popup":
+        r = result or {}
+        ok = bool(r.get("passed"))
+        return (kwargs.get("expect_url") or "popup", r.get("url") or r.get("error"),
+                ok, r.get("resolved_by"),
+                "popup opened" if ok else "popup not opened as expected",
+                None if ok else "트리거가 새 창/탭을 여는지 확인 "
+                                "(팝업 차단·target=_blank 여부)")
+    if name == "expect_download":
+        r = result or {}
+        ok = bool(r.get("passed"))
+        return (kwargs.get("expect_name") or kwargs.get("expect_extension") or "download",
+                (f"{r.get('filename')} ({r.get('size_bytes')}B)" if ok
+                 else r.get("error")),
+                ok, r.get("resolved_by"),
+                "download verified" if ok else "download not verified",
+                None if ok else "트리거가 실제로 파일을 내려받는지, 서버가 에러 "
+                                "페이지를 대신 반환하지 않는지 확인")
+    if name == "switch_tab":
+        r = result or {}
+        ok = bool(r.get("ok"))
+        return ("tab switch", r.get("url") or r.get("error"), ok, None,
+                f"tab → {kwargs.get('index', 0)}",
+                None if ok else "list_tabs로 열린 탭 인덱스를 확인")
+    if name == "dismiss_banners":
+        r = result or {}
+        hit = r.get("dismissed") or []
+        # Always ok=True (it is a best-effort sweep); WHAT it clicked is the
+        # reportable fact — a click on an unrelated control shows up here.
+        return ("banners dismissed", ", ".join(hit) or "none matched",
+                bool(r.get("ok", True)), None,
+                f"닫은 오버레이 {len(hit)}건", None)
+    # Unmapped tool: read the verdict OUT of the result instead of assuming a
+    # pass. A tool added to RECORDABLE without an _interpret branch used to be
+    # recorded as passed=True unconditionally — a failing verification would
+    # then land in the report as a green step (test_recorder guards against a
+    # branchless RECORDABLE entry, this is the second line of defence).
+    r = result if isinstance(result, dict) else {}
+    passed = bool(r.get("passed", r.get("ok", True)))
+    return (name, str(result)[:60], passed, None, name,
+            None if passed else r.get("error"))
 
 
 async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
@@ -124,6 +172,9 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     n0 = len(session.buffers.network) if session else 0
     d0 = len(session.buffers.dialogs) if session else 0
 
+    global _STARTED_AT
+    if _STARTED_AT is None:
+        _STARTED_AT = datetime.now()
     t0 = time.monotonic()
     exc: Exception | None = None
     result = None
@@ -149,10 +200,24 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     if session and not passed:
         shot = await report.capture_step_screenshot(session, f"{_RUN_ID}_session", idx)
 
+    # Where the call actually ran. The runner records this and both renderers
+    # print it on failures, but the recorder never set the key — and
+    # scrub_record creates it as None, so the omission passed schema checks
+    # while the "페이지:" line silently vanished from every ad-hoc report.
+    # SPA routing is exactly what the interactive path is used to debug.
+    page_url = None
+    if session is not None:
+        try:
+            page_url = session.page.url
+        except Exception:
+            page_url = None
+
     _LOG.append(secrets.scrub_record({
         "step": idx,
         "action": name,
-        "raw": secrets.mask_step(dict(kwargs)),
+        "raw": secrets.mask_step(
+            dict(kwargs),
+            sensitive_value=bool(isinstance(result, dict) and result.get("sensitive"))),
         "selector_input": kwargs.get("selector") or kwargs.get("target"),
         "resolved_by": resolved_by,
         "expected": expected,
@@ -160,6 +225,7 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         "passed": passed,
         "duration_ms": duration_ms,
         "screenshot": shot,
+        "page_url": page_url,
         "console_errors": [e for e in new_console if e.get("level") == "error"],
         "network_errors": new_network,
         "dialogs": new_dialogs,
@@ -184,4 +250,12 @@ def build_result(name: str = "session", description: str = "") -> dict:
     # them together. None when no screenshot was captured — save() falls back.
     if _RUN_ID is not None:
         result["run_id"] = _RUN_ID
+    # Timing the report header needs. duration_ms is the sum of the steps, i.e.
+    # time actually spent driving the browser — NOT wall clock to now, which on
+    # an interactive flow is dominated by how long the operator (or the host
+    # LLM) thought between calls and would read as "the site is slow".
+    meta: dict = {"duration_ms": sum(int(x.get("duration_ms") or 0) for x in s)}
+    if _STARTED_AT is not None:
+        meta["started_at"] = _STARTED_AT.isoformat(timespec="seconds")
+    result["meta"] = meta
     return result

@@ -13,11 +13,17 @@ from ._registry import tool
 _NO_VALUE = {"click", "dblclick", "hover", "check", "uncheck", "focus",
              "clear", "scroll_into_view"}
 # Actions requiring a value.
-_NEEDS_VALUE = {"type", "select", "press", "upload"}
+_NEEDS_VALUE = {"type", "type_keys", "select", "press", "upload"}
 _ACTIONS = _NO_VALUE | _NEEDS_VALUE
 
+# Per-character delay for type_keys. Not 0: a debounced/throttled handler
+# (search-as-you-type usually debounces 150~300ms) needs the keystrokes to be
+# spread out to behave like a human, and 0 makes them arrive in one burst.
+_KEY_DELAY_MS = 25
 
-def _display_value(selector: str, action: str, value: str | None) -> str | None:
+
+def _display_value(selector: str, action: str, value: str | None,
+                   *, sensitive: bool | None = None) -> str | None:
     """What to echo back for ``value`` in results and reports.
 
     Masking used to be unconditional, which turned every step into
@@ -25,12 +31,40 @@ def _display_value(selector: str, action: str, value: str | None) -> str | None:
     could not tell which option was chosen. Mask only what is actually
     sensitive: a credential-looking target field, or a value that came from a
     resolved ${SECRET} (scrub swaps those back to their placeholder).
+
+    ``sensitive`` overrides the name-based guess with the runtime verdict
+    (see _is_credential_field); None means "decide from the names alone".
     """
     if not value:
         return value
-    if is_sensitive_name(selector) or is_sensitive_name(action):
-        return mask_value(value)
-    return scrub(value)
+    if sensitive is None:
+        sensitive = is_sensitive_name(selector) or is_sensitive_name(action)
+    return mask_value(value) if sensitive else scrub(value)
+
+
+async def _is_credential_field(locator) -> bool:
+    """True when the RESOLVED element is really a password input.
+
+    Sensitivity used to be inferred from how the selector reads, which misses
+    opaque ones: "#p" on <input type="password"> wrote the plaintext straight
+    into the report's `raw.value`. The element itself is ground truth and it
+    is already resolved here.
+
+    count() first so this never waits: get_attribute() would block for the
+    full element timeout when the target does not exist, turning every
+    mistyped selector into a slow failure.
+    """
+    try:
+        if await locator.count() == 0:
+            return False
+        el = locator.first
+        probe = min(CONFIG.selector_timeout_ms, 1000)
+        if (await el.get_attribute("type", timeout=probe) or "").lower() == "password":
+            return True
+        auto = (await el.get_attribute("autocomplete", timeout=probe) or "").lower()
+        return "password" in auto
+    except Exception:
+        return False
 
 
 def _upload_paths(value: str) -> tuple[list[str], str | None]:
@@ -45,11 +79,17 @@ def _upload_paths(value: str) -> tuple[list[str], str | None]:
     return expanded, None
 
 
-@tool(description="Perform a UI action: action ∈ click|dblclick|type|hover|select|"
-                  "press|check|uncheck|clear|focus|scroll_into_view|upload. "
+@tool(description="Perform a UI action: action ∈ click|dblclick|type|type_keys|hover|"
+                  "select|press|check|uncheck|clear|focus|scroll_into_view|upload. "
                   "selector uses the priority chain testid= / role= / text= / css=. "
-                  "value is required for type/select/press/upload (upload takes one "
-                  "or more comma-separated local file paths).")
+                  "value is required for type/type_keys/select/press/upload (upload "
+                  "takes one or more comma-separated local file paths). "
+                  "'type' sets the value in one shot (fast; fires ONE input event, no "
+                  "keydown/keyup) — use 'type_keys' for anything driven by typing: "
+                  "search autocomplete, live suggestions, character counters, "
+                  "digits-only key filters, Enter-to-submit handlers. type_keys sends "
+                  "real keystrokes per character (CJK has no key mapping, so it is "
+                  "inserted as text — input still fires per character, keydown does not).")
 async def interact(action: str, selector: str, value: str | None = None) -> dict:
     if action not in _ACTIONS:
         return {"ok": False, "action": action, "selector": selector,
@@ -61,7 +101,14 @@ async def interact(action: str, selector: str, value: str | None = None) -> dict
     session = await get_session()
     locator, resolved_by = await resolve(session.root, selector)
     value_resolved = resolve_env(value) if value is not None else None
-    value_shown = _display_value(selector, action, value_resolved)
+
+    # Name-based signal first (free), then ask the element itself — but only
+    # for the actions that actually WRITE a credential into a field.
+    sensitive = is_sensitive_name(selector) or is_sensitive_name(action)
+    if not sensitive and action in ("type", "type_keys"):
+        sensitive = await _is_credential_field(locator)
+    value_shown = _display_value(selector, action, value_resolved,
+                                 sensitive=sensitive)
 
     t = CONFIG.selector_timeout_ms
     try:
@@ -92,6 +139,18 @@ async def interact(action: str, selector: str, value: str | None = None) -> dict
         elif action == "type":
             await locator.fill(value_resolved or "", timeout=t)
             detail = "typed"
+        elif action == "type_keys":
+            text = value_resolved or ""
+            # Replace first (fill semantics), then send real keystrokes:
+            # press_sequentially appends, and "set this field to X" is what a
+            # scenario author means by typing.
+            await locator.fill("", timeout=t)
+            # The per-character delay is inside the operation's own budget, so
+            # a long value must not be capped by the plain selector timeout.
+            await locator.press_sequentially(
+                text, delay=_KEY_DELAY_MS,
+                timeout=t + len(text) * _KEY_DELAY_MS)
+            detail = f"typed {len(text)} char(s) as key events"
         elif action == "select":
             # A bare string matches by value OR label, so "부산" and "v2" both
             # work on <option value="v2">부산</option> — QA writes what it sees.
@@ -101,7 +160,8 @@ async def interact(action: str, selector: str, value: str | None = None) -> dict
             paths, err = _upload_paths(value_resolved or "")
             if err:
                 return {"ok": False, "action": action, "selector": selector,
-                        "resolved_by": resolved_by, "error": err}
+                        "resolved_by": resolved_by, "sensitive": sensitive,
+                        "error": err}
             await locator.set_input_files(paths, timeout=t)
             detail = f"uploaded {len(paths)} file(s): " + ", ".join(
                 os.path.basename(p) for p in paths)
@@ -111,8 +171,10 @@ async def interact(action: str, selector: str, value: str | None = None) -> dict
     except Exception as exc:
         # scrub: Playwright error text can echo the awaited value (press/select)
         return {"ok": False, "action": action, "selector": selector,
-                "resolved_by": resolved_by,
+                "resolved_by": resolved_by, "sensitive": sensitive,
                 "error": scrub(f"{type(exc).__name__}: {exc}")}
 
+    # `sensitive` travels with the result so the report builders can mask
+    # raw.value — they only see the step/kwargs, never the element.
     return {"ok": True, "action": action, "selector": selector,
-            "resolved_by": resolved_by, "detail": detail}
+            "resolved_by": resolved_by, "sensitive": sensitive, "detail": detail}

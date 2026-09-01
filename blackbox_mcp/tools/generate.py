@@ -55,8 +55,12 @@ _COLLECT_JS = """
 
 _STEP_SCHEMA = {
     "navigate": {"action": "navigate", "url": "<url>", "wait_until": "load"},
-    "interact": {"action": "interact", "type": "click|type|hover|select|press",
-                 "selector": "<D2 selector>", "value": "<for type/select/press>"},
+    "interact": {"action": "interact",
+                 "type": "click|type|type_keys|hover|select|press",
+                 "selector": "<D2 selector>",
+                 "value": "<for type/type_keys/select/press>",
+                 "_note": "type=한 번에 값 설정(빠름, key 이벤트 없음) · "
+                          "type_keys=실제 키 입력(자동완성/글자수/키 필터용)"},
     "assert": {"action": "assert", "kind": "text_visible|element_visible|url_is|"
                                            "url_contains|count", "target": "<...>",
                "expected": "<for count>"},

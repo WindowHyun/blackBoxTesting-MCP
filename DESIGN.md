@@ -324,8 +324,19 @@ API:
   사용하지 않는다. `dom`=태그/role/text 위주 간략 트리. **Q1 트리밍은 §8 참조.**
   > 검증: Playwright 공식 문서 기준 `accessibility.snapshot()` deprecated,
   > `locator.aria_snapshot()` / `expect().to_match_aria_snapshot()` 권장.
-- **interact (CT-04):** action ∈ {click, type, hover, select, press}.
-  `type`/`select`/`press`는 value 사용. 셀렉터는 §4 체인.
+- **interact (CT-04):** action ∈ {click, type, type_keys, hover, select, press}.
+  `type`/`type_keys`/`select`/`press`는 value 사용. 셀렉터는 §4 체인.
+  `type`은 `locator.fill()` — 한 번에 값을 설정하고 `input`/`change`만 발생시킨다
+  (빠르지만 `keydown`/`keyup`은 발생하지 않는다). 키 이벤트에 의존하는 UI(검색
+  자동완성·실시간 추천·글자수 카운터·숫자만 허용하는 키 필터·Enter 제출)는
+  `type_keys`(`fill("")` + `press_sequentially(delay=25ms)`)를 써야 한다 —
+  `type`으로는 화면이 전혀 반응하지 않는데 스텝은 통과로 기록된다.
+  실측(Chromium 141): `type("notebook")` → keydown 0 · input 1(일괄),
+  `type_keys("notebook")` → keydown 9(선행 clear의 Delete 1 포함) · input 8.
+  한글/CJK는 키 매핑이 없어 Playwright가 `insertText`로 넣는다 → keydown은 안 오지만
+  **input은 문자당 발생**(`type_keys("노트북")` → input 3, `type`은 input 1)이라,
+  debounce된 실시간 검색에는 여전히 `type_keys`가 맞다. 실제 IME 조합
+  (keyCode 229 + composition 이벤트)은 어떤 자동화도 재현하지 못한다.
 - **assert_ (CT-05):** kind ∈ {text_visible, element_visible, url_is,
   url_contains, count}. count는 expected=숫자와 일치 검사.
 - **wait (CT-08):** ms 주어지면 고정 대기, selector 주어지면 등장/텍스트 변경 대기.

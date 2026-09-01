@@ -219,3 +219,48 @@ async def test_status_reports_session_state(session):
     assert out["session"]["mode"] in ("bundled", "channel")
     assert "basic.html" in out["session"]["url"]
     assert out["config"]["browser"] == "chromium"
+
+
+# ── P2-07: scrub must not rewrite unrelated text ─────────────────────
+def test_short_secret_is_not_globally_substituted(monkeypatch):
+    """scrub() replaces the value ANYWHERE, so a short one is a common
+    substring, not a secret: PIN="1" used to rewrite "?page=1 · 12 rows"
+    into "?page=${APP_PIN} · ${APP_PIN}2 rows"."""
+    secrets.clear_registry()
+    monkeypatch.setenv("APP_PIN", "1")
+    secrets.resolve("${APP_PIN}")
+    text = "navigated to https://shop.corp/orders?page=1 (status 200) · 12 rows"
+    assert secrets.scrub(text) == text
+
+    monkeypatch.setenv("API_TOKEN", "dev")
+    secrets.resolve("${API_TOKEN}")
+    err = "TimeoutError: waiting for locator('#dev-banner') on https://dev.corp/"
+    assert secrets.scrub(err) == err
+
+
+def test_real_length_secret_is_still_scrubbed(monkeypatch):
+    secrets.clear_registry()
+    monkeypatch.setenv("REAL_PW", "hunter2!")
+    secrets.resolve("${REAL_PW}")
+    assert secrets.scrub("login failed for hunter2!") == "login failed for ${REAL_PW}"
+
+
+def test_short_secret_is_still_masked_by_field_name(monkeypatch):
+    """Skipping the global substitution must not weaken field-name masking —
+    that is the primary defence, scrub only cleans DERIVED text."""
+    secrets.clear_registry()
+    monkeypatch.setenv("APP_PIN", "1")
+    step = {"action": "interact", "selector": "testid=pin", "value": "1"}
+    assert secrets.mask_step(step)["value"] == "***"
+    assert secrets.mask_step({"password": "1"})["password"] == "***"
+
+
+def test_min_scrubbable_boundary(monkeypatch):
+    secrets.clear_registry()
+    monkeypatch.setenv("PW_SHORT", "a" * (secrets._MIN_SCRUBBABLE - 1))
+    monkeypatch.setenv("PW_EXACT", "b" * secrets._MIN_SCRUBBABLE)
+    secrets.resolve("${PW_SHORT}")
+    secrets.resolve("${PW_EXACT}")
+    assert secrets.scrub("x " + "a" * (secrets._MIN_SCRUBBABLE - 1)) \
+        == "x " + "a" * (secrets._MIN_SCRUBBABLE - 1)
+    assert secrets.scrub("x " + "b" * secrets._MIN_SCRUBBABLE) == "x ${PW_EXACT}"

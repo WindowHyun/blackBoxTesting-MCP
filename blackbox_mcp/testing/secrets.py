@@ -7,10 +7,26 @@ derived strings (URLs, error messages) via :func:`scrub`.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 
+log = logging.getLogger(__name__)
+
 _VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+# Shortest resolved value that may be globally substituted out of derived text.
+#
+# scrub() replaces the value ANYWHERE it appears, so a short one is not a
+# secret, it is a common substring: PIN="1" rewrote "?page=1 · 12 rows" into
+# "?page=${PIN} · ${PIN}2 rows", and TOKEN="dev" turned "#dev-banner on
+# dev.corp" into "#${TOKEN}-banner on ${TOKEN}.corp". The report stops being
+# usable as evidence — which is the same reason masking is targeted rather
+# than unconditional (CLAUDE.md). Values below this are still masked by FIELD
+# NAME (mask_step / interact._display_value); only the derived-text scrub is
+# skipped, and it is logged so the choice is visible rather than silent.
+_MIN_SCRUBBABLE = 6
+_warned_short: set[str] = set()
 
 # Substring keywords (field names, selectors, env-var names) that mark a value
 # as sensitive. Short tokens ("pw", "otp", "pin") are matched as whole words to
@@ -57,7 +73,15 @@ def resolve(value: str) -> str:
         if val is None:
             return m.group(0)
         if val and is_sensitive_name(var):
-            _RESOLVED_SECRETS[val] = "${" + var + "}"
+            if len(val) >= _MIN_SCRUBBABLE:
+                _RESOLVED_SECRETS[val] = "${" + var + "}"
+            elif var not in _warned_short:
+                _warned_short.add(var)
+                log.warning(
+                    "%s resolves to a value shorter than %d chars — it is masked "
+                    "by field name but NOT scrubbed from derived report text "
+                    "(too short to substitute without corrupting unrelated text).",
+                    var, _MIN_SCRUBBABLE)
         return val
 
     return _VAR.sub(_sub, value)
@@ -118,13 +142,21 @@ def scrub_record(record: dict) -> dict:
     return record
 
 
-def mask_step(step: dict) -> dict:
-    """Return a copy of a step with sensitive values masked for reporting."""
+def mask_step(step: dict, *, sensitive_value: bool = False) -> dict:
+    """Return a copy of a step with sensitive values masked for reporting.
+
+    ``sensitive_value`` is the verdict the RUNTIME reached about the target
+    field (interact inspects the resolved element). Name matching alone reads
+    only the selector text, so an opaque one — "#p" on <input type="password">
+    — let the plaintext through into the report.
+    """
     out = dict(step)
     for key in list(out.keys()):
         if is_sensitive_name(key) and isinstance(out[key], str):
             out[key] = mask_value(out[key])
-    # Mask a 'value' field when the target field name looks sensitive.
-    if "value" in out and is_sensitive_name(str(out.get("selector", ""))):
+    # Mask a 'value' field when the runtime said so, or the target field name
+    # looks sensitive.
+    if "value" in out and (sensitive_value
+                           or is_sensitive_name(str(out.get("selector", "")))):
         out["value"] = mask_value(str(out["value"]))
     return out

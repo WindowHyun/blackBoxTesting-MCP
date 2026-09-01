@@ -167,3 +167,73 @@ async def test_settle_survives_a_popup_that_never_loads(session):
         session_mod._POPUP_SETTLE_S = original
         task.cancel()
     assert session._page_ready is None
+
+
+# ── P3-12 / P3-13: one tab index, one adoption ───────────────────────
+def test_tab_indices_come_from_one_list():
+    """list_pages() numbered the UNFILTERED context.pages while switch_page()
+    indexed the filtered one, so the two disagreed as soon as a closed page
+    was still present. Both now read open_pages()."""
+    import inspect
+
+    from blackbox_mcp.browser.session import BrowserSession
+
+    for fn in (BrowserSession.list_pages, BrowserSession.switch_page,
+               BrowserSession._on_page_closed):
+        assert "open_pages()" in inspect.getsource(fn), fn.__name__
+
+
+async def test_list_tabs_titles_line_up_with_switch_tab(session, tmp_path):
+    from blackbox_mcp.tools.tabs import list_tabs, switch_tab
+
+    a = tmp_path / "a.html"; a.write_text("<title>AAA</title>a", encoding="utf-8")
+    b = tmp_path / "b.html"; b.write_text("<title>BBB</title>b", encoding="utf-8")
+    await session.page.goto(a.as_uri())
+    p2 = await session._context.new_page()
+    await p2.goto(b.as_uri())
+
+    tabs = await list_tabs()
+    assert [t["title"] for t in tabs] == ["AAA", "BBB"]
+    for tab in tabs:
+        got = await switch_tab(tab["index"])
+        assert got["ok"] is True
+        assert got["url"] == tab["url"]
+    await p2.close()
+
+
+async def test_popup_is_adopted_once(session, tmp_path):
+    """expect_popup adopts explicitly on top of the context listener; without a
+    guard the same popup was adopted twice, parking a second _page_ready task
+    that replaced — and orphaned — the first.
+
+    Counts _await_page_ready instead of patching _adopt_page: the context
+    listener holds a BOUND _adopt_page captured when the context was created,
+    so a class-level patch of it would only see the explicit call.
+    """
+    from blackbox_mcp.browser import session as session_mod
+    from blackbox_mcp.tools.navigate import navigate
+    from blackbox_mcp.tools.popup import expect_popup
+
+    target = tmp_path / "pop.html"
+    target.write_text("<title>POP</title><h1>팝업</h1>", encoding="utf-8")
+    opener = tmp_path / "opener.html"
+    opener.write_text(
+        f"<a id='go' href='{target.as_uri()}' target='_blank'>팝업 열기</a>",
+        encoding="utf-8")
+
+    parked: list = []
+    real = session_mod.BrowserSession._await_page_ready
+
+    async def counting(page):
+        parked.append(page)
+        return await real(page)
+
+    session_mod.BrowserSession._await_page_ready = staticmethod(counting)
+    try:
+        await navigate(opener.as_uri(), wait_until="load")
+        r = await expect_popup("팝업 열기", expect_url="pop.html")
+    finally:
+        session_mod.BrowserSession._await_page_ready = staticmethod(real)
+
+    assert r["passed"] is True
+    assert len(parked) == 1, f"popup adopted {len(parked)} times"

@@ -127,3 +127,48 @@ async def test_retry_exhausted_still_fails(session, report_dir):
         name="retry_fail")
     st = res["steps"][0]
     assert st["passed"] is False and st["retries"] == 2
+
+
+# ── P2-10: regression baselines were outside retention ───────────────
+def test_prune_drops_history_of_pruned_runs(tmp_path, monkeypatch):
+    """history/{name}.json is keyed by scenario NAME, not run id, so it was
+    never pruned: one file per distinct name accumulated forever."""
+    cfg = dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                              report_retention=2)
+    monkeypatch.setattr(report, "CONFIG", cfg)
+    hist = tmp_path / "history"
+    hist.mkdir(parents=True)
+    (tmp_path / "screenshots").mkdir(exist_ok=True)
+
+    ids = ["20260101_000000_000000", "20260102_000000_000000",
+           "20260103_000000_000000", "20260104_000000_000000"]
+    for rid in ids:
+        (tmp_path / f"report_{rid}.json").write_text("{}", encoding="utf-8")
+
+    stale = hist / "old_scenario.json"
+    stale.write_text("{}", encoding="utf-8")
+    import os
+    old = report._run_id_time("20260101_000000_000000")
+    os.utime(stale, (old, old))
+
+    fresh = hist / "current_scenario.json"
+    fresh.write_text("{}", encoding="utf-8")   # mtime = now
+
+    report._prune(tmp_path)
+
+    kept = sorted(p.name for p in tmp_path.glob("report_*.json"))
+    assert kept == [f"report_{ids[2]}.json", f"report_{ids[3]}.json"]
+    assert not stale.exists(), "baseline of a pruned run should go with it"
+    assert fresh.exists(), "a baseline newer than the oldest kept run stays"
+
+
+def test_prune_keeps_history_when_retention_disabled(tmp_path, monkeypatch):
+    cfg = dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                              report_retention=0)
+    monkeypatch.setattr(report, "CONFIG", cfg)
+    hist = tmp_path / "history"
+    hist.mkdir(parents=True)
+    keep = hist / "x.json"
+    keep.write_text("{}", encoding="utf-8")
+    report._prune(tmp_path)
+    assert keep.exists()

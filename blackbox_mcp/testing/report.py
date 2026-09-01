@@ -200,6 +200,16 @@ def _run_id_of(name: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _run_id_time(run_id: str) -> float | None:
+    """A run id as a POSIX timestamp (ids ARE timestamps — see new_run_id)."""
+    for fmt in ("%Y%m%d_%H%M%S_%f", "%Y%m%d_%H%M%S"):
+        try:
+            return datetime.strptime(run_id, fmt).timestamp()
+        except ValueError:
+            continue
+    return None
+
+
 def _prune(report_dir: Path) -> None:
     """Retention: keep the newest CONFIG.report_retention runs, deleting older
     report files AND the screenshots that share those runs' ids. Report files
@@ -229,6 +239,20 @@ def _prune(report_dir: Path) -> None:
             # with their run like screenshots.
             if _run_id_of(p.name) in doomed:
                 p.unlink(missing_ok=True)
+    # Regression baselines are keyed by scenario NAME, not by run id, so they
+    # were outside retention entirely: one file per distinct name accumulated
+    # forever (ad-hoc flows default to "session", but a renamed scenario leaves
+    # its old baseline behind). A baseline whose newest run has been pruned is
+    # comparing against runs that no longer exist, so it goes with them.
+    history = report_dir / "history"
+    cutoff = _run_id_time(ids[keep - 1])   # oldest run we are keeping
+    if history.is_dir() and cutoff is not None:
+        for p in history.glob("*.json"):
+            try:
+                if p.stat().st_mtime < cutoff:
+                    p.unlink(missing_ok=True)
+            except OSError:
+                continue
 
 
 def save(result: dict, formats: str = "both") -> dict[str, str]:

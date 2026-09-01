@@ -100,3 +100,60 @@ async def test_expect_dialog_missing_is_failure(session):
     await session.page.set_content("<button data-testid='n'>noop</button>")
     r = await expect_dialog(action="accept", trigger="testid=n")
     assert r["passed"] is False
+
+
+# ── P2-11: poll cadence ──────────────────────────────────────────────
+async def test_wait_backs_off_instead_of_polling_flat(session):
+    """A bare-string selector re-runs the whole D2 chain per poll (~12 driver
+    round trips). At a flat 100ms that was 208 Locator.count() calls for a 2s
+    wait; the ramp keeps a long wait from spending its budget on IPC."""
+    from playwright.async_api import Locator
+
+    from blackbox_mcp.tools.wait import wait
+
+    await session.page.set_content("<div>nothing here</div>")
+    calls = {"n": 0}
+    real = Locator.count
+
+    async def counting(self):
+        calls["n"] += 1
+        return await real(self)
+
+    Locator.count = counting
+    try:
+        r = await wait(selector="절대없는텍스트123", timeout_ms=2000)
+    finally:
+        Locator.count = real
+    assert r["ok"] is False
+    assert calls["n"] < 150, f"still polling near-flat ({calls['n']} probes)"
+
+
+async def test_wait_still_finds_a_quickly_appearing_element(session):
+    """Backing off must not make the common case sluggish — the first polls
+    stay at the original cadence."""
+    import time as _time
+
+    from blackbox_mcp.tools.wait import wait
+
+    await session.page.set_content(
+        "<div id='d'></div><script>setTimeout(() => {"
+        "document.getElementById('d').textContent = '늦게 나타남';}, 120)"
+        "</script>")
+    t0 = _time.monotonic()
+    r = await wait(selector="늦게 나타남", timeout_ms=5000)
+    assert r["ok"] is True
+    assert _time.monotonic() - t0 < 1.0
+
+
+async def test_wait_does_not_overshoot_its_deadline(session):
+    """The final sleep is clamped to the remaining budget, so a 500ms poll
+    cannot push a wait past the timeout the caller asked for."""
+    import time as _time
+
+    from blackbox_mcp.tools.wait import wait
+
+    await session.page.set_content("<div>x</div>")
+    t0 = _time.monotonic()
+    await wait(selector="css=.nope-xyz", timeout_ms=1500)
+    elapsed = (_time.monotonic() - t0) * 1000
+    assert 1500 <= elapsed < 1900, elapsed
