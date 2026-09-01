@@ -15,7 +15,8 @@ from . import report, secrets
 # and intentionally excluded so they don't add noise to the report.)
 RECORDABLE = {
     "navigate", "interact", "assert_", "screenshot", "wait",
-    "switch_frame", "expect_dialog", "reset_session", "use_real_browser",
+    "switch_frame", "expect_dialog", "expect_popup", "expect_download",
+    "switch_tab", "reset_session", "use_real_browser",
     "dismiss_banners", "save_state", "load_state", "mock_route", "unmock_route",
 }
 
@@ -108,7 +109,47 @@ def _interpret(name: str, kwargs: dict, result, exc: Exception | None):
         return (name, r.get("pattern") or f"active={r.get('active')}", ok, None,
                 f"{name} {'ok' if ok else 'failed'}",
                 None if ok else r.get("error"))
-    return (name, str(result)[:60], True, None, name, None)
+    if name == "expect_popup":
+        r = result or {}
+        ok = bool(r.get("passed"))
+        return (kwargs.get("expect_url") or "popup", r.get("url") or r.get("error"),
+                ok, r.get("resolved_by"),
+                "popup opened" if ok else "popup not opened as expected",
+                None if ok else "트리거가 새 창/탭을 여는지 확인 "
+                                "(팝업 차단·target=_blank 여부)")
+    if name == "expect_download":
+        r = result or {}
+        ok = bool(r.get("passed"))
+        return (kwargs.get("expect_name") or kwargs.get("expect_extension") or "download",
+                (f"{r.get('filename')} ({r.get('size_bytes')}B)" if ok
+                 else r.get("error")),
+                ok, r.get("resolved_by"),
+                "download verified" if ok else "download not verified",
+                None if ok else "트리거가 실제로 파일을 내려받는지, 서버가 에러 "
+                                "페이지를 대신 반환하지 않는지 확인")
+    if name == "switch_tab":
+        r = result or {}
+        ok = bool(r.get("ok"))
+        return ("tab switch", r.get("url") or r.get("error"), ok, None,
+                f"tab → {kwargs.get('index', 0)}",
+                None if ok else "list_tabs로 열린 탭 인덱스를 확인")
+    if name == "dismiss_banners":
+        r = result or {}
+        hit = r.get("dismissed") or []
+        # Always ok=True (it is a best-effort sweep); WHAT it clicked is the
+        # reportable fact — a click on an unrelated control shows up here.
+        return ("banners dismissed", ", ".join(hit) or "none matched",
+                bool(r.get("ok", True)), None,
+                f"닫은 오버레이 {len(hit)}건", None)
+    # Unmapped tool: read the verdict OUT of the result instead of assuming a
+    # pass. A tool added to RECORDABLE without an _interpret branch used to be
+    # recorded as passed=True unconditionally — a failing verification would
+    # then land in the report as a green step (test_recorder guards against a
+    # branchless RECORDABLE entry, this is the second line of defence).
+    r = result if isinstance(result, dict) else {}
+    passed = bool(r.get("passed", r.get("ok", True)))
+    return (name, str(result)[:60], passed, None, name,
+            None if passed else r.get("error"))
 
 
 async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
