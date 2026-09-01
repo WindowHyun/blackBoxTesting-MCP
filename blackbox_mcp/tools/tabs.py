@@ -19,7 +19,9 @@ async def list_tabs() -> list[dict]:
     tabs = session.list_pages()
     # Title needs a round-trip per page, so it is fetched here rather than in
     # the session accessor (which stays sync for use from event handlers).
-    pages = session._context.pages if session._context is not None else []
+    # Indexed off the SAME list list_pages/switch_page use, so a title can
+    # never be attached to a different tab than the one switch_tab selects.
+    pages = session.open_pages()
     for tab in tabs:
         try:
             tab["title"] = await pages[tab["index"]].title()
