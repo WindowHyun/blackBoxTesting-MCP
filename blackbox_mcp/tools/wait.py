@@ -8,7 +8,15 @@ from ..browser import get_session
 from ..browser.locator import is_single_strategy, resolve
 from ._registry import tool
 
+# Poll cadence. A bare-string selector re-runs the whole D2 chain each poll —
+# CSS (conditionally) + testid + 10 roles + text, one driver round trip each —
+# so a flat 100ms cost ~12 round trips every 100ms: measured 208 Locator.count()
+# calls for a 2s wait (vs 21 for an explicit `css=` prefix). The first polls stay
+# fast because most elements appear almost immediately; after that the interval
+# ramps so a long wait on a slow/remote target does not spend its budget on IPC.
 _POLL_MS = 100
+_POLL_MAX_MS = 500
+_POLL_GROWTH = 1.4
 
 
 @tool(description="Wait: pass ms for a fixed delay, or selector to wait until that "
@@ -28,6 +36,7 @@ async def wait(ms: int | None = None, selector: str | None = None,
         single = is_single_strategy(selector)
         last_exc: Exception | None = None
         streak = 0  # consecutive polls failing with the IDENTICAL error
+        delay_ms = float(_POLL_MS)
         while True:
             try:
                 loc, _ = await resolve(session.root, selector, visible_only=True)
@@ -55,7 +64,10 @@ async def wait(ms: int | None = None, selector: str | None = None,
                         "error": f"not visible within {timeout_ms}ms ({kind})"}
             # asyncio.sleep, not page.wait_for_timeout: the sleep must not
             # itself raise when the page that started the wait just closed.
-            await asyncio.sleep(_POLL_MS / 1000)
+            # Never sleep past the deadline — the caller asked for timeout_ms.
+            remaining = deadline - time.monotonic()
+            await asyncio.sleep(min(delay_ms / 1000, max(remaining, 0)))
+            delay_ms = min(_POLL_MAX_MS, delay_ms * _POLL_GROWTH)
     if ms is not None:
         await session.page.wait_for_timeout(ms)
         return {"ok": True, "waited": f"{ms}ms"}
