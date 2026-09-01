@@ -2,6 +2,12 @@
 
 대상 커밋 `c38c38e` · Python 3.11.15 · Playwright 1.62.0 · Chromium 141.0.7390.37
 
+> **상태 (2026-09-01 수정 완료).** 13건 전부 수정되고 회귀 테스트가 붙었다.
+> 커밋은 발견 번호(P0-01 … P3-13)를 제목에 달고 1건 = 1커밋으로 남겼다.
+> 스위트는 254 → **290 passed**(+36 회귀 테스트), `ruff`/`mypy` clean 유지.
+> 각 항목의 수정 내용은 아래 표의 "수정" 열과 본문 말미의
+> [수정 요약](#수정-요약)을 참고.
+
 ## 요약
 
 정적 리뷰만이 아니라 **실제로 서버/CLI/도구를 구동해** 확인한 결과다. 로컬 HTTP 서버와
@@ -11,21 +17,21 @@
 기준선: `pytest` **254 passed** (브라우저 포함, 3분 51초), `ruff check` / `mypy` 모두 clean.
 **아래 13건은 전부 현재 테스트가 잡지 못하는 것들이다.**
 
-| # | 등급 | 이슈 | 위치 |
-|---|---|---|---|
-| 1 | **P0** | 실패한 `expect_popup`/`expect_download`가 리포트에 아예 안 남아 **100% 통과로 보고** | `testing/recorder.py:16` |
-| 2 | **P0** | `interact type`이 키 이벤트를 안 쏴서 자동완성/키 기반 UI가 **무반응인데 통과** | `tools/interact.py:93` |
-| 3 | **P0** | CLI 최종 집계가 **미실행(skip) 스텝을 통과로 계산** | `cli.py:244` |
-| 4 | P1 | `${VAR}`가 `navigate.url`·`interact.value`에서만 해석됨 | `testing/runner.py:155` 외 |
-| 5 | P1 | 슬래시 명령 도구 허용목록이 5개 도구를 누락 | `tools/_prompts.py:14` |
-| 6 | P1 | 대화형 리포트의 `page_url`이 **항상 null** | `testing/recorder.py:152` |
-| 7 | P2 | `scrub`에 최소 길이 가드가 없어 **짧은 비밀값이 리포트 본문을 오염** | `testing/secrets.py:93` |
-| 8 | P2 | 셀렉터 이름이 안 민감해 보이면 **평문 비밀번호가 리포트에 기록** | `testing/secrets.py:128` |
-| 9 | P2 | 대화형 리포트 헤더 소요시간이 항상 `0 ms` | `tools/savereport.py:25` |
-| 10 | P2 | `reports/history/`는 리텐션 대상이 아님 (무한 증가) | `testing/report.py:203` |
-| 11 | P2 | bare-string `wait`가 폴링당 드라이버 왕복 12회 | `tools/wait.py:31` |
-| 12 | P3 | `list_pages()`와 `switch_page()`의 인덱스 기준이 다름 | `browser/session.py:530` |
-| 13 | P3 | `expect_popup`이 팝업을 두 번 adopt | `tools/popup.py:59` |
+| # | 등급 | 이슈 | 위치 | 수정 |
+|---|---|---|---|---|
+| 1 | **P0** | 실패한 `expect_popup`/`expect_download`가 리포트에 아예 안 남아 **100% 통과로 보고** | `testing/recorder.py:16` | `RECORDABLE`에 3종 추가 + `_interpret` 분기, fallback이 판정을 읽도록 |
+| 2 | **P0** | `interact type`이 키 이벤트를 안 쏴서 자동완성/키 기반 UI가 **무반응인데 통과** | `tools/interact.py:93` | `type_keys` 액션 추가(`press_sequentially`) |
+| 3 | **P0** | CLI 최종 집계가 **미실행(skip) 스텝을 통과로 계산** | `cli.py:244` | `_suite_line()`이 `passed`를 직접 합산 + failed/skipped 명시 |
+| 4 | P1 | `${VAR}`가 `navigate.url`·`interact.value`에서만 해석됨 | `testing/runner.py:155` 외 | `_resolve_step()`이 스텝의 모든 문자열 필드를 해석 |
+| 5 | P1 | 슬래시 명령 도구 허용목록이 5개 도구를 누락 | `tools/_prompts.py:14` | `_only()`가 레지스트리에서 목록 생성 |
+| 6 | P1 | 대화형 리포트의 `page_url`이 **항상 null** | `testing/recorder.py:152` | `run_and_record`가 `session.page.url` 기록 |
+| 7 | P2 | `scrub`에 최소 길이 가드가 없어 **짧은 비밀값이 리포트 본문을 오염** | `testing/secrets.py:93` | `_MIN_SCRUBBABLE=6` 미만은 등록하지 않음 + 1회 WARNING |
+| 8 | P2 | 셀렉터 이름이 안 민감해 보이면 **평문 비밀번호가 리포트에 기록** | `testing/secrets.py:128` | 요소의 `type=password`/`autocomplete` 확인 → `mask_step(sensitive_value=)` |
+| 9 | P2 | 대화형 리포트 헤더 소요시간이 항상 `0 ms` | `tools/savereport.py:25` | `build_result`가 `meta{started_at, duration_ms}` 제공 |
+| 10 | P2 | `reports/history/`는 리텐션 대상이 아님 (무한 증가) | `testing/report.py:203` | `_prune`이 가장 오래된 보존 run 시각을 컷오프로 history 정리 |
+| 11 | P2 | bare-string `wait`가 폴링당 드라이버 왕복 12회 | `tools/wait.py:31` | 폴 간격 100ms→1.4배→최대 500ms + 데드라인 clamp |
+| 12 | P3 | `list_pages()`와 `switch_page()`의 인덱스 기준이 다름 | `browser/session.py:530` | `open_pages()` 단일 출처로 통일 |
+| 13 | P3 | `expect_popup`이 팝업을 두 번 adopt | `tools/popup.py:59` | `_adopt_page`가 이미 활성 페이지면 no-op |
 
 ---
 
@@ -321,10 +327,45 @@ Adopted new page/popup.     ← 같은 팝업
 - `navigate` 상태코드 판정: 404/500 실패, `expect_status: 404` 통과.
 - CLI exit code: 실패 시 `1`, JUnit의 `<skipped>` 표기 정확.
 
+## 수정 요약
+
+| 발견 | 커밋 | 핵심 변경 |
+|---|---|---|
+| P0-01 | `7c6c138` | `recorder.RECORDABLE` + `_interpret` 분기 · fallback이 `passed`/`ok`를 읽음. 새 가드 테스트가 `dismiss_banners`도 분기 없이 등재돼 있던 것을 잡아냄 |
+| P0-02 | `fff9c7f` | `interact`에 `type_keys` — `fill("")` + `press_sequentially(delay=25ms)` |
+| P0-03 | `65be5f7` | `cli._suite_line()` — `passed` 직접 합산, failed/skipped 명시 |
+| P1-04 | `4c8ae0a` | `runner._resolve_step()` — 모든 문자열 필드 해석, 원본 불변, 미설정 변수 경고 |
+| P1-05 | `483716c` | `_prompts._only()` — 레지스트리에서 생성 + 양방향 동기화 테스트 |
+| P1-06 | `3e34653` | `recorder.run_and_record`가 `page_url` 기록 |
+| P2-07 | `0a8e570` | `secrets._MIN_SCRUBBABLE` — 6자 미만은 전역 치환 대상에서 제외 |
+| P2-08 | `f2a089f` | `interact._is_credential_field()` + `mask_step(sensitive_value=)` |
+| P2-09 | `0af8ea6` | `recorder._STARTED_AT` + `build_result`의 `meta` 타이밍 |
+| P2-10 | `531b982` | `report._prune`이 `history/`도 정리 |
+| P2-11 | `2042424` | `wait` 폴 간격 백오프 + 데드라인 clamp |
+| P3-12/13 | `9b12a96` | `session.open_pages()` 단일 출처 · `_adopt_page` 멱등 가드 |
+
+수정 후 실측 (수정 전 → 수정 후):
+
+```text
+P0-01  리포트 steps  [navigate]                  → [navigate, expect_popup(FAIL), switch_tab]
+       summary       1/1 passed · rate 1.0       → 2/3 passed · 1 failed
+P0-02  type 'notebook'  keydown 0 · input 1      → type_keys: keydown 9 · input 8 · 자동완성 표시
+P0-03  total: 3/4 passed                         → total: 1/4 passed · 1 failed · 2 skipped
+P1-04  assert ${BASE_PAGE} passed=False          → passed=True (raw는 placeholder 유지)
+P1-05  프리머 25개 (5개 누락)                     → 30개 (레지스트리에서 생성)
+P1-06  page_url=None                             → page_url=http://…/index.html
+P2-07  "?page=${APP_PIN} · ${APP_PIN}2 rows"     → "?page=1 · 12 rows"
+P2-08  "value": "hunter2"                        → "value": "***"  (일반 값은 그대로)
+P2-09  "· 0 ms ·"                                → "· 679 ms ·", started_at=흐름 시작
+P2-10  history ret0 ret1 ret2 ret3               → history ret2 ret3
+P2-11  2s 대기에 count() 208회 · 2069ms          → 104회 · 2027ms
+P3-13  Adopted new page/popup ×2                 → ×1
+```
+
 ## 재현 환경
 
 ```bash
-.venv/bin/python -m pytest -q                # 254 passed
+.venv/bin/python -m pytest -q                # 254 passed (수정 전) / 290 passed (수정 후)
 .venv/bin/ruff check blackbox_mcp            # clean
 .venv/bin/mypy blackbox_mcp                  # clean
 ```
