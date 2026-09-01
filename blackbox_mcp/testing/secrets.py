@@ -142,13 +142,21 @@ def scrub_record(record: dict) -> dict:
     return record
 
 
-def mask_step(step: dict) -> dict:
-    """Return a copy of a step with sensitive values masked for reporting."""
+def mask_step(step: dict, *, sensitive_value: bool = False) -> dict:
+    """Return a copy of a step with sensitive values masked for reporting.
+
+    ``sensitive_value`` is the verdict the RUNTIME reached about the target
+    field (interact inspects the resolved element). Name matching alone reads
+    only the selector text, so an opaque one — "#p" on <input type="password">
+    — let the plaintext through into the report.
+    """
     out = dict(step)
     for key in list(out.keys()):
         if is_sensitive_name(key) and isinstance(out[key], str):
             out[key] = mask_value(out[key])
-    # Mask a 'value' field when the target field name looks sensitive.
-    if "value" in out and is_sensitive_name(str(out.get("selector", ""))):
+    # Mask a 'value' field when the runtime said so, or the target field name
+    # looks sensitive.
+    if "value" in out and (sensitive_value
+                           or is_sensitive_name(str(out.get("selector", "")))):
         out["value"] = mask_value(str(out["value"]))
     return out

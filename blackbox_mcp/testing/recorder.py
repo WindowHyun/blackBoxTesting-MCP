@@ -205,7 +205,9 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     _LOG.append(secrets.scrub_record({
         "step": idx,
         "action": name,
-        "raw": secrets.mask_step(dict(kwargs)),
+        "raw": secrets.mask_step(
+            dict(kwargs),
+            sensitive_value=bool(isinstance(result, dict) and result.get("sensitive"))),
         "selector_input": kwargs.get("selector") or kwargs.get("target"),
         "resolved_by": resolved_by,
         "expected": expected,

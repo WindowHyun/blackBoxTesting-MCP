@@ -175,7 +175,8 @@ async def _dispatch_resolved(step: dict) -> dict:
     elif action == "interact":
         res = await interact(step.get("type"), step["selector"], step.get("value"))
         out.update(expected=f"{step.get('type')} ok", actual=res.get("detail") or res.get("error"),
-                   passed=bool(res.get("ok")), resolved_by=res.get("resolved_by"))
+                   passed=bool(res.get("ok")), resolved_by=res.get("resolved_by"),
+                   sensitive=bool(res.get("sensitive")))
         out["ai_reason"] = (f"{step.get('type')} via {res.get('resolved_by')} selector"
                             if res.get("ok") else "action failed")
         if not res.get("ok"):
@@ -424,7 +425,7 @@ async def run(
         result["steps"].append(secrets.scrub_record({
             "step": idx,
             "action": step.get("action"),
-            "raw": secrets.mask_step(step),
+            "raw": secrets.mask_step(step, sensitive_value=fields.get("sensitive", False)),
             "selector_input": step.get("selector") or step.get("target"),
             "resolved_by": fields.get("resolved_by"),
             "expected": fields.get("expected"),
