@@ -13,8 +13,13 @@ from ._registry import tool
 _NO_VALUE = {"click", "dblclick", "hover", "check", "uncheck", "focus",
              "clear", "scroll_into_view"}
 # Actions requiring a value.
-_NEEDS_VALUE = {"type", "select", "press", "upload"}
+_NEEDS_VALUE = {"type", "type_keys", "select", "press", "upload"}
 _ACTIONS = _NO_VALUE | _NEEDS_VALUE
+
+# Per-character delay for type_keys. Not 0: a debounced/throttled handler
+# (search-as-you-type usually debounces 150~300ms) needs the keystrokes to be
+# spread out to behave like a human, and 0 makes them arrive in one burst.
+_KEY_DELAY_MS = 25
 
 
 def _display_value(selector: str, action: str, value: str | None) -> str | None:
@@ -45,11 +50,17 @@ def _upload_paths(value: str) -> tuple[list[str], str | None]:
     return expanded, None
 
 
-@tool(description="Perform a UI action: action ∈ click|dblclick|type|hover|select|"
-                  "press|check|uncheck|clear|focus|scroll_into_view|upload. "
+@tool(description="Perform a UI action: action ∈ click|dblclick|type|type_keys|hover|"
+                  "select|press|check|uncheck|clear|focus|scroll_into_view|upload. "
                   "selector uses the priority chain testid= / role= / text= / css=. "
-                  "value is required for type/select/press/upload (upload takes one "
-                  "or more comma-separated local file paths).")
+                  "value is required for type/type_keys/select/press/upload (upload "
+                  "takes one or more comma-separated local file paths). "
+                  "'type' sets the value in one shot (fast; fires ONE input event, no "
+                  "keydown/keyup) — use 'type_keys' for anything driven by typing: "
+                  "search autocomplete, live suggestions, character counters, "
+                  "digits-only key filters, Enter-to-submit handlers. type_keys sends "
+                  "real keystrokes per character (CJK has no key mapping, so it is "
+                  "inserted as text — input still fires per character, keydown does not).")
 async def interact(action: str, selector: str, value: str | None = None) -> dict:
     if action not in _ACTIONS:
         return {"ok": False, "action": action, "selector": selector,
@@ -92,6 +103,18 @@ async def interact(action: str, selector: str, value: str | None = None) -> dict
         elif action == "type":
             await locator.fill(value_resolved or "", timeout=t)
             detail = "typed"
+        elif action == "type_keys":
+            text = value_resolved or ""
+            # Replace first (fill semantics), then send real keystrokes:
+            # press_sequentially appends, and "set this field to X" is what a
+            # scenario author means by typing.
+            await locator.fill("", timeout=t)
+            # The per-character delay is inside the operation's own budget, so
+            # a long value must not be capped by the plain selector timeout.
+            await locator.press_sequentially(
+                text, delay=_KEY_DELAY_MS,
+                timeout=t + len(text) * _KEY_DELAY_MS)
+            detail = f"typed {len(text)} char(s) as key events"
         elif action == "select":
             # A bare string matches by value OR label, so "부산" and "v2" both
             # work on <option value="v2">부산</option> — QA writes what it sees.
