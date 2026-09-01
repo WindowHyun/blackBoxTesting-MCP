@@ -8,6 +8,7 @@ tool *functions* (not the wrapped MCP entrypoints), so it never double-records.
 from __future__ import annotations
 
 import time
+from datetime import datetime
 
 from . import report, secrets
 
@@ -30,13 +31,19 @@ _COUNTER = 0
 # Per-recording-session run id, shared by this session's screenshots and (via
 # build_result → save) its report files, so retention keeps them together.
 _RUN_ID: str | None = None
+# Wall clock of the FIRST recorded call in this flow. save_report used to stamp
+# the report with runner._meta's started_at, i.e. the moment the report was
+# saved, and with no duration at all — the header read "· 0 ms ·" on every
+# ad-hoc report even though each step's duration was recorded.
+_STARTED_AT: datetime | None = None
 
 
 def reset() -> None:
-    global _COUNTER, _RUN_ID
+    global _COUNTER, _RUN_ID, _STARTED_AT
     _LOG.clear()
     _COUNTER = 0
     _RUN_ID = None
+    _STARTED_AT = None
     # A flow boundary is also the scrub-registry boundary: values re-register
     # on the next resolve(), so this only bounds growth/cross-flow bleed.
     secrets.clear_registry()
@@ -165,6 +172,9 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     n0 = len(session.buffers.network) if session else 0
     d0 = len(session.buffers.dialogs) if session else 0
 
+    global _STARTED_AT
+    if _STARTED_AT is None:
+        _STARTED_AT = datetime.now()
     t0 = time.monotonic()
     exc: Exception | None = None
     result = None
@@ -240,4 +250,12 @@ def build_result(name: str = "session", description: str = "") -> dict:
     # them together. None when no screenshot was captured — save() falls back.
     if _RUN_ID is not None:
         result["run_id"] = _RUN_ID
+    # Timing the report header needs. duration_ms is the sum of the steps, i.e.
+    # time actually spent driving the browser — NOT wall clock to now, which on
+    # an interactive flow is dominated by how long the operator (or the host
+    # LLM) thought between calls and would read as "the site is slow".
+    meta: dict = {"duration_ms": sum(int(x.get("duration_ms") or 0) for x in s)}
+    if _STARTED_AT is not None:
+        meta["started_at"] = _STARTED_AT.isoformat(timespec="seconds")
+    result["meta"] = meta
     return result

@@ -20,12 +20,16 @@ async def save_report(name: str = "session", description: str = "",
     if result["summary"]["total"] == 0:
         return {"ok": False, "message": "기록된 동작이 없습니다. 먼저 도구로 작업을 수행하세요."}
 
+    # build_result already carries the flow's own timing; environment metadata
+    # is layered UNDER it so runner._meta's "started_at = now" cannot overwrite
+    # the moment the flow actually began.
+    flow_meta = result.get("meta") or {}
     try:
         session = await get_session()
-        result["meta"] = runner._meta(session)
+        result["meta"] = {**runner._meta(session), **flow_meta}
         result["a11y_findings"] = await runner._a11y_audit(session)
     except Exception:
-        result["meta"] = {}
+        result["meta"] = dict(flow_meta)
         result["a11y_findings"] = []
     # Ad-hoc flows: derive the tested target from the first recorded navigate
     # (raw is already masked — ${VAR} placeholders, never resolved secrets).

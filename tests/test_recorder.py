@@ -86,3 +86,39 @@ async def test_recorded_step_carries_the_page_url(session):
     from blackbox_mcp.testing import report as rep
     md = rep._render_markdown(rec.build_result(name="adhoc"))
     assert "페이지: " in md
+
+
+async def test_adhoc_report_carries_real_timing(session, tmp_path, monkeypatch):
+    """P2-09 — save_report stamped runner._meta's started_at (= the moment the
+    report was saved) and no duration at all, so every ad-hoc report header
+    read "· 0 ms ·" even though each step's duration was recorded."""
+    import dataclasses
+
+    from conftest import fixture_url
+
+    from blackbox_mcp.testing import recorder as rec
+    from blackbox_mcp.testing import report as rep
+    from blackbox_mcp.tools.navigate import navigate
+    from blackbox_mcp.tools.savereport import save_report
+
+    rec.reset()
+    started_before = rec._STARTED_AT
+    assert started_before is None
+    await rec.run_and_record("navigate", navigate, (),
+                             {"url": fixture_url("basic.html")})
+    flow_start = rec._STARTED_AT
+    assert flow_start is not None
+
+    built = rec.build_result(name="timing")
+    assert built["meta"]["duration_ms"] == sum(
+        s["duration_ms"] for s in built["steps"])
+    assert built["meta"]["duration_ms"] > 0
+
+    cfg = dataclasses.replace(rep.CONFIG, report_dir=tmp_path)
+    monkeypatch.setattr(rep, "CONFIG", cfg)
+    out = await save_report(name="timing", report_format="md")
+    assert out["ok"] is True
+    md = open(out["report_files"]["md"], encoding="utf-8").read()
+    assert "· 0 ms ·" not in md
+    # the header timestamp is the flow's start, not the save moment
+    assert flow_start.isoformat(timespec="seconds") in md
