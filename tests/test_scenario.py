@@ -104,3 +104,67 @@ async def test_report_writes_all_formats(session, report_dir):
     assert {"json", "md", "html"} <= set(files)
     htmls = list(report_dir.glob("*.html"))
     assert htmls and "PASS" in htmls[0].read_text(encoding="utf-8")
+
+
+# ── P1-04: ${VAR} substitution across the whole step ─────────────────
+def test_resolve_step_covers_every_string_field(monkeypatch):
+    """Resolution used to run on navigate.url and interact.value only, so an
+    assert target / wait selector / mock pattern kept the literal placeholder
+    and could never match."""
+    monkeypatch.setenv("BASE_URL", "https://shop.test")
+    monkeypatch.setenv("ITEM", "widget")
+    step = {"action": "assert", "kind": "url_contains",
+            "target": "${BASE_URL}/orders", "expected": "${ITEM}",
+            "timeout_ms": 4000}
+    resolved, missing = runner._resolve_step(step)
+    assert resolved["target"] == "https://shop.test/orders"
+    assert resolved["expected"] == "widget"
+    assert resolved["timeout_ms"] == 4000        # non-strings pass through
+    assert missing == []
+
+
+def test_resolve_step_does_not_mutate_the_original(monkeypatch):
+    """The report's raw/selector_input are built from the original step, so the
+    placeholder — not the resolved secret — is what reaches disk."""
+    monkeypatch.setenv("PW_FOR_TEST", "s3cret")
+    step = {"action": "interact", "type": "type", "selector": "#p",
+            "value": "${PW_FOR_TEST}"}
+    resolved, _ = runner._resolve_step(step)
+    assert resolved["value"] == "s3cret"
+    assert step["value"] == "${PW_FOR_TEST}"
+
+
+def test_resolve_step_reports_unset_vars_once(monkeypatch):
+    monkeypatch.delenv("NO_SUCH_VAR_A", raising=False)
+    monkeypatch.delenv("NO_SUCH_VAR_B", raising=False)
+    step = {"action": "assert", "kind": "url_is",
+            "target": "${NO_SUCH_VAR_A}/x/${NO_SUCH_VAR_A}",
+            "expected": "${NO_SUCH_VAR_B}"}
+    resolved, missing = runner._resolve_step(step)
+    assert missing == ["NO_SUCH_VAR_A", "NO_SUCH_VAR_B"]   # de-duplicated, ordered
+    assert resolved["target"] == "${NO_SUCH_VAR_A}/x/${NO_SUCH_VAR_A}"
+
+
+async def test_assert_target_resolves_env_var(session, monkeypatch):
+    """End-to-end: the assert target now compares against the resolved URL."""
+    url = fixture_url("basic.html")
+    monkeypatch.setenv("BASE_PAGE", url)
+    res = await runner.run(
+        [{"action": "navigate", "url": "${BASE_PAGE}"},
+         {"action": "assert", "kind": "url_contains", "target": "${BASE_PAGE}"}],
+        name="env_in_assert", continue_on_fail=True)
+    assert [s["passed"] for s in res["steps"]] == [True, True]
+    # the report keeps the placeholder, never the resolved value
+    assert res["steps"][1]["raw"]["target"] == "${BASE_PAGE}"
+
+
+async def test_unset_var_is_flagged_on_any_field(session, monkeypatch):
+    """A typo'd ${VAR} in a field other than url/value used to fail silently."""
+    monkeypatch.delenv("TYPOED_VAR", raising=False)
+    res = await runner.run(
+        [{"action": "navigate", "url": fixture_url("basic.html")},
+         {"action": "assert", "kind": "url_contains", "target": "${TYPOED_VAR}"}],
+        name="env_typo", continue_on_fail=True)
+    step = res["steps"][1]
+    assert step["passed"] is False
+    assert "TYPOED_VAR" in step["ai_suggestion"]
