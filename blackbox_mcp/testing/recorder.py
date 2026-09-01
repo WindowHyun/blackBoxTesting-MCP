@@ -190,6 +190,18 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     if session and not passed:
         shot = await report.capture_step_screenshot(session, f"{_RUN_ID}_session", idx)
 
+    # Where the call actually ran. The runner records this and both renderers
+    # print it on failures, but the recorder never set the key — and
+    # scrub_record creates it as None, so the omission passed schema checks
+    # while the "페이지:" line silently vanished from every ad-hoc report.
+    # SPA routing is exactly what the interactive path is used to debug.
+    page_url = None
+    if session is not None:
+        try:
+            page_url = session.page.url
+        except Exception:
+            page_url = None
+
     _LOG.append(secrets.scrub_record({
         "step": idx,
         "action": name,
@@ -201,6 +213,7 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         "passed": passed,
         "duration_ms": duration_ms,
         "screenshot": shot,
+        "page_url": page_url,
         "console_errors": [e for e in new_console if e.get("level") == "error"],
         "network_errors": new_network,
         "dialogs": new_dialogs,

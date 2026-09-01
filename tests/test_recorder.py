@@ -61,3 +61,28 @@ def test_unmapped_tool_does_not_default_to_passed():
     assert recorder._interpret("brand_new", {}, {"ok": False}, None)[2] is False
     # A non-dict result (e.g. screenshot's Image) has no verdict to read → pass.
     assert recorder._interpret("brand_new", {}, "some text", None)[2] is True
+
+
+async def test_recorded_step_carries_the_page_url(session):
+    """P1-06 — the field is in the schema and both renderers print it on a
+    failure, but the recorder never set it, so ad-hoc reports lost the one
+    piece of context SPA debugging needs."""
+    from conftest import fixture_url
+
+    from blackbox_mcp.testing import recorder as rec
+    from blackbox_mcp.tools.assertion import assert_
+    from blackbox_mcp.tools.navigate import navigate
+
+    rec.reset()
+    url = fixture_url("basic.html")
+    await rec.run_and_record("navigate", navigate, (), {"url": url})
+    await rec.run_and_record("assert_", assert_, (),
+                             {"kind": "text_visible", "target": "존재하지 않는 텍스트"})
+    steps = rec.steps()
+    assert [s["passed"] for s in steps] == [True, False]
+    assert all(s["page_url"] == url for s in steps)
+
+    # and it reaches the rendered failure detail
+    from blackbox_mcp.testing import report as rep
+    md = rep._render_markdown(rec.build_result(name="adhoc"))
+    assert "페이지: " in md
