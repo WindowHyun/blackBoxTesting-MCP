@@ -239,10 +239,31 @@ def _cmd_run(args) -> int:
 
     if args.junit:
         _write_junit(results, args.junit)
-    failed = sum(r["summary"]["failed"] for r in results)
-    total = sum(r["summary"]["total"] for r in results)
-    print(f"total: {total - failed}/{total} passed")
-    return EXIT_OK if failed == 0 else EXIT_FAILED
+    print(_suite_line(results))
+    return (EXIT_OK if sum(r["summary"]["failed"] for r in results) == 0
+            else EXIT_FAILED)
+
+
+def _suite_line(results: list[dict]) -> str:
+    """The suite's closing line.
+
+    Sums ``passed`` directly instead of ``total - failed``: skipped steps are
+    deliberately kept out of ``failed`` (summarize), so the subtraction counted
+    every un-run step as a pass — "3/4 passed" for a run where 1 passed, 1
+    failed and 2 never ran. The failed/skipped counts are spelled out because
+    this line is what a CI log shows at the end.
+    """
+    def total_of(key: str) -> int:
+        return sum(r["summary"].get(key, 0) for r in results)
+
+    total, passed = total_of("total"), total_of("passed")
+    failed, skipped = total_of("failed"), total_of("skipped")
+    line = f"total: {passed}/{total} passed"
+    if failed:
+        line += f" · {failed} failed"
+    if skipped:
+        line += f" · {skipped} skipped (실행되지 않음)"
+    return line
 
 
 def _cmd_doctor(args) -> int:  # noqa: ARG001
