@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import html
 import json
+import math
 import re
 from datetime import datetime
 from pathlib import Path
@@ -384,6 +385,12 @@ def _render_markdown(result: dict) -> str:
     return "\n".join(lines)
 
 
+def _dash(v):
+    """"—" for a genuinely absent value (a skipped step's expected/actual are
+    None) — otherwise str(None) rendered as the literal word "None"."""
+    return "—" if v is None else v
+
+
 def _short(v, n: int = 40) -> str:
     s = str(v).replace("\n", " ")
     return s if len(s) <= n else s[: n - 1] + "…"
@@ -394,64 +401,299 @@ def _cell(v) -> str:
     return str(v).replace("|", "\\|")
 
 
-# ── HTML (self-contained, mint theme to match the PRD) ────────────
+# ── HTML (self-contained instrument-panel theme) ───────────────────
+#
+# No <link>/@font-face: DESIGN §6.2 requires the HTML report to run with zero
+# external dependencies/network (this tool targets closed corporate networks —
+# CLAUDE.md "사내망 지원"). Font names are PREFERENCES only, with a universal
+# fallback; nothing is fetched. The pass-rate gauge is plain inline SVG with
+# its arc math computed in Python (stroke-dasharray/dashoffset), so no
+# client-side script is needed to render it. A run with 2+ chapters (Steps
+# plus regression and/or a11y findings) gets one inline <script> for sidebar
+# tab switching (_chapters_html) — still zero network/external deps, just no
+# longer zero script; a single-chapter run (most runs) never emits it.
 _CSS = """
-:root{--bg:#f5f6f8;--surface:#fff;--surface2:#f0f2f5;--border:#e1e4eb;--ink:#0d1117;
---ink2:#353d4f;--ink3:#6a7386;--ink4:#9da6b8;--mint:#0baa77;--mint-dim:#089965;
---mint-bg:#edf9f4;--mint-bd:#b0e6d0;--red:#c93030;--red-bg:#fdf2f2;--red-bd:#f5c0c0;
---amber:#c9780a;--amber-bg:#fff8ed;--amber-bd:#fcd89a;--blue:#1a56e8;--blue-bg:#eff3fd;}
+:root{
+  --paper:#f2efe6;--surface:#fbfaf5;--sunk:#eae4d5;--track:#e3ddc9;
+  --ink:#1b1712;--ink2:#56504a;--ink3:#8a8375;--ink4:#a9a294;
+  --rule:#ddd5c1;--rule-soft:#e9e3d3;
+  --accent:#b8480f;--accent-ink:#8a3308;--accent-soft:#f6e2ce;--accent-bd:#e7c19c;
+  --good:#0ca30c;--good-bg:#e2f4df;--good-bd:#bfe3b8;
+  --warn:#c8790a;--warn-bg:#fbedd3;--warn-bd:#eecf98;
+  --crit:#d03b3b;--crit-bg:#fbe4e1;--crit-bd:#f0bcb6;
+  --skip:#726c60;--skip-bg:#eae4d5;--skip-bd:#d8cfba;
+}
+@media (prefers-color-scheme:dark){:root{
+  --paper:#12100b;--surface:#1b170f;--sunk:#211c13;--track:#2a2415;
+  --ink:#f3ede0;--ink2:#cbc1ac;--ink3:#928a76;--ink4:#726b5a;
+  --rule:#332c1d;--rule-soft:#292213;
+  --accent:#e88a3d;--accent-ink:#f3a765;--accent-soft:#2f1d0e;--accent-bd:#4a2c12;
+  --good:#3ac23a;--good-bg:#132313;--good-bd:#204a20;
+  --warn:#f0a933;--warn-bg:#2a1f0c;--warn-bd:#4a3712;
+  --crit:#ec6d6d;--crit-bg:#2c1414;--crit-bd:#4d2222;
+  --skip:#9b9484;--skip-bg:#211c13;--skip-bd:#332c1d;
+}}
 *{box-sizing:border-box}
-body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--ink);
-margin:0;padding:32px 24px;font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
-.wrap{max-width:980px;margin:0 auto}
-.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;
-padding:24px 28px;margin-bottom:18px}
-.eyebrow{font:500 11px/1 'IBM Plex Mono',monospace;letter-spacing:.14em;
-text-transform:uppercase;color:var(--mint-dim);margin-bottom:10px}
-h1.title{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:0 0 6px}
-.desc{color:var(--ink2);font-size:14px;margin:8px 0 18px;max-width:640px}
-.hero{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
-.bigrate{font-size:40px;font-weight:700;letter-spacing:-.02em}
-.bar{flex:1;min-width:200px;height:12px;background:var(--surface2);border-radius:99px;overflow:hidden}
-.bar > span{display:block;height:100%;background:var(--mint)}
-.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-.chip{font:500 11px/1 'IBM Plex Mono',monospace;padding:5px 9px;border-radius:5px;
-border:1px solid var(--border);background:var(--surface2);color:var(--ink3)}
-.chip.pass{background:var(--mint-bg);border-color:var(--mint-bd);color:var(--mint-dim)}
-.chip.fail{background:var(--red-bg);border-color:var(--red-bd);color:var(--red)}
-.sec{font:600 12px/1 'IBM Plex Mono',monospace;letter-spacing:.1em;text-transform:uppercase;
-color:var(--ink4);margin:0 0 14px}
-.step{display:grid;grid-template-columns:34px 1fr 150px;gap:14px;padding:16px 0;
-border-top:1px solid var(--border)}
-.step:first-of-type{border-top:none}
-.step.fail{background:linear-gradient(90deg,var(--red-bg),transparent);
-margin:0 -28px;padding:16px 28px}
-.num{font:600 13px/1 'IBM Plex Mono',monospace;color:var(--ink4);padding-top:3px}
-.act{font-weight:600;font-size:14px}
-.kv{color:var(--ink3);font-size:12.5px;margin-top:3px}
-.kv b{color:var(--ink2);font-weight:600}
-.rb{font:500 11px/1 'IBM Plex Mono',monospace;background:var(--blue-bg);color:var(--blue);
-padding:2px 6px;border-radius:4px;margin-left:6px}
-.reason{color:var(--ink2);font-size:12.5px;margin-top:6px}
-.sugg{color:var(--amber);background:var(--amber-bg);border:1px solid var(--amber-bd);
-border-radius:5px;padding:6px 10px;font-size:12.5px;margin-top:8px}
-.err{color:var(--red);font:12px/1.5 'IBM Plex Mono',monospace;margin-top:4px}
-.right{text-align:right}
-.verdict{font:700 12px/1 'IBM Plex Mono',monospace;padding:5px 10px;border-radius:5px;
-display:inline-block}
-.verdict.pass{background:var(--mint-bg);color:var(--mint-dim);border:1px solid var(--mint-bd)}
-.verdict.fail{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd)}
-.verdict.skip{background:var(--surface2);color:var(--ink4);border:1px solid var(--border)}
-.tagchip{font:500 10px/1 'IBM Plex Mono',monospace;background:var(--surface2);
-color:var(--ink3);border:1px solid var(--border);padding:2px 6px;border-radius:4px;margin-left:6px}
-.sev{display:block;font:10px/1 'IBM Plex Mono',monospace;color:var(--ink4);margin-top:5px}
-.time{display:block;font-size:11px;color:var(--ink4);margin-top:5px}
-.thumb{margin-top:10px;border:1px solid var(--border);border-radius:6px;max-height:130px;
-display:block}
-ul.list{margin:0;padding-left:18px}ul.list li{margin:3px 0;font-size:13px;color:var(--ink2)}
-code{font:12px 'IBM Plex Mono',monospace;background:var(--surface2);padding:1px 5px;border-radius:3px}
-.foot{color:var(--ink4);font:11px 'IBM Plex Mono',monospace;text-align:center;margin-top:8px}
+[hidden]{display:none}
+body{font-family:'Pretendard',-apple-system,BlinkMacSystemFont,system-ui,"Malgun Gothic",
+"Apple SD Gothic Neo",sans-serif;background:var(--paper);color:var(--ink);
+margin:0;padding:28px 18px 60px;font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.mono{font-family:'JetBrains Mono',ui-monospace,"SF Mono",Consolas,monospace}
+.wrap{max-width:1000px;margin:0 auto}
+code{font-family:'JetBrains Mono',ui-monospace,"SF Mono",Consolas,monospace;font-size:.86em;
+background:var(--sunk);padding:.1em .38em;border-radius:3px}
+
+/* masthead */
+.mast{padding-bottom:20px;border-bottom:2px solid var(--ink)}
+.eyebrow{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;font-weight:600;
+letter-spacing:.14em;text-transform:uppercase;color:var(--accent-ink);margin-bottom:12px}
+h1{font-size:24px;font-weight:800;letter-spacing:-.01em;margin:0}
+.desc{color:var(--ink2);font-size:14px;margin:10px 0 0;max-width:70ch}
+.mmeta{display:flex;flex-wrap:wrap;gap:5px 18px;margin-top:14px;
+font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;color:var(--ink3)}
+.mmeta b{color:var(--ink2);font-weight:500}
+
+/* instrument cluster */
+.cluster{display:grid;grid-template-columns:180px 1fr;margin-top:22px;
+border:1px solid var(--rule);background:var(--surface)}
+.gaugebox{padding:16px;display:flex;flex-direction:column;align-items:center;
+justify-content:center;gap:6px;border-right:1px solid var(--rule)}
+.glabel{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;letter-spacing:.1em;
+text-transform:uppercase;color:var(--ink3)}
+.gsub{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:var(--ink3);
+text-align:center}
+.rightcol{display:flex;flex-direction:column;min-width:0}
+.statrow{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid var(--rule)}
+.stat{padding:12px 14px;border-left:1px solid var(--rule)}
+.stat:first-child{border-left:none}
+.stat .sv{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:20px;font-weight:700;
+line-height:1}
+.stat .sl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;letter-spacing:.08em;
+text-transform:uppercase;color:var(--ink3);margin-top:6px}
+.envrow{display:flex;flex-wrap:wrap;gap:6px;padding:11px 14px;border-bottom:1px solid var(--rule)}
+.chip{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;padding:3px 8px;
+border-radius:3px;border:1px solid var(--rule);background:var(--sunk);color:var(--ink2);
+white-space:nowrap}
+.chip.mask{color:var(--good);border-color:var(--good-bd);background:var(--good-bg)}
+.trendrow{padding:11px 14px}
+.trendlabel{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;letter-spacing:.08em;
+text-transform:uppercase;color:var(--ink3);margin-bottom:8px}
+.tstreak{color:var(--crit);margin-left:8px;text-transform:none;letter-spacing:0}
+.trend-runs{display:flex;gap:14px;overflow-x:auto}
+.trun{flex:none;display:flex;flex-direction:column;gap:4px}
+.trun.now .tlabel{color:var(--ink)}
+.tbar{display:flex;height:8px;gap:1px}
+.tseg{display:block;height:100%;border-radius:1px}
+.tseg.good{background:var(--good)}.tseg.crit{background:var(--crit)}
+.tseg.skip{background:var(--skip)}
+.tlabel{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:var(--ink3);
+display:flex;gap:6px;white-space:nowrap}
+
+/* chapter sidebar — only rendered when a run has 2+ chapters (Steps plus
+   regression and/or a11y findings); a single-chapter report skips this
+   entirely and stays exactly as before (no sidebar, no script). */
+section[id]{scroll-margin-top:16px}
+.layout{display:grid;grid-template-columns:168px minmax(0,1fr);gap:0 28px;
+align-items:start;margin-top:20px}
+.content{min-width:0}
+.sidenav{position:sticky;top:14px}
+.sidenav .inner{display:flex;flex-direction:column;gap:2px}
+.sidenav .brand{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;
+font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);
+padding:0 10px 8px;margin-bottom:6px;border-bottom:1px solid var(--rule)}
+.tab{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;
+color:var(--ink3);background:transparent;border:1px solid transparent;border-radius:4px;
+cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;
+width:100%;text-align:left;padding:7px 10px}
+.tab:hover{color:var(--ink);background:var(--sunk)}
+.tab[aria-selected="true"]{color:var(--ink);background:var(--accent-soft);
+border-color:var(--accent-bd);font-weight:600}
+.tab .cnt{font-size:10px;color:var(--ink4)}
+.tab[aria-selected="true"] .cnt{color:var(--accent-ink)}
+
+/* generic panel (regression / a11y) */
+.panel{margin-top:20px;border:1px solid var(--rule);background:var(--surface)}
+.phead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+padding:11px 14px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.phead h2{font-size:13.5px;margin:0;font-weight:700}
+.phead .pnote{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:var(--ink3)}
+.pbody{padding:4px 14px}
+
+.regrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 0;font-size:13px;
+border-bottom:1px solid var(--rule-soft)}
+.regrow:last-child{border-bottom:none}
+.regstep{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:var(--ink3);
+width:52px;flex:none}
+.regfrom,.regto{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px}
+.regto.crit{color:var(--crit);font-weight:600}
+.regto.good{color:var(--good);font-weight:600}
+.regarrow{color:var(--ink4)}
+.regnote{color:var(--ink3);font-size:12px}
+.regnote.crit{color:var(--crit)}.regnote.good{color:var(--good)}
+
+.a11yrow{display:flex;gap:9px;align-items:baseline;padding:7px 0;font-size:13px;
+border-bottom:1px solid var(--rule-soft)}
+.a11yrow:last-child{border-bottom:none}
+.a11yrow code{color:var(--warn)}
+.a11ytag{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;color:var(--ink3)}
+.a11yname{color:var(--ink2)}
+
+/* step ledger */
+.ledger{display:flex;flex-direction:column}
+.step{display:grid;grid-template-columns:44px 1fr 82px;border-bottom:1px solid var(--rule)}
+.step:last-child{border-bottom:none}
+.step.fail{background:linear-gradient(90deg,var(--crit-bg) 0,transparent 240px)}
+.step.skip{opacity:.55}
+.rail{padding:13px 0 13px 14px;border-right:1px solid var(--rule)}
+.rail .sn{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:14px;font-weight:700;
+color:var(--ink3)}
+.step.fail .rail .sn{color:var(--crit)}
+.body{padding:13px 14px;min-width:0}
+.bhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.act{font-weight:700;font-size:13px}
+.tagchip,.rbchip{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;
+padding:2px 6px;border-radius:3px;border:1px solid var(--rule);background:var(--sunk);
+color:var(--ink3)}
+.rbchip{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent-bd)}
+.priochip{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+padding:2px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.03em;
+background:var(--sunk);color:var(--ink3);border:1px solid var(--rule)}
+.priochip.crit{background:var(--crit-bg);color:var(--crit);border-color:var(--crit-bd)}
+.priochip.warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn-bd)}
+.retrychip{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;font-weight:700;
+padding:2px 6px;border-radius:3px;background:var(--warn-bg);color:var(--warn);
+border:1px solid var(--warn-bd)}
+.ea{display:flex;gap:16px;margin-top:7px;font-size:12.5px;flex-wrap:wrap}
+.ea div{color:var(--ink2);min-width:0}
+.ea b{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;letter-spacing:.07em;
+text-transform:uppercase;color:var(--ink4);display:block;margin-bottom:2px;font-weight:600}
+.purl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:var(--ink3);
+margin-top:6px;word-break:break-all}
+.reason{color:var(--ink2);font-size:12.5px;margin-top:8px}
+.sugg{margin-top:8px;padding:7px 10px;background:var(--warn-bg);border:1px solid var(--warn-bd);
+border-radius:3px;font-size:12.5px;color:var(--ink);display:flex;gap:7px}
+.sugglbl{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;letter-spacing:.07em;
+color:var(--warn);font-weight:700;flex:none;padding-top:1px}
+.evline{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;padding:4px 8px;
+border-radius:3px;margin-top:5px;word-break:break-all}
+.evline.crit{background:var(--crit-bg);color:var(--crit)}
+.evtag{font-weight:700;letter-spacing:.04em;margin-right:5px}
+.evk{color:var(--ink3);margin-right:6px}
+.evline.crit .evk{color:inherit;opacity:.7}
+.shot{margin-top:9px}
+.shot img{max-width:220px;border:1px solid var(--rule);border-radius:3px;display:block}
+.shotpath{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:var(--ink3);
+display:block;margin-top:4px;word-break:break-all}
+.right{padding:13px 12px;text-align:right}
+.verdict{display:inline-flex;align-items:center;gap:4px;font-family:'JetBrains Mono',
+ui-monospace,monospace;font-size:10px;font-weight:700;letter-spacing:.04em;padding:3px 7px;
+border-radius:3px;border:1px solid}
+.verdict.pass{background:var(--good-bg);color:var(--good);border-color:var(--good-bd)}
+.verdict.fail{background:var(--crit-bg);color:var(--crit);border-color:var(--crit-bd)}
+.verdict.skip{background:var(--skip-bg);color:var(--skip);border-color:var(--skip-bd)}
+.vicon{width:8px;height:8px;flex:none}
+.sevtag{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9.5px;
+color:var(--ink4);margin-top:5px}
+.dur{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;
+color:var(--ink4);margin-top:5px}
+
+.foot{margin-top:24px;padding-top:14px;border-top:1px solid var(--rule);
+font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10.5px;color:var(--ink3);
+line-height:1.8}
+
+@media (max-width:640px){
+  .cluster{grid-template-columns:1fr}
+  .gaugebox{border-right:none;border-bottom:1px solid var(--rule)}
+  .statrow{grid-template-columns:1fr 1fr}
+  .stat:nth-child(3){border-left:none}
+  .step{grid-template-columns:38px 1fr;grid-template-rows:auto auto}
+  .right{grid-column:1/-1;text-align:left;padding:0 14px 12px;display:flex;
+  align-items:center;gap:10px;border-top:1px solid var(--rule-soft)}
+  .rail{padding-left:10px}
+  .layout{grid-template-columns:1fr;gap:0;margin-top:14px}
+  .sidenav{position:static;margin-bottom:12px;border-bottom:1px solid var(--rule);
+  padding-bottom:8px}
+  .sidenav .inner{flex-direction:row;gap:4px;overflow-x:auto;scrollbar-width:none}
+  .sidenav .inner::-webkit-scrollbar{display:none}
+  .sidenav .brand{display:none}
+  .tab{width:auto;white-space:nowrap}
+}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 """
+
+
+def _gauge_svg(pct: int, ok: bool) -> str:
+    """Pass-rate meter as inline SVG — a full ring, arc math done here in Python
+    (stroke-dasharray/dashoffset) so the report needs no client-side script.
+
+    ``ok`` (no failures) picks the ring color: even a high rate is not "green"
+    if something failed — matches the header's rate-color rule below.
+    """
+    size, r, sw = 148, 60, 10
+    c = size / 2
+    circumference = 2 * math.pi * r
+    offset = circumference * (1 - max(0, min(100, pct)) / 100)
+    color = "var(--good)" if ok else "var(--crit)"
+    ticks = []
+    for frac in (0, 0.25, 0.5, 0.75):
+        a = math.radians(-90 + frac * 360)
+        x1, y1 = c + (r - 13) * math.cos(a), c + (r - 13) * math.sin(a)
+        x2, y2 = c + (r - 7) * math.cos(a), c + (r - 7) * math.sin(a)
+        ticks.append(f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+                     f'stroke="var(--ink4)" stroke-width="1.5"/>')
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" role="img" '
+        f'aria-label="pass rate {pct}%">'
+        f'<circle cx="{c}" cy="{c}" r="{r}" fill="none" stroke="var(--track)" '
+        f'stroke-width="{sw}"/>'
+        f'<circle cx="{c}" cy="{c}" r="{r}" fill="none" stroke="{color}" stroke-width="{sw}" '
+        f'stroke-linecap="round" stroke-dasharray="{circumference:.2f}" '
+        f'stroke-dashoffset="{offset:.2f}" transform="rotate(-90 {c} {c})"/>'
+        + "".join(ticks) +
+        f'<text x="{c}" y="{c - 2}" text-anchor="middle" font-family="\'JetBrains Mono\',ui-monospace,'
+        f'monospace" font-size="22" font-weight="700" fill="var(--ink)">{pct}%</text>'
+        f'</svg>'
+    )
+
+
+def _short_time(ts) -> str:
+    ts = str(ts or "")
+    return ts.split("T", 1)[1][:8] if "T" in ts else ts[:16]
+
+
+def _trend_html(result: dict) -> str:
+    """Recent same-name runs as small shared-scale bars (SM-07's trend).
+
+    A fixed px-per-step scale across ALL shown bars (not one width per bar) so
+    a run with more steps actually draws a longer bar — an earlier per-bar-
+    independent scale silently implied every run had the same step count.
+    """
+    trend = result.get("trend") or {}
+    recent = trend.get("recent") or []
+    if len(recent) < 2:
+        return ""
+    max_total = max((r.get("total", 0) for r in recent), default=0) or 1
+    unit = 64 / max_total
+    bars = []
+    for i, r in enumerate(recent):
+        total = r.get("total", 0)
+        passed = r.get("passed", 0)
+        failed = r.get("failed", 0)
+        skipped = max(total - passed - failed, 0)
+        segs = "".join(
+            f'<span class="tseg {cls}" style="width:{n * unit:.1f}px"></span>'
+            for cls, n in (("good", passed), ("crit", failed), ("skip", skipped)) if n
+        )
+        now = " now" if i == len(recent) - 1 else ""
+        bars.append(
+            f'<div class="trun{now}"><div class="tbar">{segs}</div>'
+            f'<div class="tlabel"><span>{passed}/{total}</span>'
+            f'<span>{html.escape(_short_time(r.get("ts")))}</span></div></div>'
+        )
+    streak = trend.get("consecutive_failures", 0)
+    streak_html = f'<span class="tstreak">연속 실패 {streak}회</span>' if streak > 1 else ""
+    return (f'<div class="trendrow"><div class="trendlabel">최근 실행{streak_html}</div>'
+           f'<div class="trend-runs">{"".join(bars)}</div></div>')
 
 
 def _render_html(result: dict, report_dir: Path) -> str:
@@ -459,134 +701,287 @@ def _render_html(result: dict, report_dir: Path) -> str:
     meta = result.get("meta", {})
     rate = s.get("pass_rate", 0)
     pct = int(rate * 100)
-    bar_color = "var(--mint)" if s.get("failed", 0) == 0 else "var(--red)"
-    rate_color = "var(--mint-dim)" if s.get("failed", 0) == 0 else "var(--red)"
+    failed = s.get("failed", 0)
+    total = s.get("total", 0)
+    executed = total - s.get("skipped", 0)
     name = html.escape(result.get("name", "scenario"))
     desc = html.escape(result.get("description") or "")
 
+    env_chips = [
+        f'<span class="chip">{html.escape(str(meta.get("os")))} · '
+        f'py{html.escape(str(meta.get("python")))}</span>',
+        f'<span class="chip">playwright {html.escape(str(meta.get("playwright")))}</span>',
+        f'<span class="chip">{html.escape(str(meta.get("browser")))}'
+        f'{" " + html.escape(str(meta.get("browser_version"))) if meta.get("browser_version") else ""}'
+        f' · headless={meta.get("headless")}</span>',
+    ]
+    if meta.get("viewport"):
+        env_chips.append(f'<span class="chip">{html.escape(str(meta["viewport"]))}</span>')
+    if meta.get("credentials_masked"):
+        env_chips.append(
+            '<span class="chip mask"><svg width="10" height="10" viewBox="0 0 10 10" '
+            'style="vertical-align:-1px;margin-right:1px"><path d="M3 4.3V3.2a2 2 0 0 1 4 0v1.1" '
+            'fill="none" stroke="currentColor" stroke-width="1.1"/><rect x="2.3" y="4.3" '
+            'width="5.4" height="4.4" rx=".8" fill="currentColor"/></svg>creds masked</span>')
+
+    target_html = (f'<span><b>대상</b> {html.escape(str(meta["target_url"]))}</span>'
+                   if meta.get("target_url") else "")
+    run_html = f'<span><b>run</b> {html.escape(str(result["run_id"]))}</span>' if result.get("run_id") else ""
+
     steps_html = "".join(_step_html(st, report_dir) for st in result.get("steps", []))
+    trace_html = (f'trace: {html.escape(str(result["trace"]))} '
+                 f'(playwright show-trace로 열기)<br>' if result.get("trace") else "")
+
+    steps_panel = f"""<section class="panel">
+  <div class="phead"><h2>Steps</h2><span class="pnote">{total} total</span></div>
+  <div class="ledger">{steps_html}</div>
+</section>"""
+    chapters: list[tuple[str, str, int | None, str]] = [
+        ("ch-steps", "Steps", None, steps_panel)]
+    reg_panel = _regression_html(result)
+    if reg_panel:
+        n = len((result.get("regression") or {}).get("changed") or [])
+        chapters.append(("ch-regression", "회귀", n, reg_panel))
+    a11y_panel = _a11y_html(result)
+    if a11y_panel:
+        chapters.append(("ch-a11y", "접근성", len(result.get("a11y_findings") or []), a11y_panel))
+    # A single chapter (the common case: just Steps, nothing to switch
+    # between) renders exactly as before — no sidebar, no script.
+    body_html = _chapters_html(chapters) if len(chapters) > 1 else steps_panel
 
     return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UI Blackbox Report — {name}</title><style>{_CSS}</style></head>
 <body><div class="wrap">
-  <div class="card">
-    <div class="eyebrow">● UI Blackbox Report</div>
-    <h1 class="title">{name}</h1>
-    {f'<p class="desc">{desc}</p>' if desc else ''}
-    <div class="hero">
-      <div class="bigrate" style="color:{rate_color}">{s.get('passed',0)}/{s.get('total',0)}</div>
-      <div class="bar"><span style="width:{pct}%;background:{bar_color}"></span></div>
-      <div style="font:600 14px/1 'IBM Plex Mono',monospace;color:{rate_color}">{pct}%</div>
-    </div>
-    <div class="chips">
-      <span class="chip pass">PASS {s.get('passed',0)}</span>
-      <span class="chip fail">FAIL {s.get('failed',0)}</span>
-      {f'<span class="chip">SKIP {s.get("skipped",0)}</span>' if s.get('skipped') else ''}
-      <span class="chip">{meta.get('duration_ms',0)}ms</span>
-      <span class="chip">{html.escape(str(meta.get('os')))} · py{html.escape(str(meta.get('python')))}</span>
-      <span class="chip">playwright {html.escape(str(meta.get('playwright')))}</span>
-      <span class="chip">{html.escape(str(meta.get('browser')))}{' ' + html.escape(str(meta.get('browser_version'))) if meta.get('browser_version') else ''} · headless={meta.get('headless')}</span>
-      {f'<span class="chip">{html.escape(str(meta.get("viewport")))}</span>' if meta.get('viewport') else ''}
-      {_trend_chip(result)}
-      <span class="chip pass">🔒 creds masked</span>
-    </div>
-    {f'<div class="kv" style="margin-top:10px"><b>대상</b> {html.escape(str(meta.get("target_url")))}</div>' if meta.get('target_url') else ''}
+
+<header class="mast">
+  <div class="eyebrow">UI Blackbox Report</div>
+  <h1>{name}</h1>
+  {f'<p class="desc">{desc}</p>' if desc else ''}
+  <div class="mmeta">{run_html}
+    <span><b>시작</b> {html.escape(str(meta.get('started_at', '')))}</span>
+    {target_html}</div>
+</header>
+
+<div class="cluster">
+  <div class="gaugebox">
+    <div class="glabel">Pass rate</div>
+    {_gauge_svg(pct, failed == 0)}
+    <div class="gsub">{s.get('passed', 0)} / {executed} executed</div>
   </div>
-  <div class="card">
-    <div class="sec">Steps</div>
-    {steps_html}
+  <div class="rightcol">
+    <div class="statrow">
+      <div class="stat"><div class="sv" style="color:var(--good)">{s.get('passed', 0)}</div>
+        <div class="sl">passed</div></div>
+      <div class="stat"><div class="sv" style="color:var(--crit)">{failed}</div>
+        <div class="sl">failed</div></div>
+      <div class="stat"><div class="sv" style="color:var(--skip)">{s.get('skipped', 0)}</div>
+        <div class="sl">skipped</div></div>
+      <div class="stat"><div class="sv">{meta.get('duration_ms', 0)}<span
+        style="font-size:12px;color:var(--ink3)">ms</span></div>
+        <div class="sl">전체 소요</div></div>
+    </div>
+    <div class="envrow">{''.join(env_chips)}</div>
+    {_trend_html(result)}
   </div>
-  {_extras_html(result)}
-  <div class="foot">{html.escape(meta.get('started_at',''))} · generated by ui-blackbox-mcp
-    <br>실패 원인·제안(💡)은 <b>규칙 기반 힌트</b>입니다 — 대화형(Claude) 실행 시 호스트 LLM이 분석으로 보강합니다.</div>
+</div>
+
+{body_html}
+
+<div class="foot">
+  {trace_html}실패 원인·제안은 규칙 기반 힌트입니다 — 대화형(Claude) 실행 시 호스트 LLM이
+  분석으로 보강합니다.<br>
+  generated by ui-blackbox-mcp
+</div>
+
 </div></body></html>"""
 
 
-def _trend_chip(result: dict) -> str:
-    trend = result.get("trend") or {}
-    recent = trend.get("recent") or []
-    if len(recent) < 2:
-        return ""
-    icons = "".join("✗" if r.get("failed", 0) > 0 else "✓" for r in recent)
-    streak = trend.get("consecutive_failures", 0)
-    note = f" · 연속실패 {streak}" if streak > 1 else ""
-    return f'<span class="chip">최근 {icons}{html.escape(note)}</span>'
+_CHAPTERS_SCRIPT = """<script>
+(function(){
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab[role="tab"]'));
+  var panelOf = {};
+  tabs.forEach(function(t){ panelOf[t.id] = document.getElementById(t.getAttribute('aria-controls')); });
+  tabs.forEach(function(t){
+    t.addEventListener('click', function(){
+      var id = t.getAttribute('aria-controls');
+      tabs.forEach(function(o){
+        var on = o === t;
+        o.setAttribute('aria-selected', on ? 'true' : 'false');
+        panelOf[o.id].hidden = !on;
+      });
+      document.getElementById(id).scrollIntoView({block: 'start'});
+    });
+  });
+})();
+</script>"""
+
+
+def _chapters_html(chapters: list[tuple[str, str, int | None, str]]) -> str:
+    """Left-sidebar tab-panel switching across a run's chapters (Steps plus
+    whichever of regression/a11y have data). Called only when there are 2+
+    chapters — a single chapter has nothing to switch between, so
+    ``_render_html`` skips this and emits that chapter's panel bare (no
+    sidebar, no inline script; DESIGN §6.2 stays satisfied trivially since
+    most runs never reach this path at all).
+
+    The one inline ``<script>`` this emits is local, non-network tab
+    switching — DESIGN §6.2 rules out *external* dependencies/network, not
+    inline behavior; the earlier no-JS design simply never needed a script
+    until multi-chapter navigation did.
+    """
+    tabs, panels = [], []
+    for i, (cid, label, count, body) in enumerate(chapters):
+        active = i == 0
+        cnt_html = f'<span class="cnt">{count}</span>' if count else ""
+        tabs.append(
+            f'<button class="tab" role="tab" id="tabbtn-{cid}" aria-controls="{cid}" '
+            f'aria-selected="{"true" if active else "false"}">'
+            f'{html.escape(label)}{cnt_html}</button>')
+        panels.append(
+            f'<section id="{cid}" role="tabpanel" aria-labelledby="tabbtn-{cid}" '
+            f'tabindex="0"{"" if active else " hidden"}>{body}</section>')
+    return (
+        '<div class="layout">\n<nav class="sidenav" aria-label="리포트 챕터">\n'
+        '  <div class="inner" role="tablist" aria-label="챕터">\n'
+        '    <span class="brand">CHAPTERS</span>\n    '
+        + "\n    ".join(tabs) + "\n  </div>\n</nav>\n"
+        '<div class="content">\n' + "\n".join(panels) + "\n</div>\n</div>\n"
+        + _CHAPTERS_SCRIPT
+    )
+
+
+def _priority_class(priority) -> str:
+    p = str(priority or "").strip().lower()
+    if p == "blocker":
+        return "crit"
+    if p == "high":
+        return "warn"
+    return ""
+
+
+_VERDICT_PATH = {
+    "pass": '<path d="M1 5.5 4 8.5 9 2" stroke="currentColor" stroke-width="1.6" fill="none" '
+           'stroke-linecap="round" stroke-linejoin="round"/>',
+    "fail": '<path d="M2 2 8 8M8 2 2 8" stroke="currentColor" stroke-width="1.6" '
+           'stroke-linecap="round"/>',
+    "skip": '<path d="M2 5h6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>',
+}
 
 
 def _step_html(st: dict, report_dir: Path) -> str:
-    ok = st["passed"]
-    skipped = st.get("skipped", False)
+    ok = bool(st.get("passed"))
+    skipped = bool(st.get("skipped"))
+    verdict = "skip" if skipped else ("pass" if ok else "fail")
+
     thumb = ""
     if st.get("screenshot"):
         data = _b64(report_dir / st["screenshot"], report_dir)
         if data:
             uri = f"data:image/png;base64,{data}"
-            thumb = f'<a href="{uri}" target="_blank"><img class="thumb" src="{uri}"></a>'
-    sugg = (f'<div class="sugg">💡 {html.escape(str(st["ai_suggestion"]))}</div>'
-            if st.get("ai_suggestion") else "")
-    errs = ""
-    for ce in st.get("console_errors", []):
-        errs += f'<div class="err">console: {html.escape(str(ce.get("text")))}</div>'
-    for ne in st.get("network_errors", []):
-        errs += (f'<div class="err">network: {html.escape(str(ne.get("url")))} '
-                 f'{html.escape(str(ne.get("status") or ne.get("failure")))}</div>')
-    for dl in st.get("dialogs", []):
-        # Unexpected dialogs are findings; armed ones are just context.
-        kind = "err" if not dl.get("expected") else "kv"
-        label = "예상치 못한 dialog" if not dl.get("expected") else "dialog"
-        errs += (f'<div class="{kind}">{label}: {html.escape(str(dl.get("type")))} '
-                 f'“{html.escape(_short(dl.get("message"), 120))}” '
-                 f'→ {html.escape(str(dl.get("handled")))}</div>')
-    rb = (f'<span class="rb">{html.escape(str(st["resolved_by"]))}</span>'
-          if st.get("resolved_by") else "")
-    tag = (f'<span class="tagchip">{html.escape(str(st["tag"]))}</span>'
-           if st.get("tag") else "")
-    flaky = (' <span class="tagchip">⚠ flaky</span>'
-             if ok and st.get("retries") else "")
-    sev = (f'<span class="sev">{html.escape(str(st.get("severity") or st.get("priority") or ""))}</span>'
-           if not ok and (st.get("severity") or st.get("priority")) else "")
-    purl = (f'<div class="kv"><b>페이지</b> {html.escape(_short(st.get("page_url"), 90))}</div>'
-            if not ok and not skipped and st.get("page_url") else "")
-    verdict = "SKIP" if skipped else ("PASS" if ok else "FAIL")
-    vclass = "skip" if skipped else ("pass" if ok else "fail")
-    return f"""<div class="step {'fail' if (not ok and not skipped) else ''}">
-      <div class="num">{st['step']}</div>
-      <div>
-        <div class="act">{html.escape(str(st.get('action')))}{rb}{tag}{flaky}</div>
-        <div class="kv"><b>기대</b> {html.escape(_short(st.get('expected'),70))}
-          &nbsp;·&nbsp; <b>실제</b> {html.escape(_short(st.get('actual'),70))}</div>
-        {purl}
-        <div class="reason">{html.escape(str(st.get('ai_reason') or ''))}</div>
-        {sugg}{errs}{thumb}
+            thumb = (f'<div class="shot"><a href="{uri}" target="_blank">'
+                     f'<img src="{uri}" alt="step {html.escape(str(st.get("step")))} '
+                     f'screenshot"></a><span class="shotpath">'
+                     f'{html.escape(str(st["screenshot"]))}</span></div>')
+
+    evidence = ""
+    for ce in st.get("console_errors") or []:
+        # source="pageerror" is an UNCAUGHT exception (an app bug), not a
+        # deliberate console.error call — worth flagging distinctly (§13).
+        etag = '<span class="evtag">UNCAUGHT</span>' if ce.get("source") == "pageerror" else ""
+        evidence += (f'<div class="evline crit">{etag}<span class="evk">console</span>'
+                    f'{html.escape(str(ce.get("text")))}</div>')
+    for ne in st.get("network_errors") or []:
+        status = ne.get("status") or ne.get("failure")
+        evidence += (f'<div class="evline crit"><span class="evk">network</span>'
+                    f'{html.escape(str(ne.get("url")))} — {html.escape(str(status))}</div>')
+    for dl in st.get("dialogs") or []:
+        unexpected = not dl.get("expected")
+        cls = "evline crit" if unexpected else "evline"
+        label = "예상치 못한 dialog" if unexpected else "dialog"
+        evidence += (f'<div class="{cls}"><span class="evk">{label}</span>'
+                    f'{html.escape(str(dl.get("type")))} '
+                    f'“{html.escape(_short(dl.get("message"), 120))}” → '
+                    f'{html.escape(str(dl.get("handled")))}</div>')
+
+    tag_chip = (f'<span class="tagchip">{html.escape(str(st["tag"]))}</span>'
+               if st.get("tag") else "")
+    prio_chip = (f'<span class="priochip {_priority_class(st.get("priority"))}">'
+                f'{html.escape(str(st["priority"]))}</span>' if st.get("priority") else "")
+    rb_chip = (f'<span class="rbchip">{html.escape(str(st["resolved_by"]))}</span>'
+              if st.get("resolved_by") else "")
+    retry_chip = (f'<span class="retrychip">&#8635; &times;{st.get("retries")} retry</span>'
+                 if ok and st.get("retries") else "")
+
+    purl = (f'<div class="purl">페이지 {html.escape(_short(st.get("page_url"), 100))}</div>'
+           if not ok and not skipped and st.get("page_url") else "")
+    reason = (f'<div class="reason">{html.escape(str(st["ai_reason"]))}</div>'
+             if st.get("ai_reason") else "")
+    sugg = (f'<div class="sugg"><span class="sugglbl">SUGGEST</span>'
+           f'{html.escape(str(st["ai_suggestion"]))}</div>' if st.get("ai_suggestion") else "")
+    sev_html = (f'<span class="sevtag">{html.escape(str(st["severity"]))}</span>'
+               if not ok and not skipped and st.get("severity") else "")
+
+    dur = st.get("duration_ms")
+    dur_html = f'{dur}ms' if dur is not None else "—"
+
+    return f"""<div class="step {verdict}">
+      <div class="rail"><span class="sn">{html.escape(str(st.get('step', '')))}</span></div>
+      <div class="body">
+        <div class="bhead"><span class="act">{html.escape(str(st.get('action') or ''))}</span>
+          {rb_chip}{tag_chip}{prio_chip}{retry_chip}</div>
+        <div class="ea">
+          <div><b>expect</b>{html.escape(_short(_dash(st.get('expected')), 90))}</div>
+          <div><b>actual</b>{html.escape(_short(_dash(st.get('actual')), 90))}</div>
+        </div>
+        {purl}{reason}{sugg}{evidence}{thumb}
       </div>
       <div class="right">
-        <span class="verdict {vclass}">{verdict}</span>
-        {sev}<span class="time">{st.get('duration_ms')}ms</span>
+        <span class="verdict {verdict}"><svg class="vicon" viewBox="0 0 10 10">
+        {_VERDICT_PATH[verdict]}</svg>{verdict.upper()}</span>
+        {sev_html}<span class="dur">{dur_html}</span>
       </div>
     </div>"""
 
 
-def _extras_html(result: dict) -> str:
-    out = ""
+def _regression_html(result: dict) -> str:
     reg = result.get("regression") or {}
-    if reg.get("changed"):
-        items = "".join(
-            f"<li>step {c['step']}: {html.escape(c['from'])} → "
-            f"<b>{html.escape(c['to'])}</b></li>" for c in reg["changed"])
-        out += (f'<div class="card"><div class="sec">회귀 · 직전 실행 대비</div>'
-                f'<div class="kv">기준: {html.escape(str(reg.get("previous_run")))}</div>'
-                f'<ul class="list">{items}</ul></div>')
+    changed = reg.get("changed") or []
+    if not changed:
+        return ""
+    rows = []
+    for c in changed:
+        frm, to = c.get("from"), c.get("to")
+        note = ""
+        if frm == "absent":
+            note = '<span class="regnote">이전 실행엔 없던 스텝 — 새로 추가되며 결과가 기록됨</span>'
+        elif frm == "passed" and to == "failed":
+            note = '<span class="regnote crit">이전엔 통과했으나 이번에 실패</span>'
+        elif frm == "failed" and to == "passed":
+            note = '<span class="regnote good">이전 실패가 이번에 해결됨</span>'
+        to_cls = "crit" if to == "failed" else ("good" if to == "passed" else "")
+        rows.append(
+            f'<div class="regrow"><span class="regstep">step {html.escape(str(c.get("step")))}</span>'
+            f'<span class="regfrom">{html.escape(str(frm))}</span><span class="regarrow">→</span>'
+            f'<span class="regto {to_cls}">{html.escape(str(to))}</span>{note}</div>')
+    prev = html.escape(str(reg.get("previous_run") or ""))
+    return (f'<section class="panel"><div class="phead"><h2>회귀 · 직전 실행 대비</h2>'
+           f'<span class="pnote">기준: {prev}</span></div>'
+           f'<div class="pbody">{"".join(rows)}</div></section>')
+
+
+def _a11y_html(result: dict) -> str:
     a11y = result.get("a11y_findings") or []
-    if a11y:
-        items = "".join(
-            f"<li><code>{html.escape(str(f.get('type')))}</code> "
-            f"&lt;{html.escape(str(f.get('tag')))}&gt; "
-            f"{html.escape(str(f.get('name') or f.get('info') or ''))}</li>"
-            for f in a11y[:30])
-        out += (f'<div class="card"><div class="sec">접근성 발견 · {len(a11y)}</div>'
-                f'<ul class="list">{items}</ul></div>')
-    return out
+    if not a11y:
+        return ""
+    items = "".join(
+        f'<div class="a11yrow"><code>{html.escape(str(f.get("type")))}</code>'
+        f'<span class="a11ytag">&lt;{html.escape(str(f.get("tag")))}&gt;</span>'
+        f'<span class="a11yname">{html.escape(str(f.get("name") or f.get("info") or ""))}'
+        f'</span></div>' for f in a11y[:30])
+    return (f'<section class="panel"><div class="phead"><h2>접근성 발견</h2>'
+           f'<span class="pnote">{len(a11y)}건</span></div>'
+           f'<div class="pbody">{items}</div></section>')
 
 
 def _b64(path: Path, base: Path) -> str | None:

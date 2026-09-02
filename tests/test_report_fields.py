@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import pathlib
 import re
 
 import pytest
@@ -172,3 +173,162 @@ def test_prune_keeps_history_when_retention_disabled(tmp_path, monkeypatch):
     keep.write_text("{}", encoding="utf-8")
     report._prune(tmp_path)
     assert keep.exists()
+
+
+# ── HTML report redesign (instrument-panel port) ──────────────────────
+def test_html_report_has_no_external_dependencies():
+    """DESIGN §6.2: the HTML report must run with zero external dependencies/
+    network — this tool targets closed corporate networks. No <link> fetching
+    a stylesheet/font, no <script src>, everything inline."""
+    result = {
+        "name": "x", "summary": {"total": 0, "passed": 0, "failed": 0,
+                                 "skipped": 0, "pass_rate": 0.0},
+        "meta": {}, "steps": [],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert "<link" not in html_out
+    assert "<script" not in html_out
+    assert "fonts.googleapis" not in html_out
+    assert "http://" not in html_out and "https://" not in html_out
+
+
+def test_html_report_renders_with_minimal_result():
+    """Every field the renderer reads is optional except summary/steps — a
+    bare result (no trend/regression/a11y/run_id/most meta keys) must not
+    KeyError."""
+    result = {
+        "name": "bare", "summary": {"total": 1, "passed": 1, "failed": 0,
+                                    "skipped": 0, "pass_rate": 1.0},
+        "meta": {}, "steps": [{"step": 1, "action": "navigate",
+                               "passed": True, "duration_ms": 5}],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert "bare" in html_out
+    assert "100%" in html_out
+
+
+def test_skipped_step_shows_dash_not_python_none():
+    """A skipped step's expected/actual are None (runner._append_skipped) —
+    that must render as a dash, not the literal word "None"."""
+    result = {
+        "name": "x", "summary": {"total": 1, "passed": 0, "failed": 0,
+                                 "skipped": 1, "pass_rate": 0.0},
+        "meta": {}, "steps": [{"step": 1, "action": "assert", "passed": False,
+                               "skipped": True, "expected": None,
+                               "actual": "not run (step 0 failed)",
+                               "duration_ms": 0}],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert ">None<" not in html_out
+    assert "—" in html_out
+
+
+def test_gauge_ring_is_red_when_any_step_failed():
+    """Even a high pass rate must not read as fully green if something
+    failed — the gauge color follows failed==0, not the rate value alone."""
+    result = {
+        "name": "x", "summary": {"total": 10, "passed": 9, "failed": 1,
+                                 "skipped": 0, "pass_rate": 0.9},
+        "meta": {}, "steps": [],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert 'stroke="var(--crit)"' in html_out
+    assert 'stroke="var(--good)"' not in html_out
+
+
+def test_trend_bars_share_one_scale_across_runs():
+    """Two runs with a different step COUNT must draw different total bar
+    widths — an earlier version scaled each bar independently, which drew
+    the same width regardless of how many steps that run had."""
+    result = {
+        "name": "x", "summary": {"total": 11, "passed": 8, "failed": 1,
+                                 "skipped": 2, "pass_rate": 0.889},
+        "meta": {}, "steps": [],
+        "trend": {"recent": [{"ts": "2026-01-01T00:00:00", "passed": 8,
+                              "failed": 0, "total": 8},
+                             {"ts": "2026-01-02T00:00:00", "passed": 8,
+                              "failed": 1, "total": 11}],
+                 "consecutive_failures": 1},
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    # one <div class="trun">...</div> block per run; sum each run's own
+    # segment widths to get that run's TOTAL bar width.
+    runs = re.findall(r'<div class="trun[^"]*">(.*?)</div></div>', html_out)
+    assert len(runs) == 2
+    totals = [sum(float(w) for w in re.findall(r'style="width:([\d.]+)px', run))
+             for run in runs]
+    # both runs have the SAME passed count (8), so the green segment alone is
+    # identical — only the run with more total steps (11 vs 8) draws wider
+    # overall, because skip/fail segments are on the same shared scale.
+    assert totals[1] > totals[0]
+
+
+async def test_report_html_matches_live_run(session, report_dir):
+    """End-to-end: a real scenario through runner.run + report.save produces
+    an HTML file with no unescaped literal None and the right verdict text."""
+    from conftest import fixture_url
+
+    res = await runner.run(
+        [{"action": "navigate", "url": fixture_url("basic.html")},
+         {"action": "assert", "kind": "text_visible", "target": "존재하지 않는 텍스트"},
+         {"action": "assert", "kind": "text_visible", "target": "Blackbox"}],
+        name="port_e2e", continue_on_fail=False)
+    files = report.save(res, formats="html")
+    html_out = open(files["html"], encoding="utf-8").read()
+    assert ">None<" not in html_out
+    assert "FAIL" in html_out and "SKIP" in html_out
+    assert "<script" not in html_out
+
+
+# ── HTML report chapter sidebar ────────────────────────────────────
+def test_single_chapter_report_has_no_sidebar():
+    """The common case (Steps only — no regression/a11y data) has nothing to
+    switch between, so it must render exactly as before: no sidebar chrome,
+    no script."""
+    result = {
+        "name": "x", "summary": {"total": 1, "passed": 1, "failed": 0,
+                                 "skipped": 0, "pass_rate": 1.0},
+        "meta": {}, "steps": [{"step": 1, "action": "navigate",
+                               "passed": True, "duration_ms": 5}],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert "<script" not in html_out
+    assert 'class="layout"' not in html_out
+    assert 'class="sidenav"' not in html_out
+
+
+def test_multi_chapter_report_gets_sidebar_with_one_visible_panel():
+    """A run with both regression changes and a11y findings has 3 chapters
+    (Steps/회귀/접근성): the sidebar must appear, every tab's aria-controls
+    must resolve to a real panel id, and exactly the first panel starts
+    visible (the rest carry the `hidden` attribute) — a no-JS fallback in
+    case the inline script fails to run."""
+    result = {
+        "name": "x", "summary": {"total": 1, "passed": 0, "failed": 1,
+                                 "skipped": 0, "pass_rate": 0.0},
+        "meta": {},
+        "steps": [{"step": 1, "action": "assert", "passed": False,
+                   "duration_ms": 5, "expected": "a", "actual": "b"}],
+        "regression": {"previous_run": "2026-01-01T00:00:00",
+                       "changed": [{"step": 1, "from": "passed", "to": "failed"}]},
+        "a11y_findings": [{"type": "img-missing-alt", "tag": "img", "name": None}],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert html_out.count("<script") == 1
+    assert 'class="layout"' in html_out and 'class="sidenav"' in html_out
+
+    tab_ids = re.findall(r'aria-controls="([^"]+)"', html_out)
+    assert tab_ids == ["ch-steps", "ch-regression", "ch-a11y"]
+    for cid in tab_ids:
+        assert f'id="{cid}"' in html_out           # every tab points at a real panel
+
+    for m in re.finditer(r'<section id="(ch-[^"]+)"([^>]*)>', html_out):
+        cid, attrs = m.group(1), m.group(2)
+        assert (" hidden" in attrs) == (cid != "ch-steps")
+
+    # scoped to <button> tags — the CSS above also contains the literal
+    # substring `aria-selected="true"` inside a `.tab[aria-selected="true"]`
+    # selector, so counting over the whole document would over-match.
+    btn_selected = re.findall(r'<button class="tab" role="tab"[^>]*aria-selected="(true|false)"',
+                              html_out)
+    assert btn_selected == ["true", "false", "false"]
