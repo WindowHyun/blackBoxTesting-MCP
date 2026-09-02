@@ -278,3 +278,57 @@ async def test_report_html_matches_live_run(session, report_dir):
     assert ">None<" not in html_out
     assert "FAIL" in html_out and "SKIP" in html_out
     assert "<script" not in html_out
+
+
+# ── HTML report chapter sidebar ────────────────────────────────────
+def test_single_chapter_report_has_no_sidebar():
+    """The common case (Steps only — no regression/a11y data) has nothing to
+    switch between, so it must render exactly as before: no sidebar chrome,
+    no script."""
+    result = {
+        "name": "x", "summary": {"total": 1, "passed": 1, "failed": 0,
+                                 "skipped": 0, "pass_rate": 1.0},
+        "meta": {}, "steps": [{"step": 1, "action": "navigate",
+                               "passed": True, "duration_ms": 5}],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert "<script" not in html_out
+    assert 'class="layout"' not in html_out
+    assert 'class="sidenav"' not in html_out
+
+
+def test_multi_chapter_report_gets_sidebar_with_one_visible_panel():
+    """A run with both regression changes and a11y findings has 3 chapters
+    (Steps/회귀/접근성): the sidebar must appear, every tab's aria-controls
+    must resolve to a real panel id, and exactly the first panel starts
+    visible (the rest carry the `hidden` attribute) — a no-JS fallback in
+    case the inline script fails to run."""
+    result = {
+        "name": "x", "summary": {"total": 1, "passed": 0, "failed": 1,
+                                 "skipped": 0, "pass_rate": 0.0},
+        "meta": {},
+        "steps": [{"step": 1, "action": "assert", "passed": False,
+                   "duration_ms": 5, "expected": "a", "actual": "b"}],
+        "regression": {"previous_run": "2026-01-01T00:00:00",
+                       "changed": [{"step": 1, "from": "passed", "to": "failed"}]},
+        "a11y_findings": [{"type": "img-missing-alt", "tag": "img", "name": None}],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert html_out.count("<script") == 1
+    assert 'class="layout"' in html_out and 'class="sidenav"' in html_out
+
+    tab_ids = re.findall(r'aria-controls="([^"]+)"', html_out)
+    assert tab_ids == ["ch-steps", "ch-regression", "ch-a11y"]
+    for cid in tab_ids:
+        assert f'id="{cid}"' in html_out           # every tab points at a real panel
+
+    for m in re.finditer(r'<section id="(ch-[^"]+)"([^>]*)>', html_out):
+        cid, attrs = m.group(1), m.group(2)
+        assert (" hidden" in attrs) == (cid != "ch-steps")
+
+    # scoped to <button> tags — the CSS above also contains the literal
+    # substring `aria-selected="true"` inside a `.tab[aria-selected="true"]`
+    # selector, so counting over the whole document would over-match.
+    btn_selected = re.findall(r'<button class="tab" role="tab"[^>]*aria-selected="(true|false)"',
+                              html_out)
+    assert btn_selected == ["true", "false", "false"]

@@ -403,12 +403,15 @@ def _cell(v) -> str:
 
 # ── HTML (self-contained instrument-panel theme) ───────────────────
 #
-# No <link>/@font-face and no JS: DESIGN §6.2 requires the HTML report to run
-# with zero external dependencies/network (this tool targets closed corporate
-# networks — CLAUDE.md "사내망 지원"). Font names are PREFERENCES only, with a
-# universal fallback; nothing is fetched. The pass-rate gauge is plain inline
-# SVG with its arc math computed in Python (stroke-dasharray/dashoffset), so
-# no client-side script is needed to render it.
+# No <link>/@font-face: DESIGN §6.2 requires the HTML report to run with zero
+# external dependencies/network (this tool targets closed corporate networks —
+# CLAUDE.md "사내망 지원"). Font names are PREFERENCES only, with a universal
+# fallback; nothing is fetched. The pass-rate gauge is plain inline SVG with
+# its arc math computed in Python (stroke-dasharray/dashoffset), so no
+# client-side script is needed to render it. A run with 2+ chapters (Steps
+# plus regression and/or a11y findings) gets one inline <script> for sidebar
+# tab switching (_chapters_html) — still zero network/external deps, just no
+# longer zero script; a single-chapter run (most runs) never emits it.
 _CSS = """
 :root{
   --paper:#f2efe6;--surface:#fbfaf5;--sunk:#eae4d5;--track:#e3ddc9;
@@ -431,6 +434,7 @@ _CSS = """
   --skip:#9b9484;--skip-bg:#211c13;--skip-bd:#332c1d;
 }}
 *{box-sizing:border-box}
+[hidden]{display:none}
 body{font-family:'Pretendard',-apple-system,BlinkMacSystemFont,system-ui,"Malgun Gothic",
 "Apple SD Gothic Neo",sans-serif;background:var(--paper);color:var(--ink);
 margin:0;padding:28px 18px 60px;font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
@@ -484,6 +488,28 @@ text-transform:uppercase;color:var(--ink3);margin-bottom:8px}
 .tseg.skip{background:var(--skip)}
 .tlabel{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;color:var(--ink3);
 display:flex;gap:6px;white-space:nowrap}
+
+/* chapter sidebar — only rendered when a run has 2+ chapters (Steps plus
+   regression and/or a11y findings); a single-chapter report skips this
+   entirely and stays exactly as before (no sidebar, no script). */
+section[id]{scroll-margin-top:16px}
+.layout{display:grid;grid-template-columns:168px minmax(0,1fr);gap:0 28px;
+align-items:start;margin-top:20px}
+.content{min-width:0}
+.sidenav{position:sticky;top:14px}
+.sidenav .inner{display:flex;flex-direction:column;gap:2px}
+.sidenav .brand{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:10px;
+font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink3);
+padding:0 10px 8px;margin-bottom:6px;border-bottom:1px solid var(--rule)}
+.tab{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11.5px;
+color:var(--ink3);background:transparent;border:1px solid transparent;border-radius:4px;
+cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;
+width:100%;text-align:left;padding:7px 10px}
+.tab:hover{color:var(--ink);background:var(--sunk)}
+.tab[aria-selected="true"]{color:var(--ink);background:var(--accent-soft);
+border-color:var(--accent-bd);font-weight:600}
+.tab .cnt{font-size:10px;color:var(--ink4)}
+.tab[aria-selected="true"] .cnt{color:var(--accent-ink)}
 
 /* generic panel (regression / a11y) */
 .panel{margin-top:20px;border:1px solid var(--rule);background:var(--surface)}
@@ -584,6 +610,13 @@ line-height:1.8}
   .right{grid-column:1/-1;text-align:left;padding:0 14px 12px;display:flex;
   align-items:center;gap:10px;border-top:1px solid var(--rule-soft)}
   .rail{padding-left:10px}
+  .layout{grid-template-columns:1fr;gap:0;margin-top:14px}
+  .sidenav{position:static;margin-bottom:12px;border-bottom:1px solid var(--rule);
+  padding-bottom:8px}
+  .sidenav .inner{flex-direction:row;gap:4px;overflow-x:auto;scrollbar-width:none}
+  .sidenav .inner::-webkit-scrollbar{display:none}
+  .sidenav .brand{display:none}
+  .tab{width:auto;white-space:nowrap}
 }
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
 """
@@ -699,6 +732,23 @@ def _render_html(result: dict, report_dir: Path) -> str:
     trace_html = (f'trace: {html.escape(str(result["trace"]))} '
                  f'(playwright show-trace로 열기)<br>' if result.get("trace") else "")
 
+    steps_panel = f"""<section class="panel">
+  <div class="phead"><h2>Steps</h2><span class="pnote">{total} total</span></div>
+  <div class="ledger">{steps_html}</div>
+</section>"""
+    chapters: list[tuple[str, str, int | None, str]] = [
+        ("ch-steps", "Steps", None, steps_panel)]
+    reg_panel = _regression_html(result)
+    if reg_panel:
+        n = len((result.get("regression") or {}).get("changed") or [])
+        chapters.append(("ch-regression", "회귀", n, reg_panel))
+    a11y_panel = _a11y_html(result)
+    if a11y_panel:
+        chapters.append(("ch-a11y", "접근성", len(result.get("a11y_findings") or []), a11y_panel))
+    # A single chapter (the common case: just Steps, nothing to switch
+    # between) renders exactly as before — no sidebar, no script.
+    body_html = _chapters_html(chapters) if len(chapters) > 1 else steps_panel
+
     return f"""<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UI Blackbox Report — {name}</title><style>{_CSS}</style></head>
@@ -736,14 +786,7 @@ def _render_html(result: dict, report_dir: Path) -> str:
   </div>
 </div>
 
-{_regression_html(result)}
-
-<section class="panel">
-  <div class="phead"><h2>Steps</h2><span class="pnote">{total} total</span></div>
-  <div class="ledger">{steps_html}</div>
-</section>
-
-{_a11y_html(result)}
+{body_html}
 
 <div class="foot">
   {trace_html}실패 원인·제안은 규칙 기반 힌트입니다 — 대화형(Claude) 실행 시 호스트 LLM이
@@ -752,6 +795,60 @@ def _render_html(result: dict, report_dir: Path) -> str:
 </div>
 
 </div></body></html>"""
+
+
+_CHAPTERS_SCRIPT = """<script>
+(function(){
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab[role="tab"]'));
+  var panelOf = {};
+  tabs.forEach(function(t){ panelOf[t.id] = document.getElementById(t.getAttribute('aria-controls')); });
+  tabs.forEach(function(t){
+    t.addEventListener('click', function(){
+      var id = t.getAttribute('aria-controls');
+      tabs.forEach(function(o){
+        var on = o === t;
+        o.setAttribute('aria-selected', on ? 'true' : 'false');
+        panelOf[o.id].hidden = !on;
+      });
+      document.getElementById(id).scrollIntoView({block: 'start'});
+    });
+  });
+})();
+</script>"""
+
+
+def _chapters_html(chapters: list[tuple[str, str, int | None, str]]) -> str:
+    """Left-sidebar tab-panel switching across a run's chapters (Steps plus
+    whichever of regression/a11y have data). Called only when there are 2+
+    chapters — a single chapter has nothing to switch between, so
+    ``_render_html`` skips this and emits that chapter's panel bare (no
+    sidebar, no inline script; DESIGN §6.2 stays satisfied trivially since
+    most runs never reach this path at all).
+
+    The one inline ``<script>`` this emits is local, non-network tab
+    switching — DESIGN §6.2 rules out *external* dependencies/network, not
+    inline behavior; the earlier no-JS design simply never needed a script
+    until multi-chapter navigation did.
+    """
+    tabs, panels = [], []
+    for i, (cid, label, count, body) in enumerate(chapters):
+        active = i == 0
+        cnt_html = f'<span class="cnt">{count}</span>' if count else ""
+        tabs.append(
+            f'<button class="tab" role="tab" id="tabbtn-{cid}" aria-controls="{cid}" '
+            f'aria-selected="{"true" if active else "false"}">'
+            f'{html.escape(label)}{cnt_html}</button>')
+        panels.append(
+            f'<section id="{cid}" role="tabpanel" aria-labelledby="tabbtn-{cid}" '
+            f'tabindex="0"{"" if active else " hidden"}>{body}</section>')
+    return (
+        '<div class="layout">\n<nav class="sidenav" aria-label="리포트 챕터">\n'
+        '  <div class="inner" role="tablist" aria-label="챕터">\n'
+        '    <span class="brand">CHAPTERS</span>\n    '
+        + "\n    ".join(tabs) + "\n  </div>\n</nav>\n"
+        '<div class="content">\n' + "\n".join(panels) + "\n</div>\n</div>\n"
+        + _CHAPTERS_SCRIPT
+    )
 
 
 def _priority_class(priority) -> str:
