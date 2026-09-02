@@ -1,12 +1,12 @@
 # UI Blackbox Report — checkout_login_demo
 
-**8/11 passed** (rate 0.889) · **2 skipped** · 1295 ms · 2026-07-14T02:29:21
+**8/11 passed** (rate 0.889) · **2 skipped** · 1400 ms · 2026-09-02T05:39:02
 
 _대상: file:///home/user/blackBoxTesting-MCP/examples/demo_page.html_
 
 _최근 2회: ✅❌_
 
-_env: Linux · py3.11.15 · playwright 1.61.0 · chromium 141.0.7390.37 · 1280x720_
+_env: Linux · py3.11.15 · playwright 1.62.0 · chromium 141.0.7390.37 · 1280x720_
 
 | # | action | resolved | expected | actual | result | sev |
 |---|---|---|---|---|---|---|
@@ -25,10 +25,10 @@ _env: Linux · py3.11.15 · playwright 1.61.0 · chromium 141.0.7390.37 · 1280x
 ## 실패 상세
 - **step 9 (assert) `REQ-105` [blocker]** — text_visible did not hold. 제안: expected text_visible on '포인트 잔액' — verify the target
   - 페이지: file:///home/user/blackBoxTesting-MCP/examples/demo_page.html
-  - 스크린샷: `screenshots/20260714_022921_768085_checkout_login_demo_step09.png`
+  - 스크린샷: `screenshots/20260902_053902_773311_checkout_login_demo_step09.png`
 
 ## 회귀 (직전 실행 대비)
-_기준: 2026-07-14T02:29:20_
+_기준: 2026-09-02T05:39:01_
 - step 9: absent → **failed**
 - step 10: absent → **failed**
 - step 11: absent → **failed**
