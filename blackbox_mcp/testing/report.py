@@ -256,17 +256,65 @@ def _prune(report_dir: Path) -> None:
                 continue
 
 
+# What each documented `formats` value writes (DESIGN §6). Single source for
+# save(), the MCP tools and the CLI's --format choices.
+_FORMAT_SETS: dict[str, frozenset[str]] = {
+    "json": frozenset({"json"}),
+    "md": frozenset({"md"}),
+    "html": frozenset({"html"}),
+    "both": frozenset({"json", "md"}),
+    "all": frozenset({"json", "md", "html"}),
+}
+# Spellings a caller plausibly reaches for instead of the documented value —
+# the MCP path is driven by a host LLM reading the tool description, and
+# "markdown" is a likelier miss than a typo.
+_FORMAT_ALIASES = {"markdown": "md", "mkd": "md", "htm": "html", "jsn": "json"}
+
+
+def resolve_formats(formats: str) -> set[str]:
+    """Normalize a ``formats`` argument into the set of files to write.
+
+    Accepts the documented values case-insensitively, the obvious alternate
+    spellings above, and a separated list ("json,html").
+
+    Raises ValueError on anything else. That matters more than it looks: the
+    old membership tests had no else branch, so an unrecognized value wrote
+    NOTHING and still returned success — and in the MCP path save_report read
+    that as a successful save and reset the recorder, destroying the very flow
+    it had just failed to persist. Refusing loudly keeps the steps recoverable.
+    """
+    out: set[str] = set()
+    unknown: list[str] = []
+    for part in re.split(r"[,+|/\s]+", str(formats or "").strip().lower()):
+        if not part:
+            continue
+        part = _FORMAT_ALIASES.get(part, part)
+        if part in _FORMAT_SETS:
+            out |= _FORMAT_SETS[part]
+        else:
+            unknown.append(part)
+    if not out or unknown:
+        raise ValueError(
+            f"unknown report format {formats!r} — expected one of "
+            f"{sorted(_FORMAT_SETS)} (or a comma-separated combination, "
+            f"e.g. 'json,html')")
+    return out
+
+
 def save(result: dict, formats: str = "both") -> dict[str, str]:
     """Persist a scenario result; return written file paths by format."""
+    # Validate BEFORE touching the filesystem: a bad format must not create
+    # directories or leave a half-written run behind.
+    want = resolve_formats(formats)
     report_dir = ensure_dirs()
     # Reuse the run id the screenshots were stamped with, so retention keeps
     # report + screenshots together. Falls back for callers that didn't set it.
     stamp = result.get("run_id") or new_run_id()
     written: dict[str, str] = {}
 
-    want_json = formats in ("json", "both", "all")
-    want_md = formats in ("md", "both", "all")
-    want_html = formats in ("html", "all")
+    want_json = "json" in want
+    want_md = "md" in want
+    want_html = "html" in want
 
     if want_json:
         p = report_dir / f"report_{stamp}.json"
