@@ -206,6 +206,116 @@ def test_retention_keeps_a_run_with_its_own_screenshots(tmp_path, monkeypatch):
     assert (shots / f"{rid}_r_step01.png").exists()
 
 
+def test_retention_prunes_screenshots_from_runs_that_never_saved(
+        tmp_path, monkeypatch):
+    """P2 regression: retention was blind to runs with no report file.
+
+    The doomed set was derived from `report_*.*` alone, so a run that captured
+    screenshots but never called save_report could not appear in it — which is
+    the NORMAL interactive shape (recorder shoots every failed tool call,
+    save_report is optional). Those PNGs then lived forever in the exact
+    directory retention exists to bound.
+    """
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_retention=2))
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    # five older recording flows that never saved a report …
+    orphans = [f"2026010{i}_101010_00000{i}" for i in range(1, 6)]
+    for rid in orphans:
+        (shots / f"{rid}_session_step01.png").write_bytes(b"x")
+    # … and two newer runs that did
+    for rid in ("20260201_101010_000001", "20260202_101010_000002"):
+        _seed_run(tmp_path, rid)
+
+    report._prune(tmp_path)
+
+    # the two newest runs survive whole; every older orphan is gone
+    assert sorted(p.name for p in tmp_path.glob("report_*.json")) == [
+        "report_20260201_101010_000001.json",
+        "report_20260202_101010_000002.json"]
+    assert [p.name for p in shots.glob("*.png") if "session" in p.name] == []
+    assert (shots / "20260202_101010_000002_r_step01.png").exists()
+
+
+def test_retention_counts_orphan_runs_when_no_report_exists(tmp_path, monkeypatch):
+    """Retention must bound a directory that holds ONLY screenshots — the
+    early `len(ids) <= keep` return used to see zero report ids and bail."""
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_retention=1))
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    for rid in ("20260101_101010_000001", "20260101_101010_000002",
+                "20260101_101010_000003"):
+        (shots / f"{rid}_session_step01.png").write_bytes(b"x")
+
+    report._prune(tmp_path)
+
+    assert [p.name for p in shots.glob("*.png")] == [
+        "20260101_101010_000003_session_step01.png"]
+
+
+def test_traces_are_pruned_with_their_run(tmp_path, monkeypatch):
+    """Failure traces are multi-MB; they age out with their run like shots."""
+    import dataclasses
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_retention=1))
+    traces = tmp_path / "traces"
+    traces.mkdir()
+    for rid in ("20260101_101010_000001", "20260101_101010_000002"):
+        (traces / f"{rid}_r.zip").write_bytes(b"x")
+
+    report._prune(tmp_path)
+
+    assert [p.name for p in traces.glob("*.zip")] == ["20260101_101010_000002_r.zip"]
+
+
+async def test_recorder_applies_retention_when_a_flow_begins(tmp_path, monkeypatch):
+    """The other half of the leak: _prune only ever ran from save().
+
+    A flow that never saves a report never pruned at all, so the fix has to
+    hook the start of a recording flow too.
+    """
+    import dataclasses
+
+    from blackbox_mcp.testing import recorder
+
+    monkeypatch.setattr(report, "CONFIG",
+                        dataclasses.replace(report.CONFIG, report_dir=tmp_path,
+                                            report_retention=1))
+    shots = tmp_path / "screenshots"
+    shots.mkdir()
+    for rid in ("20260101_101010_000001", "20260101_101010_000002"):
+        (shots / f"{rid}_session_step01.png").write_bytes(b"x")
+
+    # keep this in the fast lane: run_and_record tolerates an unavailable
+    # session, and the prune hook does not depend on one.
+    import blackbox_mcp.browser as browser_pkg
+
+    async def _no_session():
+        raise RuntimeError("no browser in this test")
+
+    monkeypatch.setattr(browser_pkg, "get_session", _no_session)
+    recorder.reset()
+
+    async def _noop():
+        return {"ok": True}
+
+    # one recorded call is enough — the flow's run id is assigned there
+    await recorder.run_and_record("reset_session", _noop, (), {})
+
+    assert [p.name for p in shots.glob("*.png")] == [
+        "20260101_101010_000002_session_step01.png"]
+
+
 # ── status tool: read-only probe ─────────────────────────────────
 
 async def test_status_reports_session_state(session):

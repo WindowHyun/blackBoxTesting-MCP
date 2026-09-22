@@ -207,11 +207,8 @@ def _run_parallel(refs: list[str], args) -> int:
 
 def _parent_prune() -> None:
     """Apply retention once, after all parallel children have finished."""
-    try:
-        from .testing.report import _prune, ensure_dirs
-        _prune(ensure_dirs())
-    except Exception:
-        pass
+    from .testing.report import prune_now
+    prune_now()
 
 
 def _cmd_run(args) -> int:

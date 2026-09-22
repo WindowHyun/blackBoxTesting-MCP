@@ -196,6 +196,11 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
     idx = _COUNTER
     if _RUN_ID is None:
         _RUN_ID = report.new_run_id()
+        # A new flow just began. Retention normally runs after a save, but this
+        # flow may capture failure screenshots for hours and never reach
+        # save_report — so apply it here too, or nothing ever bounds
+        # reports/screenshots for interactive use. Best-effort, once per flow.
+        report.prune_now()
     shot = None
     if session and not passed:
         shot = await report.capture_step_screenshot(session, f"{_RUN_ID}_session", idx)

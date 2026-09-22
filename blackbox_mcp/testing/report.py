@@ -211,33 +211,65 @@ def _run_id_time(run_id: str) -> float | None:
     return None
 
 
+def _artifact_globs(report_dir: Path) -> list:
+    """(directory, glob) pairs holding per-run artifacts, all stamped with a run id."""
+    return [(report_dir, "report_*.*"),
+            (report_dir / "screenshots", "*.png"),
+            (report_dir / "traces", "*.zip")]
+
+
+def _collect_run_ids(report_dir: Path) -> set[str]:
+    """Every run id present on disk, from ANY artifact kind.
+
+    Deriving the id universe from report files alone made retention blind to
+    the interactive path: recorder.run_and_record captures a screenshot for
+    every failed tool call, while save_report is optional, so a run that never
+    wrote a report could not appear in the doomed set — its screenshots stayed
+    forever in the exact directory retention exists to bound.
+    """
+    ids: set[str] = set()
+    for directory, pattern in _artifact_globs(report_dir):
+        if not directory.is_dir():
+            continue
+        for p in directory.glob(pattern):
+            if (rid := _run_id_of(p.name)):
+                ids.add(rid)
+    return ids
+
+
+def prune_now() -> None:
+    """Apply retention outside a save. Best-effort: never raises.
+
+    save() prunes after writing, but an interactive flow can capture step
+    screenshots for hours and never reach save_report — so retention also has
+    to run when a flow BEGINS, or nothing bounds that directory at all.
+    """
+    try:
+        _prune(ensure_dirs())
+    except Exception:
+        pass
+
+
 def _prune(report_dir: Path) -> None:
-    """Retention: keep the newest CONFIG.report_retention runs, deleting older
-    report files AND the screenshots that share those runs' ids. Report files
-    and screenshots carry the SAME run id (see new_run_id), so a kept run keeps
-    its screenshots. Never allowed to break report saving — caller try/excepts."""
+    """Retention: keep the newest CONFIG.report_retention runs, deleting every
+    older run's artifacts — report files, screenshots and traces alike. All
+    three carry the SAME run id (see new_run_id), so a kept run keeps its
+    evidence. Never allowed to break report saving — caller try/excepts."""
     keep = CONFIG.report_retention
     if keep <= 0:
         return
-    ids = sorted({rid for p in report_dir.glob("report_*.*")
-                  if (rid := _run_id_of(p.name))}, reverse=True)
+    # Run ids come from all artifact kinds, not just report files: a run that
+    # captured screenshots but never saved a report is still a run, and its
+    # files must age out with everyone else's.
+    ids = sorted(_collect_run_ids(report_dir), reverse=True)
     if len(ids) <= keep:
         return
     doomed = set(ids[keep:])  # everything older than the newest `keep` runs
-    for p in report_dir.glob("report_*.*"):
-        if _run_id_of(p.name) in doomed:
-            p.unlink(missing_ok=True)
-    shots = report_dir / "screenshots"
-    if shots.is_dir():
-        for p in shots.glob("*.png"):
+    for directory, pattern in _artifact_globs(report_dir):
+        if not directory.is_dir():
+            continue
+        for p in directory.glob(pattern):
             # Unstamped legacy files (no id) are left alone.
-            if _run_id_of(p.name) in doomed:
-                p.unlink(missing_ok=True)
-    traces = report_dir / "traces"
-    if traces.is_dir():
-        for p in traces.glob("*.zip"):
-            # Failure traces share the run id (runner._stop_tracing) — pruned
-            # with their run like screenshots.
             if _run_id_of(p.name) in doomed:
                 p.unlink(missing_ok=True)
     # Regression baselines are keyed by scenario NAME, not by run id, so they
