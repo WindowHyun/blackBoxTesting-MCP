@@ -263,7 +263,7 @@ API:
 |---|---|---|---|
 | `reset_session` | `reset_session()` | `{ok, message}` | SHOULD |
 | `use_real_browser` | `use_real_browser(headless=False, channel="chrome")` | `{ok, mode, browser, profile}` | 확장 |
-| `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...]}` | 확장 |
+| `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...], skipped:[label...]}` | 확장 |
 | `save_state` | `save_state(name="default")` | `{ok, name, path}` | 확장 |
 | `load_state` | `load_state(name="default")` | `{ok, name, path}` | 확장 |
 | `list_states` | `list_states()` | `[{name, saved_at}]` | 확장 |
@@ -278,7 +278,17 @@ API:
 > **dismiss_banners (실사이트 하드닝):** GDPR/쿠키/동의 오버레이가 클릭을 가로채는
 > ("intercepts pointer events") 실사이트용 — 흔한 수락/닫기 라벨(KO/EN)을 role로
 > 순회하며 **보이는 첫 항목**을 클릭(짧은 per-try 타임아웃, 매치 없어도 무에러).
-> 최대 3개까지만 눌러 무관 컨트롤 오클릭을 방지. navigate 후 클릭이 막히면 호출.
+> 최대 3개(서로 다른 컨트롤)까지만 눌러 무관 컨트롤 오클릭을 방지. navigate 후
+> 클릭이 막히면 호출.
+>
+> **부정 컨트롤 가드(2026-09):** `get_by_role(name=...)`은 **부분 일치**라 긍정
+> 라벨이 자기 부정형에도 매칭된다 — `name="동의"`가 "동의하지 않음"에,
+> `name="Allow"`가 "Don't allow"에 걸린다. 그대로 누르면 방금 준 동의를 되돌리거나
+> (배너가 아예 없는 페이지에선) 무관한 부정 컨트롤을 누른다. 그래서 클릭 전에
+> 후보의 **실제 접근성 이름**을 읽어 거부(거부/비동의/Decline/Reject/Don't…)와
+> 드릴다운(설정/관리/Manage preferences — 닫히지 않고 하위 대화상자가 열림) 계열을
+> 배제하고, 배제한 항목은 `skipped`로 반환해 리포트에 증거로 남긴다. 넓은 라벨이
+> 이미 누른 컨트롤을 다시 누르지 않도록 이름 기준 중복도 제거한다.
 >
 > **save_state / load_state (로그인 재사용, 2026-07):** 현재 컨텍스트의 쿠키+
 > localStorage를 `~/ui-blackbox/state/{name}.json`(POSIX 0600)으로 내보내고,
@@ -431,7 +441,11 @@ SM-01~04와 함께(또는 직후) 구현한다.
 - 기본 경로 **`~/ui-blackbox/reports`(홈 기준 절대경로)**, `REPORT_DIR` env로 재정의, 없으면 자동 생성.
   > cwd 상대(`./reports`)는 MCP 서버 cwd가 예측 불가·쓰기 불가(system32 등)일 수 있어 폐기. 쓰기 실패 시 홈으로 폴백.
 - 파일명 `report_YYYYMMDD_HHMMSS.json` / `.md` / `.html`.
-- `formats` ∈ {json, md, html, both(json+md), all(json+md+html)}.
+- `formats` ∈ {json, md, html, both(json+md), all(json+md+html)} — 대소문자 무시,
+  `markdown`/`htm` 같은 대체 표기와 `"json,html"` 조합 허용. **목록 밖 값은 예외**
+  (`report.resolve_formats`): 과거엔 멤버십 검사에 else가 없어 파일을 하나도 쓰지
+  않고 성공을 반환했고, `save_report`가 그걸 성공으로 읽어 레코더를 리셋해 흐름
+  자체가 사라졌다. 이제 거부하고 기록은 보존한다(재시도 가능).
 - 스크린샷은 `reports/screenshots/`에 저장하고 md/json은 상대경로 참조,
   HTML은 base64 data URI로 임베드(단일 파일 이식성).
 
