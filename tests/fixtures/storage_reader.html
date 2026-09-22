@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"><title>storage reader</title></head>
+<body>
+  <h1 data-testid="title">reader</h1>
+  <!-- prints CLEAN on a fresh context, LEAKED when the writer's state survived -->
+  <p data-testid="state">CLEAN</p>
+  <script>
+    document.querySelector('[data-testid="state"]').textContent =
+      localStorage.getItem('bbx_leak') || 'CLEAN';
+  </script>
+</body>
+</html>

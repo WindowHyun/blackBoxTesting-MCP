@@ -57,16 +57,42 @@ def _errored_result(name: str, exc: Exception) -> dict:
                        "ai_suggestion": str(exc)[:160], "duration_ms": 0}]}
 
 
+async def _isolate() -> None:
+    """Wipe context state (cookies/storage/mocks) between scenarios.
+
+    Sequential runs share one browser session, so without this scenario A's
+    login/localStorage leaked into B — and `--parallel`, which forks a process
+    per scenario, did NOT leak. The same suite therefore reached different
+    verdicts depending on a flag that is supposed to affect only scheduling,
+    and the leaky one was the default. Best-effort: a reset that fails must not
+    abort the suite (the run below surfaces any real browser problem).
+    """
+    from .browser.session import get_session
+
+    try:
+        session = await get_session()
+        await session.reset()
+    except Exception as exc:
+        print(f"  warn: session reset failed ({type(exc).__name__}: {exc})",
+              file=sys.stderr)
+
+
 async def _run_all(items: list[tuple[str, list[dict]]], args) -> list[dict]:
     """Run scenarios sequentially in one browser session; always clean up.
     A scenario that raises is recorded as an errored result and the suite
-    continues — completed results and JUnit are never lost to one failure."""
+    continues — completed results and JUnit are never lost to one failure.
+
+    Each scenario starts from a clean context (see _isolate) unless
+    --share-session asks for the old chained behavior.
+    """
     from .browser.session import close_session
     from .testing import report, runner
 
     results: list[dict] = []
     try:
-        for name, steps in items:
+        for i, (name, steps) in enumerate(items):
+            if i and not args.share_session:
+                await _isolate()
             print(f"▶ {name} ({len(steps)} steps)")
             try:
                 res = await runner.run(steps, name=name,
@@ -217,6 +243,14 @@ def _cmd_run(args) -> int:
             print("--junit is not supported with --parallel (each child writes "
                   "its own reports); run sequentially for a merged JUnit file.",
                   file=sys.stderr)
+            return EXIT_ERROR
+        if args.share_session:
+            # Each child is its own process with its own browser — there is no
+            # session to share. Refuse rather than silently ignoring a flag the
+            # caller chose precisely to control cross-scenario state.
+            print("--share-session is not supported with --parallel (each "
+                  "scenario runs in its own process/browser); drop --parallel "
+                  "to chain scenarios in one session.", file=sys.stderr)
             return EXIT_ERROR
         return _run_parallel(args.scenario, args)
 
@@ -374,6 +408,11 @@ def main(argv: list[str] | None = None) -> int:
     run_p.add_argument("--fail-on-js-error", action="store_true",
                        help="fail a step whose assertion held but whose page threw "
                             "an uncaught JS exception (always recorded either way)")
+    run_p.add_argument("--share-session", action="store_true",
+                       help="keep cookies/storage across scenarios instead of "
+                            "starting each from a clean context (for suites "
+                            "that deliberately chain, e.g. log in once then "
+                            "reuse the session)")
     run_p.add_argument("--junit", metavar="PATH",
                        help="also write a JUnit XML report (sequential runs only)")
     run_p.add_argument("--parallel", type=int, default=1, metavar="N",
