@@ -877,20 +877,45 @@ def _render_html(result: dict, report_dir: Path) -> str:
 </div></body></html>"""
 
 
+# Without JS the sidebar cannot switch anything, so it hides itself and the
+# chapters simply stack — i.e. exactly the pre-sidebar layout, fully readable,
+# printable and Ctrl+F-able. The document ships every panel VISIBLE; collapsing
+# to one is what the script adds.
+_CHAPTERS_NOSCRIPT = ("<noscript><style>.sidenav{display:none}"
+                      ".layout{grid-template-columns:1fr;gap:0}</style></noscript>")
+
 _CHAPTERS_SCRIPT = """<script>
 (function(){
   var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab[role="tab"]'));
+  if (!tabs.length) return;
   var panelOf = {};
   tabs.forEach(function(t){ panelOf[t.id] = document.getElementById(t.getAttribute('aria-controls')); });
-  tabs.forEach(function(t){
+  function show(t){
+    tabs.forEach(function(o){
+      var on = o === t;
+      o.setAttribute('aria-selected', on ? 'true' : 'false');
+      o.setAttribute('tabindex', on ? '0' : '-1');
+      if (panelOf[o.id]) panelOf[o.id].hidden = !on;
+    });
+  }
+  // Progressive enhancement: the served HTML has no `hidden` anywhere, so a
+  // viewer without JS reads every chapter. This first call is what collapses
+  // the stack into tabs.
+  show(tabs[0]);
+  tabs.forEach(function(t, i){
     t.addEventListener('click', function(){
-      var id = t.getAttribute('aria-controls');
-      tabs.forEach(function(o){
-        var on = o === t;
-        o.setAttribute('aria-selected', on ? 'true' : 'false');
-        panelOf[o.id].hidden = !on;
-      });
-      document.getElementById(id).scrollIntoView({block: 'start'});
+      show(t);
+      panelOf[t.id].scrollIntoView({block: 'start'});
+    });
+    // Arrow keys are part of the tab pattern this markup claims (role=tab);
+    // without them the widget is mouse-only.
+    t.addEventListener('keydown', function(e){
+      var d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      var next = tabs[(i + d + tabs.length) % tabs.length];
+      show(next);
+      next.focus();
     });
   });
 })();
@@ -909,6 +934,14 @@ def _chapters_html(chapters: list[tuple[str, str, int | None, str]]) -> str:
     switching — DESIGN §6.2 rules out *external* dependencies/network, not
     inline behavior; the earlier no-JS design simply never needed a script
     until multi-chapter navigation did.
+
+    That script is an ENHANCEMENT, never a gate on content. Panels ship with
+    no ``hidden`` attribute, so a viewer that does not run scripts (print
+    preview, a corporate document viewer, a mail client) still reads every
+    chapter — the 회귀 diff, the most actionable signal in the report, was
+    otherwise sealed behind a click that could never happen. The script hides
+    the inactive panels on load; a <noscript> rule drops the then-useless
+    sidebar so the chapters simply stack, exactly as they did before tabs.
     """
     tabs, panels = [], []
     for i, (cid, label, count, body) in enumerate(chapters):
@@ -916,12 +949,14 @@ def _chapters_html(chapters: list[tuple[str, str, int | None, str]]) -> str:
         cnt_html = f'<span class="cnt">{count}</span>' if count else ""
         tabs.append(
             f'<button class="tab" role="tab" id="tabbtn-{cid}" aria-controls="{cid}" '
-            f'aria-selected="{"true" if active else "false"}">'
+            f'aria-selected="{"true" if active else "false"}" '
+            f'tabindex="{"0" if active else "-1"}">'
             f'{html.escape(label)}{cnt_html}</button>')
         panels.append(
             f'<section id="{cid}" role="tabpanel" aria-labelledby="tabbtn-{cid}" '
-            f'tabindex="0"{"" if active else " hidden"}>{body}</section>')
+            f'tabindex="0">{body}</section>')
     return (
+        _CHAPTERS_NOSCRIPT + '\n'
         '<div class="layout">\n<nav class="sidenav" aria-label="리포트 챕터">\n'
         '  <div class="inner" role="tablist" aria-label="챕터">\n'
         '    <span class="brand">CHAPTERS</span>\n    '
