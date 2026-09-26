@@ -151,6 +151,7 @@ async def _dispatch_resolved(step: dict) -> dict:
             # status-based verdict would wrongly read the absent status as "fine".
             out.update(expected=(f"HTTP {expect}" if expect is not None else "도착 (2xx/3xx)"),
                        actual=res["error"], passed=False,
+                       severity_hint=report.severity_hint("navigate", res),
                        ai_reason="navigation failed before a response",
                        ai_suggestion="확인: URL/DNS, 프록시(PROXY_SERVER), 인증서"
                                      "(IGNORE_HTTPS_ERRORS), 사내망 접근 권한")
@@ -159,6 +160,11 @@ async def _dispatch_resolved(step: dict) -> dict:
             ok = status == expect
             reason = f"expected HTTP {expect}, got {status}"
             suggestion = None if ok else f"server returned {status}, not {expect}"
+            # expect_status IS an assertion on the navigate, so a mismatch that
+            # is NOT a server error (expected 500 via a mock, got 200) is an
+            # assertion failure — severity_hint below only speaks for 4xx/5xx.
+            if not ok:
+                out["severity_hint"] = "assertion"
         else:
             # status is None on file:// or when the settle timed out (no response
             # object) — treat as reachable. A real 4xx/5xx is a failed load.
@@ -168,6 +174,10 @@ async def _dispatch_resolved(step: dict) -> dict:
                                           "error or missing page (set expect_status to allow)")
         out.update(expected=(f"HTTP {expect}" if expect is not None else "도착 (2xx/3xx)"),
                    actual=f"“{res.get('title')}” · HTTP {status}",
+                   # a real 4xx/5xx outranks the assertion framing: "the server
+                   # errored" is the more actionable finding.
+                   severity_hint=(report.severity_hint("navigate", res)
+                                  or out.get("severity_hint")),
                    passed=ok, ai_reason=reason, ai_suggestion=suggestion)
         if not res.get("settled"):
             out["ai_reason"] += " · load not settled (proceeded on timeout)"
@@ -440,7 +450,8 @@ async def run(
             "console_errors": [e for e in new_console if e.get("level") == "error"],
             "network_errors": new_network,
             "dialogs": new_dialogs,
-            "severity": (_severity(step.get("action", ""), exc, failed_by_js)
+            "severity": (_severity(step.get("action", ""), exc, failed_by_js,
+                                   hint=fields.get("severity_hint"))
                          if not passed else None),
             "ai_reason": reason,
             "ai_suggestion": fields.get("ai_suggestion"),

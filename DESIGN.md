@@ -493,7 +493,12 @@ SM-01~04와 함께(또는 직후) 구현한다.
         // 자동 dismiss되어 흐름은 이어지지만, 그 자체가 결함 신호다.
         // {type,message,handled,expected,ts}
       ],
-      "severity": null,                  // SM-08: assertion|js_error|network|timeout
+      "severity": null,                  // SM-08: assertion|js_error|network|timeout|error
+                                         // assertion = 단언 불성립 · js_error = 페이지가
+                                         // 예외를 던짐 · network = navigate가 4xx/5xx거나
+                                         // 응답 자체를 못 받음(DNS/거부/TLS/프록시) ·
+                                         // timeout = 스텝이 Timeout 예외로 죽음 ·
+                                         // error = 그 외(실패한 interact/wait/dialog 등)
       "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
       "ai_suggestion": null              // SM-05: 실패 시 가설/수정 제안
     }
@@ -517,6 +522,18 @@ SM-01~04와 함께(또는 직후) 구현한다.
 > JUnit에서 `<skipped/>`로 표현되어 CI 대시보드가 "실패"가 아닌 "미실행"으로 집계한다.
 > history 파일(`reports/history/{name}.json`)은 baseline 스텝에 더해 `runs`(최근
 > 10회 요약)를 보관 — trend의 단일 출처.
+> **severity 어휘(2026-09 정정):** 구현이 내는 값은 `assertion|js_error|timeout|error`
+> 뿐이었다 — `network`는 **아무도 생산하지 않았고** `error`는 문서에 없었다. 그래서 HTTP
+> 500으로 죽은 navigate와 도구가 터진 스텝이 똑같이 `error`로 기록돼, severity로 거르는
+> CI 대시보드가 "서버가 죽었다"와 "자동화가 깨졌다"를 구분할 수 없었다. 이제
+> `report.severity_hint(action, result)`가 디스패처가 **아는** 원인(navigate 결과의
+> `error`/`status>=400`)을 `classify_failure`에 넘긴다. 우선순위는 js_error → 예외
+> (Timeout 분리) → hint → 액션명. 의도적으로 좁다: 단언이 실패한 스텝 구간에 무관한 광고
+> 404가 끼었다고 network로 바꾸면 오분류이므로, **네트워크 작업 자체의 실패**만 센다.
+> runner·recorder 양쪽 동일. `expect_status`는 navigate에 대한 단언이므로 불성립은
+> `assertion`이고(예: mock으로 500을 기대했는데 200), 실제 4xx/5xx면 `network`가
+> 이긴다 — "서버가 에러를 냈다"가 더 실행 가능한 발견이다.
+>
 > **회귀 baseline 가드(2026-07):** 직전 실행과 `(step, action)` 키가 하나도 겹치지
 > 않으면(이름만 공유한 무관한 흐름 — ad-hoc 리포트는 기본 이름이 "session") 비교를
 > 건너뛰고 이번 실행을 새 baseline으로 기록한다. 가짜 "absent" diff 방지.

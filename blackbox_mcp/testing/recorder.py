@@ -234,7 +234,11 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         "console_errors": [e for e in new_console if e.get("level") == "error"],
         "network_errors": new_network,
         "dialogs": new_dialogs,
-        "severity": None if passed else report.classify_failure(name, exc),
+        # severity_hint: a navigate that got 4xx/5xx or no response at all is a
+        # network/server failure, not the generic "error" a broken tool yields —
+        # the interactive path must not lose that distinction either.
+        "severity": None if passed else report.classify_failure(
+            name, exc, hint=report.severity_hint(name, result)),
         "ai_reason": reason,
         "ai_suggestion": suggestion,
     }))

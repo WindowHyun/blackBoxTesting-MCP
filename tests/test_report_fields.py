@@ -384,3 +384,51 @@ def test_chapter_tabs_support_arrow_keys():
     # roving tabindex: only the selected tab is in the tab order
     assert 'aria-selected="true" tabindex="0"' in html_out
     assert 'aria-selected="false" tabindex="-1"' in html_out
+
+
+# ── severity vocabulary is the DESIGN §6.1 set (P3 regression) ─────
+def test_severity_vocabulary_matches_the_schema():
+    """Every value classify_failure can emit must be in the documented set,
+    and `network` must be reachable — it had no producer at all."""
+    documented = {"assertion", "js_error", "network", "timeout", "error"}
+    produced = {
+        report.classify_failure("assert", None),
+        report.classify_failure("interact", None),
+        report.classify_failure("navigate", None, hint="network"),
+        report.classify_failure("wait", TimeoutError("x")),
+        report.classify_failure("interact", RuntimeError("x")),
+        report.classify_failure("assert", None, js_error=True),
+    }
+    assert produced == documented
+
+
+def test_classify_failure_precedence():
+    js = report.classify_failure("navigate", RuntimeError("x"), js_error=True,
+                                 hint="network")
+    assert js == "js_error"                      # the app threw — most specific
+    # a raised step is the automation failing, so it outranks a result-derived hint
+    assert report.classify_failure("navigate", RuntimeError("x"),
+                                   hint="network") == "error"
+    assert report.classify_failure("navigate", TimeoutError("x")) == "timeout"
+    # a hint beats the action-name guess …
+    assert report.classify_failure("assert", None, hint="network") == "network"
+    # … and no hint falls back to the action name
+    assert report.classify_failure("assert", None) == "assertion"
+    assert report.classify_failure("interact", None) == "error"
+
+
+@pytest.mark.parametrize("action,result,expected", [
+    ("navigate", {"status": 500}, "network"),
+    ("navigate", {"status": 404}, "network"),
+    ("navigate", {"error": "net::ERR_NAME_NOT_RESOLVED"}, "network"),
+    ("navigate", {"status": 200}, None),
+    ("navigate", {"status": None}, None),          # file:// or settle timeout
+    ("navigate", {}, None),
+    # only the failure OF the network operation counts
+    ("interact", {"status": 500}, None),
+    ("assert", {"status": 500}, None),
+    ("navigate", "not a dict", None),
+    ("navigate", None, None),
+])
+def test_severity_hint(action, result, expected):
+    assert report.severity_hint(action, result) == expected

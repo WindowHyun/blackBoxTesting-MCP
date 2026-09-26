@@ -53,19 +53,51 @@ def summarize(steps: list[dict]) -> dict:
             "pass_rate": round(passed / executed, 3) if executed else 0.0}
 
 
+def severity_hint(action: str, result) -> str | None:
+    """A cause the DISPATCHER knows, handed to classify_failure so it doesn't
+    have to guess from the action name. ``None`` == nothing to add.
+
+    Only "network" so far: a navigate that never got a response (DNS, refused,
+    TLS, proxy tunnel) or that answered 4xx/5xx is a network/server failure.
+    Both used to classify as "error", the same value a tool blowing up
+    produces, so nothing filtering on severity could tell "the server is down"
+    from "the automation broke" — and `network` sat in the DESIGN §6.1
+    vocabulary with no producer at all.
+
+    Deliberately narrow: only the failure OF the network operation counts. A
+    step whose assertion failed while some unrelated ad request 404'd is an
+    assertion failure, and reading the step's network slice would mislabel it.
+    """
+    if action != "navigate" or not isinstance(result, dict):
+        return None
+    if result.get("error"):
+        return "network"
+    status = result.get("status")
+    return "network" if isinstance(status, int) and status >= 400 else None
+
+
 def classify_failure(action: str, exc: Exception | None,
-                     js_error: bool = False) -> str:
+                     js_error: bool = False, hint: str | None = None) -> str:
     """Severity for a FAILED step — single implementation for runner/recorder.
 
-    ``js_error`` wins over the action-derived value: when a step is failed
-    *because* the page threw, "the app crashed" is the finding, not "an
-    assertion did not hold". DESIGN §6.1 lists js_error in the severity
-    vocabulary and nothing produced it until this path existed.
+    The vocabulary is DESIGN §6.1: assertion | js_error | network | timeout |
+    error (the catch-all for a failed interact/wait/dialog and anything else).
+
+    Precedence, most specific first:
+      1. ``js_error`` — when a step is failed *because* the page threw, "the app
+         crashed" is the finding, not "an assertion did not hold".
+      2. ``exc`` — the step raised, so this is the automation failing, not the
+         app; a Timeout is called out separately.
+      3. ``hint`` — a cause the dispatcher established from the tool's own
+         result (see severity_hint), which beats the action-name guess below.
+      4. the action name.
     """
     if js_error:
         return "js_error"
     if exc is not None:
         return "timeout" if "Timeout" in type(exc).__name__ else "error"
+    if hint:
+        return hint
     if action.startswith("assert"):
         return "assertion"
     return "error"  # failed interact/wait/dialog/etc.
