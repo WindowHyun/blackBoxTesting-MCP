@@ -319,7 +319,7 @@ API:
 | `get_network_errors` | `get_network_errors()` | `[{url,status/failure,method}]` | MUST |
 | `wait` | `wait(ms=None, selector=None)` | `{ok, waited}` | SHOULD |
 | `switch_frame` | `switch_frame(selector=None)` | `{ok, context}` | SHOULD |
-| `expect_dialog` | `expect_dialog(action, expected_text=None)` | `{passed, dialog_type, message}` | SHOULD |
+| `expect_dialog` | `expect_dialog(action, expected_text=None, trigger=None, accept_text=None, timeout_ms=3000)` | `{passed, dialog_type, message, handled}` | SHOULD |
 
 세부:
 - **navigate (CT-01):** `wait_until` ∈ {load, domcontentloaded, networkidle, commit}.
@@ -356,6 +356,12 @@ API:
   / `dialog.dismiss()` 호출. 미노출(timeout) 시 `passed=False`. dialog는 반드시
   accept/dismiss 처리하지 않으면 페이지가 멈추므로 핸들러에서 항상 처리.
   (action 트리거 전에 arm 하는 사용 패턴을 README에 명시.)
+  > **비동기 dialog 대기(2026-10):** 트리거 클릭 후 **고정 50ms**만 유예했다. 동기
+  > dialog는 `click()` 반환 시점에 이미 잡히지만 타이머/fetch 콜백에서 뜬 것은 아니라,
+  > 서버 왕복 뒤 확인을 띄우는 앱(대부분이 그렇다)이 "no dialog appeared"로 **거짓
+  > 실패**했다. 이제 `timeout_ms`(기본 3000)까지 50ms 간격으로 폴링하고 잡히는 즉시
+  > 빠져나온다 — 동기 케이스는 폴 1회 비용. runner 스텝의 `timeout_ms`도 전달한다
+  > (안 넘기면 모든 시나리오 스텝이 기본값에 묶인다).
 
 ### 5.3 시나리오 모드 (SM)
 | Tool | 시그니처 | 우선순위 |

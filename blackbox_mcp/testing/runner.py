@@ -310,9 +310,14 @@ async def _dispatch_resolved(step: dict) -> dict:
                    ai_reason="explicit screenshot step", force_screenshot=True)
 
     elif action == "expect_dialog":
+        # timeout_ms must ride along: a dialog raised after a server round trip
+        # needs more than the default window, and dropping the field silently
+        # capped every expect_dialog step at it.
         res = await expect_dialog(step.get("dialog_action", "accept"),
                                   step.get("expected_text"), step.get("trigger"),
-                                  step.get("accept_text"))
+                                  step.get("accept_text"),
+                                  **({"timeout_ms": step["timeout_ms"]}
+                                     if "timeout_ms" in step else {}))
         out.update(expected=step.get("expected_text") or "dialog",
                    actual=res.get("message") or res.get("error"),
                    passed=bool(res.get("passed")),
