@@ -876,6 +876,13 @@ PRD 보안 제약(로컬 전용·자격증명 마스킹·외부 전송 없음) �
   URL이 담기는 `ai_reason`, 예외 메시지, 콘솔/네트워크 항목)에서 `${VAR}`
   플레이스홀더로 치환한다(`scrub`/`scrub_record`, runner·recorder·interact 적용).
   미설정 `${VAR}`는 조용히 리터럴 입력되지 않고 `ai_suggestion` 경고를 남긴다.
+- **타이핑된 값 비수집(2026-10):** `snapshot(mode="dom")`과 `generate_scenario`의
+  수집 JS가 `el.value`를 무조건 읽었다. `value`는 `<input type=submit value="로그인">`
+  에선 **라벨**이지만 그 외 필드에선 **사용자 데이터**다 — 이미 입력돼 있던 비밀번호·
+  이메일·계좌번호가 호스트 LLM에 가는 키트/아웃라인에, 그리고 추천 셀렉터에까지 실렸다
+  (`${VAR}` 마스킹은 시나리오 입력 경로만 덮으므로 여기엔 닿지 않는다). 이제 value는
+  submit/button/reset 타입에서만 읽고, 그 외 input은 `placeholder`로 설명한다 —
+  내용을 노출하지 않으면서 필드 식별은 유지.
 - **명령 주입 없음:** `subprocess.run`은 리스트 인자, `shell=True` 미사용, 사용자 입력
   미포함(브라우저 설치만).
 - **MCP stdout 보호(2026-07):** 첫 실행 자동설치(`playwright install`)의 서브프로세스

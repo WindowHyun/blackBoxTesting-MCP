@@ -111,3 +111,48 @@ async def test_missing_element_does_not_stall_on_the_probe(session):
     elapsed = time.monotonic() - t0
     assert r["ok"] is False
     assert elapsed < 8       # one selector timeout, not two stacked ones
+
+
+# ── el.value must not leak typed data to the LLM ──────────────────
+_FORM = (
+    "<form>"
+    "  <input type='password' id='pw' value='hunter2'>"
+    "  <input type='email' id='mail' value='leak@example.com'>"
+    "  <input type='text' id='acct' value='110-234-567890' placeholder='계좌번호'>"
+    "  <input type='submit' value='로그인'>"
+    "</form>"
+)
+_SECRETS = ("hunter2", "leak@example.com", "110-234-567890")
+
+
+async def test_snapshot_dom_does_not_echo_typed_values(session):
+    """snapshot(dom) is called constantly, so this was the wider exposure."""
+    from blackbox_mcp.tools.snapshot import snapshot
+
+    await session.page.set_content(_FORM)
+    out = await snapshot(mode="dom")
+
+    for secret in _SECRETS:
+        assert secret not in out, secret
+    # the submit button's value IS its label, so it still shows
+    assert "로그인" in out
+    # and a field is still described, via its placeholder
+    assert "계좌번호" in out
+
+
+async def test_generate_scenario_kit_does_not_echo_typed_values(session):
+    from blackbox_mcp.tools.generate import generate_scenario
+
+    await session.page.set_content(_FORM)
+    # navigate inside generate_scenario would wipe set_content, so exercise the
+    # collector directly — it is the part that reads the DOM.
+    from blackbox_mcp.tools.generate import _COLLECT_JS
+
+    raw = await session.page.evaluate(_COLLECT_JS)
+    blob = repr(raw)
+    for secret in _SECRETS:
+        assert secret not in blob, secret
+    names = [e["name"] for e in raw]
+    assert "로그인" in names          # submit value kept as the label
+    assert "계좌번호" in names        # placeholder still describes the field
+    assert generate_scenario is not None   # tool import stays wired

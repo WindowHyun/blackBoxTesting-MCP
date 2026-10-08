@@ -27,7 +27,17 @@ _DOM_OUTLINE_JS = """
   const TAGS = new Set(['h1','h2','h3','h4','h5','h6','button','a','input','select',
     'textarea','nav','main','header','footer','form','label','section','article','li','img']);
   const lines = []; let count = 0;
-  const txt = (e) => (e.getAttribute('aria-label') || e.value || e.textContent ||
+  // e.value is a LABEL on submit/button/reset but USER DATA on every other
+  // field, so reading it unconditionally put whatever had been typed — a
+  // password, an email, an account number — straight into the outline handed
+  // to the LLM. placeholder describes an input without disclosing its content.
+  const LABEL_VALUE = new Set(['submit', 'button', 'reset']);
+  const valueOf = (e) => {
+    if (e.tagName !== 'INPUT') return '';
+    const t = (e.getAttribute('type') || '').toLowerCase();
+    return LABEL_VALUE.has(t) ? (e.value || '') : (e.getAttribute('placeholder') || '');
+  };
+  const txt = (e) => (e.getAttribute('aria-label') || valueOf(e) || e.textContent ||
     e.getAttribute('alt') || '').trim().replace(/\\s+/g, ' ').slice(0, 50);
   function walk(node, depth) {
     if (count >= maxNodes) return;
