@@ -217,31 +217,39 @@ async def run_and_record(name: str, fn, args: tuple, kwargs: dict):
         except Exception:
             page_url = None
 
-    _LOG.append(secrets.scrub_record({
-        "step": idx,
-        "action": name,
-        "raw": secrets.mask_step(
+    # step_record fills every DESIGN §6.1 key, so the interactive path emits the
+    # SAME shape as the runner. It used to omit skipped/tag/priority/retries;
+    # the renderers only tolerated that because every read is a .get().
+    # skipped/retries keep their defaults here by design: a recorded call always
+    # ran, and the recorder has no retry loop. tag/priority are scenario-step
+    # passthroughs with no interactive equivalent — no tool takes them.
+    record = report.step_record(
+        step=idx,
+        action=name,
+        raw=secrets.mask_step(
             dict(kwargs),
             sensitive_value=bool(isinstance(result, dict) and result.get("sensitive"))),
-        "selector_input": kwargs.get("selector") or kwargs.get("target"),
-        "resolved_by": resolved_by,
-        "expected": expected,
-        "actual": actual,
-        "passed": passed,
-        "duration_ms": duration_ms,
-        "screenshot": shot,
-        "page_url": page_url,
-        "console_errors": [e for e in new_console if e.get("level") == "error"],
-        "network_errors": new_network,
-        "dialogs": new_dialogs,
+        selector_input=kwargs.get("selector") or kwargs.get("target"),
+        resolved_by=resolved_by,
+        expected=expected,
+        actual=actual,
+        passed=passed,
+        duration_ms=duration_ms,
+        screenshot=shot,
+        page_url=page_url,
+        console_errors=[e for e in new_console if e.get("level") == "error"],
+        network_errors=new_network,
+        dialogs=new_dialogs,
         # severity_hint: a navigate that got 4xx/5xx or no response at all is a
         # network/server failure, not the generic "error" a broken tool yields —
         # the interactive path must not lose that distinction either.
-        "severity": None if passed else report.classify_failure(
+        severity=None if passed else report.classify_failure(
             name, exc, hint=report.severity_hint(name, result)),
-        "ai_reason": reason,
-        "ai_suggestion": suggestion,
-    }))
+        ai_reason=reason,
+        ai_suggestion=suggestion,
+    )
+    # cap first, then scrub — no point scrubbing entries about to be dropped.
+    _LOG.append(secrets.scrub_record(report.cap_evidence(record)))
 
     if len(_LOG) > _MAX_STEPS:
         del _LOG[:-_MAX_STEPS]

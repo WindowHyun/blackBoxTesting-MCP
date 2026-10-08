@@ -35,6 +35,83 @@ def new_run_id() -> str:
     return _stamp()
 
 
+# The step schema (DESIGN §6.1) with a default per key. Both producers build
+# their records through step_record(), so adding a field is one edit here and
+# neither producer can silently omit one — the recorder used to drop `skipped`,
+# `tag`, `priority` and `retries`, which the renderers only tolerated because
+# every read is a .get().
+_STEP_DEFAULTS: dict = {
+    "step": 0,
+    "action": None,
+    "raw": {},
+    "selector_input": None,
+    "resolved_by": None,
+    "expected": None,
+    "actual": None,
+    "passed": False,
+    "skipped": False,
+    "duration_ms": 0,
+    "screenshot": None,
+    "page_url": None,
+    "tag": None,
+    "priority": None,
+    "retries": 0,
+    "console_errors": [],
+    "network_errors": [],
+    "dialogs": [],
+    "severity": None,
+    "ai_reason": "",
+    "ai_suggestion": None,
+    # {kind: n} for evidence trimmed by cap_evidence; absent (None) when the
+    # step's lists fit. Present means the report is deliberately partial, so a
+    # reader is never misled about how much was captured.
+    "evidence_dropped": None,
+}
+
+# Per-step cap on each evidence list. The session buffers are capped at 1000
+# TOTAL, which one step on a chatty page (SPA polling, third-party ads) can
+# consume by itself — and those lists ride both into the JSON report and into
+# run_scenario's MCP response, where they crowd out the result they exist to
+# explain.
+_MAX_STEP_EVIDENCE = 50
+
+
+def cap_evidence(record: dict) -> dict:
+    """Bound a step's evidence lists in place, recording what was dropped.
+
+    Keeps the FIRST N of each kind: within one step the earliest errors are
+    the root cause and the rest are usually the cascade from it.
+    """
+    dropped: dict[str, int] = {}
+    for key in ("console_errors", "network_errors", "dialogs"):
+        items = record.get(key) or []
+        if len(items) > _MAX_STEP_EVIDENCE:
+            dropped[key] = len(items) - _MAX_STEP_EVIDENCE
+            record[key] = items[:_MAX_STEP_EVIDENCE]
+    if dropped:
+        record["evidence_dropped"] = dropped
+    return record
+
+
+def step_record(**fields) -> dict:
+    """Build one DESIGN §6.1 step record: schema defaults, then the caller's
+    values. Keys are in schema order so a report reads the same from either
+    producer.
+
+    An unknown key raises: a typo'd field name would otherwise land in the
+    report as a dead key while the real one silently kept its default.
+    """
+    unknown = sorted(set(fields) - set(_STEP_DEFAULTS))
+    if unknown:
+        raise KeyError(
+            f"not in the step schema (DESIGN §6.1): {unknown} — "
+            f"add it to _STEP_DEFAULTS first")
+    record = {k: (v.copy() if isinstance(v, (list, dict)) else v)
+              for k, v in _STEP_DEFAULTS.items()}
+    record.update(fields)
+    return record
+
+
 def summarize(steps: list[dict]) -> dict:
     """The one summary shape (DESIGN §6.1) — runner and recorder both use this
     so a schema change happens in exactly one place.
@@ -465,6 +542,10 @@ def _render_markdown(result: dict) -> str:
                 mark = "예상치 못한 " if not dl.get("expected") else ""
                 lines.append(f"  - {mark}dialog: {dl.get('type')} "
                              f"“{dl.get('message')}” → {dl.get('handled')}")
+            if st.get("evidence_dropped"):
+                more = ", ".join(f"{k} +{n}" for k, n in st["evidence_dropped"].items())
+                lines.append(f"  - _증거 일부 생략(스텝당 {_MAX_STEP_EVIDENCE}건 상한): "
+                             f"{more}_")
 
     reg = result.get("regression") or {}
     if reg.get("changed"):
@@ -1050,6 +1131,12 @@ def _step_html(st: dict, report_dir: Path) -> str:
                     f'{html.escape(str(dl.get("type")))} '
                     f'“{html.escape(_short(dl.get("message"), 120))}” → '
                     f'{html.escape(str(dl.get("handled")))}</div>')
+
+    if st.get("evidence_dropped"):
+        more = ", ".join(f"{html.escape(k)} +{n}"
+                         for k, n in st["evidence_dropped"].items())
+        evidence += (f'<div class="evline"><span class="evk">생략</span>'
+                    f'스텝당 {_MAX_STEP_EVIDENCE}건 상한 — {more}</div>')
 
     tag_chip = (f'<span class="tagchip">{html.escape(str(st["tag"]))}</span>'
                if st.get("tag") else "")

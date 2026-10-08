@@ -506,7 +506,9 @@ SM-01~04와 함께(또는 직후) 구현한다.
                                          // timeout = 스텝이 Timeout 예외로 죽음 ·
                                          // error = 그 외(실패한 interact/wait/dialog 등)
       "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
-      "ai_suggestion": null              // SM-05: 실패 시 가설/수정 제안
+      "ai_suggestion": null,             // SM-05: 실패 시 가설/수정 제안
+      "evidence_dropped": null           // {kind: n} — 스텝당 상한(50건)으로 잘린
+                                         // 증거 수. null이면 전부 담겼다는 뜻.
     }
   ],
   "a11y_findings": [],                   // SM-09: role/label 누락 등
@@ -528,6 +530,20 @@ SM-01~04와 함께(또는 직후) 구현한다.
 > JUnit에서 `<skipped/>`로 표현되어 CI 대시보드가 "실패"가 아닌 "미실행"으로 집계한다.
 > history 파일(`reports/history/{name}.json`)은 baseline 스텝에 더해 `runs`(최근
 > 10회 요약)를 보관 — trend의 단일 출처.
+> **스텝 레코드 단일 출처(2026-10):** runner와 recorder가 각자 dict 리터럴을 쌓던 탓에
+> recorder가 `skipped`/`tag`/`priority`/`retries`를 빼먹었고, 렌더러의 모든 읽기가
+> `.get()`이라 아무도 눈치채지 못했다. 이제 두 생산자 모두
+> `report.step_record(**fields)`를 경유한다 — 스키마 키마다 기본값을 주고, **스키마에
+> 없는 키는 예외**로 막는다(오타 필드가 죽은 키로 리포트에 실리고 진짜 필드는 조용히
+> 기본값을 유지하는 사고 방지). 필드 추가는 `_STEP_DEFAULTS` 한 곳 수정으로 끝난다.
+>
+> **스텝당 증거 상한(2026-10):** 세션 버퍼 상한은 **전체** 1000건인데, 광고/폴링이 많은
+> 페이지에선 한 스텝이 그걸 혼자 소진한다. 그 배열은 JSON 리포트와 `run_scenario`의 MCP
+> 응답에 **그대로 실려**, 설명해야 할 결과를 밀어낸다. `report.cap_evidence`가
+> console/network/dialog 각각 **앞 50건**만 남긴다(스텝 안에서는 먼저 난 에러가 원인이고
+> 뒤는 보통 그 연쇄). 자른 수는 `evidence_dropped`에 기록하고 MD/HTML 모두 "생략" 줄로
+> 표기 — 부분 리포트가 완전한 리포트처럼 읽히지 않게 한다.
+>
 > **severity 어휘(2026-09 정정):** 구현이 내는 값은 `assertion|js_error|timeout|error`
 > 뿐이었다 — `network`는 **아무도 생산하지 않았고** `error`는 문서에 없었다. 그래서 HTTP
 > 500으로 죽은 navigate와 도구가 터진 스텝이 똑같이 `error`로 기록돼, severity로 거르는

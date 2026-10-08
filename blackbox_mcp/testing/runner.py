@@ -60,29 +60,18 @@ def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None
     records so summaries/JUnit/renderers see the whole scenario, not a
     silently truncated one."""
     for j, rest in enumerate(steps[failed_idx:], start=failed_idx + 1):
-        result["steps"].append(secrets.scrub_record({
-            "step": j,
-            "action": rest.get("action"),
-            "raw": secrets.mask_step(rest),
-            "selector_input": rest.get("selector") or rest.get("target"),
-            "resolved_by": None,
-            "expected": None,
-            "actual": f"not run (step {failed_idx} failed)",
-            "passed": False,
-            "skipped": True,
-            "duration_ms": 0,
-            "screenshot": None,
-            "page_url": None,
-            "tag": rest.get("tag"),
-            "priority": rest.get("priority"),
-            "retries": 0,
-            "console_errors": [],
-            "network_errors": [],
-            "dialogs": [],
-            "severity": None,
-            "ai_reason": "이전 스텝 실패로 미실행",
-            "ai_suggestion": None,
-        }))
+        result["steps"].append(secrets.scrub_record(report.step_record(
+            step=j,
+            action=rest.get("action"),
+            raw=secrets.mask_step(rest),
+            selector_input=rest.get("selector") or rest.get("target"),
+            actual=f"not run (step {failed_idx} failed)",
+            passed=False,
+            skipped=True,
+            tag=rest.get("tag"),
+            priority=rest.get("priority"),
+            ai_reason="이전 스텝 실패로 미실행",
+        )))
 
 
 def _resolve_step(step: dict) -> tuple[dict, list[str]]:
@@ -437,30 +426,33 @@ async def run(
             reason += (f" · 예상치 못한 {surprise[0]['type']} 발생: "
                        f"{surprise[0]['message'][:80]!r} (자동 dismiss)")
 
-        result["steps"].append(secrets.scrub_record({
-            "step": idx,
-            "action": step.get("action"),
-            "raw": secrets.mask_step(step, sensitive_value=fields.get("sensitive", False)),
-            "selector_input": step.get("selector") or step.get("target"),
-            "resolved_by": fields.get("resolved_by"),
-            "expected": fields.get("expected"),
-            "actual": fields.get("actual"),
-            "passed": passed,
-            "duration_ms": duration_ms,
-            "screenshot": shot,
-            "page_url": page_url,
-            "tag": step.get("tag"),            # 요구사항/이슈 연결용 passthrough
-            "priority": step.get("priority"),  # 비즈니스 우선순위 passthrough
-            "retries": retries_used,
-            "console_errors": [e for e in new_console if e.get("level") == "error"],
-            "network_errors": new_network,
-            "dialogs": new_dialogs,
-            "severity": (_severity(step.get("action", ""), exc, failed_by_js,
-                                   hint=fields.get("severity_hint"))
-                         if not passed else None),
-            "ai_reason": reason,
-            "ai_suggestion": fields.get("ai_suggestion"),
-        }))
+        record = report.step_record(
+            step=idx,
+            action=step.get("action"),
+            raw=secrets.mask_step(step, sensitive_value=fields.get("sensitive", False)),
+            selector_input=step.get("selector") or step.get("target"),
+            resolved_by=fields.get("resolved_by"),
+            expected=fields.get("expected"),
+            actual=fields.get("actual"),
+            passed=passed,
+            duration_ms=duration_ms,
+            screenshot=shot,
+            page_url=page_url,
+            tag=step.get("tag"),            # 요구사항/이슈 연결용 passthrough
+            priority=step.get("priority"),  # 비즈니스 우선순위 passthrough
+            retries=retries_used,
+            console_errors=[e for e in new_console if e.get("level") == "error"],
+            network_errors=new_network,
+            dialogs=new_dialogs,
+            severity=(_severity(step.get("action", ""), exc, failed_by_js,
+                                hint=fields.get("severity_hint"))
+                      if not passed else None),
+            ai_reason=reason,
+            ai_suggestion=fields.get("ai_suggestion"),
+        )
+        # cap first, then scrub: scrubbing entries that are about to be dropped
+        # is wasted work on the exact pages that produce hundreds of them.
+        result["steps"].append(secrets.scrub_record(report.cap_evidence(record)))
 
         if not passed and not continue_on_fail:
             # The un-run remainder must not silently vanish from the report —
