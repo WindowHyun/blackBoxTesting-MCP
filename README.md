@@ -285,8 +285,14 @@ ui-blackbox run a b c --junit results.xml       # suite + JUnit for CI
 ui-blackbox run a b c --parallel 3              # one isolated subprocess each
 ui-blackbox run a b c --parallel 3 --timeout 300  # per-scenario watchdog (sec)
 ui-blackbox run smoke --trace-on-failure        # keep a Playwright trace.zip only on failure
+ui-blackbox run a b --share-session             # chain scenarios (default: each starts clean)
 ui-blackbox doctor                              # browser/dirs/config self-check
 ```
+
+> Sequential runs share one browser but each scenario starts from a **clean
+> context** (cookies/storage/mocks wiped), so a suite reaches the same verdict
+> with or without `--parallel`. Pass `--share-session` for suites that
+> deliberately chain — log in once, reuse the session.
 
 GitHub Actions sketch:
 ```yaml

@@ -299,10 +299,12 @@ def test_single_chapter_report_has_no_sidebar():
 
 def test_multi_chapter_report_gets_sidebar_with_one_visible_panel():
     """A run with both regression changes and a11y findings has 3 chapters
-    (Steps/회귀/접근성): the sidebar must appear, every tab's aria-controls
-    must resolve to a real panel id, and exactly the first panel starts
-    visible (the rest carry the `hidden` attribute) — a no-JS fallback in
-    case the inline script fails to run."""
+    (Steps/회귀/접근성): the sidebar must appear and every tab's aria-controls
+    must resolve to a real panel id.
+
+    No panel carries `hidden` in the served markup — the script hides the
+    inactive ones on load. See test_chapters_are_readable_without_js for why
+    that direction matters."""
     result = {
         "name": "x", "summary": {"total": 1, "passed": 0, "failed": 1,
                                  "skipped": 0, "pass_rate": 0.0},
@@ -323,8 +325,7 @@ def test_multi_chapter_report_gets_sidebar_with_one_visible_panel():
         assert f'id="{cid}"' in html_out           # every tab points at a real panel
 
     for m in re.finditer(r'<section id="(ch-[^"]+)"([^>]*)>', html_out):
-        cid, attrs = m.group(1), m.group(2)
-        assert (" hidden" in attrs) == (cid != "ch-steps")
+        assert " hidden" not in m.group(2), m.group(1)
 
     # scoped to <button> tags — the CSS above also contains the literal
     # substring `aria-selected="true"` inside a `.tab[aria-selected="true"]`
@@ -332,3 +333,102 @@ def test_multi_chapter_report_gets_sidebar_with_one_visible_panel():
     btn_selected = re.findall(r'<button class="tab" role="tab"[^>]*aria-selected="(true|false)"',
                               html_out)
     assert btn_selected == ["true", "false", "false"]
+
+
+def test_chapters_are_readable_without_js():
+    """P2 regression: the script must not be a gate on CONTENT.
+
+    The sidebar shipped every non-first chapter with an inline `hidden`, and
+    the only way to clear it was the inline script. In any viewer that does not
+    run scripts (print preview, a corporate document viewer, a mail preview)
+    the 회귀 diff — the most actionable signal a report carries — was sealed
+    behind a click that could never happen.
+    """
+    result = {
+        "name": "x", "summary": {"total": 1, "passed": 0, "failed": 1,
+                                 "skipped": 0, "pass_rate": 0.0},
+        "meta": {},
+        "steps": [{"step": 1, "action": "assert", "passed": False,
+                   "duration_ms": 5, "expected": "a", "actual": "b"}],
+        "regression": {"previous_run": "2026-01-01T00:00:00",
+                       "changed": [{"step": 1, "from": "passed", "to": "failed"}]},
+        "a11y_findings": [{"type": "img-missing-alt", "tag": "img", "name": None}],
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+
+    # nothing is hidden in the served document …
+    assert " hidden>" not in html_out and " hidden " not in html_out
+    # … so every chapter's content is actually present and readable
+    assert "이전엔 통과했으나 이번에 실패" in html_out   # 회귀 panel body
+    assert "img-missing-alt" in html_out                # a11y panel body
+
+    # the now-useless sidebar removes itself when scripts don't run
+    assert "<noscript>" in html_out and ".sidenav{display:none}" in html_out
+    # and the script is what collapses the stack into tabs
+    assert "show(tabs[0])" in html_out
+
+
+def test_chapter_tabs_support_arrow_keys():
+    """role=tab promises arrow-key navigation; without it the widget is
+    mouse-only — a poor look in a tool that reports accessibility findings."""
+    result = {
+        "name": "x", "summary": {"total": 1, "passed": 0, "failed": 1,
+                                 "skipped": 0, "pass_rate": 0.0},
+        "meta": {}, "steps": [{"step": 1, "action": "assert", "passed": False,
+                               "duration_ms": 5}],
+        "regression": {"previous_run": "t",
+                       "changed": [{"step": 1, "from": "passed", "to": "failed"}]},
+    }
+    html_out = report._render_html(result, pathlib.Path("/tmp"))
+    assert "ArrowRight" in html_out and "ArrowLeft" in html_out
+    # roving tabindex: only the selected tab is in the tab order
+    assert 'aria-selected="true" tabindex="0"' in html_out
+    assert 'aria-selected="false" tabindex="-1"' in html_out
+
+
+# ── severity vocabulary is the DESIGN §6.1 set (P3 regression) ─────
+def test_severity_vocabulary_matches_the_schema():
+    """Every value classify_failure can emit must be in the documented set,
+    and `network` must be reachable — it had no producer at all."""
+    documented = {"assertion", "js_error", "network", "timeout", "error"}
+    produced = {
+        report.classify_failure("assert", None),
+        report.classify_failure("interact", None),
+        report.classify_failure("navigate", None, hint="network"),
+        report.classify_failure("wait", TimeoutError("x")),
+        report.classify_failure("interact", RuntimeError("x")),
+        report.classify_failure("assert", None, js_error=True),
+    }
+    assert produced == documented
+
+
+def test_classify_failure_precedence():
+    js = report.classify_failure("navigate", RuntimeError("x"), js_error=True,
+                                 hint="network")
+    assert js == "js_error"                      # the app threw — most specific
+    # a raised step is the automation failing, so it outranks a result-derived hint
+    assert report.classify_failure("navigate", RuntimeError("x"),
+                                   hint="network") == "error"
+    assert report.classify_failure("navigate", TimeoutError("x")) == "timeout"
+    # a hint beats the action-name guess …
+    assert report.classify_failure("assert", None, hint="network") == "network"
+    # … and no hint falls back to the action name
+    assert report.classify_failure("assert", None) == "assertion"
+    assert report.classify_failure("interact", None) == "error"
+
+
+@pytest.mark.parametrize("action,result,expected", [
+    ("navigate", {"status": 500}, "network"),
+    ("navigate", {"status": 404}, "network"),
+    ("navigate", {"error": "net::ERR_NAME_NOT_RESOLVED"}, "network"),
+    ("navigate", {"status": 200}, None),
+    ("navigate", {"status": None}, None),          # file:// or settle timeout
+    ("navigate", {}, None),
+    # only the failure OF the network operation counts
+    ("interact", {"status": 500}, None),
+    ("assert", {"status": 500}, None),
+    ("navigate", "not a dict", None),
+    ("navigate", None, None),
+])
+def test_severity_hint(action, result, expected):
+    assert report.severity_hint(action, result) == expected

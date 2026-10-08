@@ -35,6 +35,83 @@ def new_run_id() -> str:
     return _stamp()
 
 
+# The step schema (DESIGN §6.1) with a default per key. Both producers build
+# their records through step_record(), so adding a field is one edit here and
+# neither producer can silently omit one — the recorder used to drop `skipped`,
+# `tag`, `priority` and `retries`, which the renderers only tolerated because
+# every read is a .get().
+_STEP_DEFAULTS: dict = {
+    "step": 0,
+    "action": None,
+    "raw": {},
+    "selector_input": None,
+    "resolved_by": None,
+    "expected": None,
+    "actual": None,
+    "passed": False,
+    "skipped": False,
+    "duration_ms": 0,
+    "screenshot": None,
+    "page_url": None,
+    "tag": None,
+    "priority": None,
+    "retries": 0,
+    "console_errors": [],
+    "network_errors": [],
+    "dialogs": [],
+    "severity": None,
+    "ai_reason": "",
+    "ai_suggestion": None,
+    # {kind: n} for evidence trimmed by cap_evidence; absent (None) when the
+    # step's lists fit. Present means the report is deliberately partial, so a
+    # reader is never misled about how much was captured.
+    "evidence_dropped": None,
+}
+
+# Per-step cap on each evidence list. The session buffers are capped at 1000
+# TOTAL, which one step on a chatty page (SPA polling, third-party ads) can
+# consume by itself — and those lists ride both into the JSON report and into
+# run_scenario's MCP response, where they crowd out the result they exist to
+# explain.
+_MAX_STEP_EVIDENCE = 50
+
+
+def cap_evidence(record: dict) -> dict:
+    """Bound a step's evidence lists in place, recording what was dropped.
+
+    Keeps the FIRST N of each kind: within one step the earliest errors are
+    the root cause and the rest are usually the cascade from it.
+    """
+    dropped: dict[str, int] = {}
+    for key in ("console_errors", "network_errors", "dialogs"):
+        items = record.get(key) or []
+        if len(items) > _MAX_STEP_EVIDENCE:
+            dropped[key] = len(items) - _MAX_STEP_EVIDENCE
+            record[key] = items[:_MAX_STEP_EVIDENCE]
+    if dropped:
+        record["evidence_dropped"] = dropped
+    return record
+
+
+def step_record(**fields) -> dict:
+    """Build one DESIGN §6.1 step record: schema defaults, then the caller's
+    values. Keys are in schema order so a report reads the same from either
+    producer.
+
+    An unknown key raises: a typo'd field name would otherwise land in the
+    report as a dead key while the real one silently kept its default.
+    """
+    unknown = sorted(set(fields) - set(_STEP_DEFAULTS))
+    if unknown:
+        raise KeyError(
+            f"not in the step schema (DESIGN §6.1): {unknown} — "
+            f"add it to _STEP_DEFAULTS first")
+    record = {k: (v.copy() if isinstance(v, (list, dict)) else v)
+              for k, v in _STEP_DEFAULTS.items()}
+    record.update(fields)
+    return record
+
+
 def summarize(steps: list[dict]) -> dict:
     """The one summary shape (DESIGN §6.1) — runner and recorder both use this
     so a schema change happens in exactly one place.
@@ -53,19 +130,51 @@ def summarize(steps: list[dict]) -> dict:
             "pass_rate": round(passed / executed, 3) if executed else 0.0}
 
 
+def severity_hint(action: str, result) -> str | None:
+    """A cause the DISPATCHER knows, handed to classify_failure so it doesn't
+    have to guess from the action name. ``None`` == nothing to add.
+
+    Only "network" so far: a navigate that never got a response (DNS, refused,
+    TLS, proxy tunnel) or that answered 4xx/5xx is a network/server failure.
+    Both used to classify as "error", the same value a tool blowing up
+    produces, so nothing filtering on severity could tell "the server is down"
+    from "the automation broke" — and `network` sat in the DESIGN §6.1
+    vocabulary with no producer at all.
+
+    Deliberately narrow: only the failure OF the network operation counts. A
+    step whose assertion failed while some unrelated ad request 404'd is an
+    assertion failure, and reading the step's network slice would mislabel it.
+    """
+    if action != "navigate" or not isinstance(result, dict):
+        return None
+    if result.get("error"):
+        return "network"
+    status = result.get("status")
+    return "network" if isinstance(status, int) and status >= 400 else None
+
+
 def classify_failure(action: str, exc: Exception | None,
-                     js_error: bool = False) -> str:
+                     js_error: bool = False, hint: str | None = None) -> str:
     """Severity for a FAILED step — single implementation for runner/recorder.
 
-    ``js_error`` wins over the action-derived value: when a step is failed
-    *because* the page threw, "the app crashed" is the finding, not "an
-    assertion did not hold". DESIGN §6.1 lists js_error in the severity
-    vocabulary and nothing produced it until this path existed.
+    The vocabulary is DESIGN §6.1: assertion | js_error | network | timeout |
+    error (the catch-all for a failed interact/wait/dialog and anything else).
+
+    Precedence, most specific first:
+      1. ``js_error`` — when a step is failed *because* the page threw, "the app
+         crashed" is the finding, not "an assertion did not hold".
+      2. ``exc`` — the step raised, so this is the automation failing, not the
+         app; a Timeout is called out separately.
+      3. ``hint`` — a cause the dispatcher established from the tool's own
+         result (see severity_hint), which beats the action-name guess below.
+      4. the action name.
     """
     if js_error:
         return "js_error"
     if exc is not None:
         return "timeout" if "Timeout" in type(exc).__name__ else "error"
+    if hint:
+        return hint
     if action.startswith("assert"):
         return "assertion"
     return "error"  # failed interact/wait/dialog/etc.
@@ -211,33 +320,65 @@ def _run_id_time(run_id: str) -> float | None:
     return None
 
 
+def _artifact_globs(report_dir: Path) -> list:
+    """(directory, glob) pairs holding per-run artifacts, all stamped with a run id."""
+    return [(report_dir, "report_*.*"),
+            (report_dir / "screenshots", "*.png"),
+            (report_dir / "traces", "*.zip")]
+
+
+def _collect_run_ids(report_dir: Path) -> set[str]:
+    """Every run id present on disk, from ANY artifact kind.
+
+    Deriving the id universe from report files alone made retention blind to
+    the interactive path: recorder.run_and_record captures a screenshot for
+    every failed tool call, while save_report is optional, so a run that never
+    wrote a report could not appear in the doomed set — its screenshots stayed
+    forever in the exact directory retention exists to bound.
+    """
+    ids: set[str] = set()
+    for directory, pattern in _artifact_globs(report_dir):
+        if not directory.is_dir():
+            continue
+        for p in directory.glob(pattern):
+            if (rid := _run_id_of(p.name)):
+                ids.add(rid)
+    return ids
+
+
+def prune_now() -> None:
+    """Apply retention outside a save. Best-effort: never raises.
+
+    save() prunes after writing, but an interactive flow can capture step
+    screenshots for hours and never reach save_report — so retention also has
+    to run when a flow BEGINS, or nothing bounds that directory at all.
+    """
+    try:
+        _prune(ensure_dirs())
+    except Exception:
+        pass
+
+
 def _prune(report_dir: Path) -> None:
-    """Retention: keep the newest CONFIG.report_retention runs, deleting older
-    report files AND the screenshots that share those runs' ids. Report files
-    and screenshots carry the SAME run id (see new_run_id), so a kept run keeps
-    its screenshots. Never allowed to break report saving — caller try/excepts."""
+    """Retention: keep the newest CONFIG.report_retention runs, deleting every
+    older run's artifacts — report files, screenshots and traces alike. All
+    three carry the SAME run id (see new_run_id), so a kept run keeps its
+    evidence. Never allowed to break report saving — caller try/excepts."""
     keep = CONFIG.report_retention
     if keep <= 0:
         return
-    ids = sorted({rid for p in report_dir.glob("report_*.*")
-                  if (rid := _run_id_of(p.name))}, reverse=True)
+    # Run ids come from all artifact kinds, not just report files: a run that
+    # captured screenshots but never saved a report is still a run, and its
+    # files must age out with everyone else's.
+    ids = sorted(_collect_run_ids(report_dir), reverse=True)
     if len(ids) <= keep:
         return
     doomed = set(ids[keep:])  # everything older than the newest `keep` runs
-    for p in report_dir.glob("report_*.*"):
-        if _run_id_of(p.name) in doomed:
-            p.unlink(missing_ok=True)
-    shots = report_dir / "screenshots"
-    if shots.is_dir():
-        for p in shots.glob("*.png"):
+    for directory, pattern in _artifact_globs(report_dir):
+        if not directory.is_dir():
+            continue
+        for p in directory.glob(pattern):
             # Unstamped legacy files (no id) are left alone.
-            if _run_id_of(p.name) in doomed:
-                p.unlink(missing_ok=True)
-    traces = report_dir / "traces"
-    if traces.is_dir():
-        for p in traces.glob("*.zip"):
-            # Failure traces share the run id (runner._stop_tracing) — pruned
-            # with their run like screenshots.
             if _run_id_of(p.name) in doomed:
                 p.unlink(missing_ok=True)
     # Regression baselines are keyed by scenario NAME, not by run id, so they
@@ -256,17 +397,65 @@ def _prune(report_dir: Path) -> None:
                 continue
 
 
+# What each documented `formats` value writes (DESIGN §6). Single source for
+# save(), the MCP tools and the CLI's --format choices.
+_FORMAT_SETS: dict[str, frozenset[str]] = {
+    "json": frozenset({"json"}),
+    "md": frozenset({"md"}),
+    "html": frozenset({"html"}),
+    "both": frozenset({"json", "md"}),
+    "all": frozenset({"json", "md", "html"}),
+}
+# Spellings a caller plausibly reaches for instead of the documented value —
+# the MCP path is driven by a host LLM reading the tool description, and
+# "markdown" is a likelier miss than a typo.
+_FORMAT_ALIASES = {"markdown": "md", "mkd": "md", "htm": "html", "jsn": "json"}
+
+
+def resolve_formats(formats: str) -> set[str]:
+    """Normalize a ``formats`` argument into the set of files to write.
+
+    Accepts the documented values case-insensitively, the obvious alternate
+    spellings above, and a separated list ("json,html").
+
+    Raises ValueError on anything else. That matters more than it looks: the
+    old membership tests had no else branch, so an unrecognized value wrote
+    NOTHING and still returned success — and in the MCP path save_report read
+    that as a successful save and reset the recorder, destroying the very flow
+    it had just failed to persist. Refusing loudly keeps the steps recoverable.
+    """
+    out: set[str] = set()
+    unknown: list[str] = []
+    for part in re.split(r"[,+|/\s]+", str(formats or "").strip().lower()):
+        if not part:
+            continue
+        part = _FORMAT_ALIASES.get(part, part)
+        if part in _FORMAT_SETS:
+            out |= _FORMAT_SETS[part]
+        else:
+            unknown.append(part)
+    if not out or unknown:
+        raise ValueError(
+            f"unknown report format {formats!r} — expected one of "
+            f"{sorted(_FORMAT_SETS)} (or a comma-separated combination, "
+            f"e.g. 'json,html')")
+    return out
+
+
 def save(result: dict, formats: str = "both") -> dict[str, str]:
     """Persist a scenario result; return written file paths by format."""
+    # Validate BEFORE touching the filesystem: a bad format must not create
+    # directories or leave a half-written run behind.
+    want = resolve_formats(formats)
     report_dir = ensure_dirs()
     # Reuse the run id the screenshots were stamped with, so retention keeps
     # report + screenshots together. Falls back for callers that didn't set it.
     stamp = result.get("run_id") or new_run_id()
     written: dict[str, str] = {}
 
-    want_json = formats in ("json", "both", "all")
-    want_md = formats in ("md", "both", "all")
-    want_html = formats in ("html", "all")
+    want_json = "json" in want
+    want_md = "md" in want
+    want_html = "html" in want
 
     if want_json:
         p = report_dir / f"report_{stamp}.json"
@@ -353,6 +542,10 @@ def _render_markdown(result: dict) -> str:
                 mark = "예상치 못한 " if not dl.get("expected") else ""
                 lines.append(f"  - {mark}dialog: {dl.get('type')} "
                              f"“{dl.get('message')}” → {dl.get('handled')}")
+            if st.get("evidence_dropped"):
+                more = ", ".join(f"{k} +{n}" for k, n in st["evidence_dropped"].items())
+                lines.append(f"  - _증거 일부 생략(스텝당 {_MAX_STEP_EVIDENCE}건 상한): "
+                             f"{more}_")
 
     reg = result.get("regression") or {}
     if reg.get("changed"):
@@ -797,20 +990,45 @@ def _render_html(result: dict, report_dir: Path) -> str:
 </div></body></html>"""
 
 
+# Without JS the sidebar cannot switch anything, so it hides itself and the
+# chapters simply stack — i.e. exactly the pre-sidebar layout, fully readable,
+# printable and Ctrl+F-able. The document ships every panel VISIBLE; collapsing
+# to one is what the script adds.
+_CHAPTERS_NOSCRIPT = ("<noscript><style>.sidenav{display:none}"
+                      ".layout{grid-template-columns:1fr;gap:0}</style></noscript>")
+
 _CHAPTERS_SCRIPT = """<script>
 (function(){
   var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab[role="tab"]'));
+  if (!tabs.length) return;
   var panelOf = {};
   tabs.forEach(function(t){ panelOf[t.id] = document.getElementById(t.getAttribute('aria-controls')); });
-  tabs.forEach(function(t){
+  function show(t){
+    tabs.forEach(function(o){
+      var on = o === t;
+      o.setAttribute('aria-selected', on ? 'true' : 'false');
+      o.setAttribute('tabindex', on ? '0' : '-1');
+      if (panelOf[o.id]) panelOf[o.id].hidden = !on;
+    });
+  }
+  // Progressive enhancement: the served HTML has no `hidden` anywhere, so a
+  // viewer without JS reads every chapter. This first call is what collapses
+  // the stack into tabs.
+  show(tabs[0]);
+  tabs.forEach(function(t, i){
     t.addEventListener('click', function(){
-      var id = t.getAttribute('aria-controls');
-      tabs.forEach(function(o){
-        var on = o === t;
-        o.setAttribute('aria-selected', on ? 'true' : 'false');
-        panelOf[o.id].hidden = !on;
-      });
-      document.getElementById(id).scrollIntoView({block: 'start'});
+      show(t);
+      panelOf[t.id].scrollIntoView({block: 'start'});
+    });
+    // Arrow keys are part of the tab pattern this markup claims (role=tab);
+    // without them the widget is mouse-only.
+    t.addEventListener('keydown', function(e){
+      var d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      if (!d) return;
+      e.preventDefault();
+      var next = tabs[(i + d + tabs.length) % tabs.length];
+      show(next);
+      next.focus();
     });
   });
 })();
@@ -829,6 +1047,14 @@ def _chapters_html(chapters: list[tuple[str, str, int | None, str]]) -> str:
     switching — DESIGN §6.2 rules out *external* dependencies/network, not
     inline behavior; the earlier no-JS design simply never needed a script
     until multi-chapter navigation did.
+
+    That script is an ENHANCEMENT, never a gate on content. Panels ship with
+    no ``hidden`` attribute, so a viewer that does not run scripts (print
+    preview, a corporate document viewer, a mail client) still reads every
+    chapter — the 회귀 diff, the most actionable signal in the report, was
+    otherwise sealed behind a click that could never happen. The script hides
+    the inactive panels on load; a <noscript> rule drops the then-useless
+    sidebar so the chapters simply stack, exactly as they did before tabs.
     """
     tabs, panels = [], []
     for i, (cid, label, count, body) in enumerate(chapters):
@@ -836,12 +1062,14 @@ def _chapters_html(chapters: list[tuple[str, str, int | None, str]]) -> str:
         cnt_html = f'<span class="cnt">{count}</span>' if count else ""
         tabs.append(
             f'<button class="tab" role="tab" id="tabbtn-{cid}" aria-controls="{cid}" '
-            f'aria-selected="{"true" if active else "false"}">'
+            f'aria-selected="{"true" if active else "false"}" '
+            f'tabindex="{"0" if active else "-1"}">'
             f'{html.escape(label)}{cnt_html}</button>')
         panels.append(
             f'<section id="{cid}" role="tabpanel" aria-labelledby="tabbtn-{cid}" '
-            f'tabindex="0"{"" if active else " hidden"}>{body}</section>')
+            f'tabindex="0">{body}</section>')
     return (
+        _CHAPTERS_NOSCRIPT + '\n'
         '<div class="layout">\n<nav class="sidenav" aria-label="리포트 챕터">\n'
         '  <div class="inner" role="tablist" aria-label="챕터">\n'
         '    <span class="brand">CHAPTERS</span>\n    '
@@ -903,6 +1131,12 @@ def _step_html(st: dict, report_dir: Path) -> str:
                     f'{html.escape(str(dl.get("type")))} '
                     f'“{html.escape(_short(dl.get("message"), 120))}” → '
                     f'{html.escape(str(dl.get("handled")))}</div>')
+
+    if st.get("evidence_dropped"):
+        more = ", ".join(f"{html.escape(k)} +{n}"
+                         for k, n in st["evidence_dropped"].items())
+        evidence += (f'<div class="evline"><span class="evk">생략</span>'
+                    f'스텝당 {_MAX_STEP_EVIDENCE}건 상한 — {more}</div>')
 
     tag_chip = (f'<span class="tagchip">{html.escape(str(st["tag"]))}</span>'
                if st.get("tag") else "")

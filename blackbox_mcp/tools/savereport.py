@@ -13,9 +13,21 @@ from ._registry import tool
 
 @tool(description="지금까지 수행한 도구 동작들을 모아 JSON/MD/HTML 리포트로 저장한다. "
                   "모든 테스트 작업의 마지막에 호출해 결과를 남긴다. report_format ∈ "
-                  "json|md|html|both|all. 저장 후 기록은 초기화된다.")
+                  "json|md|html|both|all ('json,html' 조합도 가능). 목록 밖 값이면 "
+                  "저장하지 않고 ok=false를 반환하며 기록은 그대로 남으니 올바른 "
+                  "형식으로 다시 호출하면 된다. 저장에 성공한 뒤에만 기록이 초기화된다.")
 async def save_report(name: str = "session", description: str = "",
                       report_format: str = "all") -> dict:
+    # Validate the format FIRST — before compute_regression writes a history
+    # baseline for a run that is about to be rejected, and before anything
+    # can reset the recorder. The steps stay recorded, so the caller just
+    # retries with a valid format instead of losing the whole flow.
+    try:
+        report.resolve_formats(report_format)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc),
+                "recorded_steps": len(recorder.steps())}
+
     result = recorder.build_result(name=name, description=description)
     if result["summary"]["total"] == 0:
         return {"ok": False, "message": "기록된 동작이 없습니다. 먼저 도구로 작업을 수행하세요."}

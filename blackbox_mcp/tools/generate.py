@@ -38,9 +38,18 @@ _INPUT_TYPE_ROLE = {
 _COLLECT_JS = """
 () => {
   const sel = 'button, a[href], input, select, textarea, [role=button], [role=link], [role=textbox]';
+  // el.value is a LABEL on submit/button/reset (<input type=submit value="로그인">)
+  // but USER DATA everywhere else. Reading it unconditionally put whatever was
+  // already typed into a field — a password, an email, an account number —
+  // into the kit handed to the host LLM, and into the suggested selector with
+  // it. Only the label-bearing input types contribute their value.
+  const LABEL_VALUE = new Set(['submit', 'button', 'reset']);
   return [...document.querySelectorAll(sel)].slice(0, 100).map(el => {
+    const type = (el.getAttribute('type') || '').toLowerCase();
+    const valueLabel = (el.tagName === 'INPUT' && LABEL_VALUE.has(type))
+      ? (el.value || '') : '';
     const name = (el.getAttribute('aria-label') || el.textContent ||
-                  el.getAttribute('placeholder') || el.value || '').trim().slice(0, 60);
+                  el.getAttribute('placeholder') || valueLabel || '').trim().slice(0, 60);
     return {
       tag: el.tagName.toLowerCase(),
       type: el.getAttribute('type') || null,

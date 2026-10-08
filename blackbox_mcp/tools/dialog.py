@@ -20,6 +20,7 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 from ..browser import get_session
@@ -28,15 +29,25 @@ from ..browser.locator import resolve
 from ..config import CONFIG
 from ._registry import tool
 
+# How long to keep waiting for a dialog after the trigger click returns, and how
+# often to look. A dialog raised synchronously is already captured by the time
+# click() returns; one raised from a timer or a fetch callback is not — the old
+# fixed 50ms grace reported "no dialog appeared" for any app that confirms after
+# an async round trip, which is most of them.
+_DIALOG_WAIT_MS = 3000
+_POLL_S = 0.05
+
 
 @tool(description="Trigger an action and handle the resulting browser dialog "
                   "(alert/confirm/prompt/beforeunload): verify its text and "
                   "accept or dismiss. action ∈ accept|dismiss; trigger is a "
-                  "selector to click that raises the dialog.")
+                  "selector to click that raises the dialog. timeout_ms is how "
+                  "long to wait for a dialog raised asynchronously (after a "
+                  "timer or a server round trip), default 3000.")
 async def expect_dialog(action: str = "accept", expected_text: str | None = None,
-                        trigger: str | None = None, accept_text: str | None = None) -> dict:
+                        trigger: str | None = None, accept_text: str | None = None,
+                        timeout_ms: int = _DIALOG_WAIT_MS) -> dict:
     session = await get_session()
-    page = session.page
 
     if trigger is None:
         return {"passed": False, "error": "provide 'trigger' selector that raises the dialog"}
@@ -70,11 +81,18 @@ async def expect_dialog(action: str = "accept", expected_text: str | None = None
     try:
         try:
             await locator.click(timeout=CONFIG.selector_timeout_ms)
-            await page.wait_for_timeout(50)  # let the handler settle
         except Exception as exc:
             if not captured:
                 return {"passed": False, "dialog_type": None, "message": None,
                         "error": f"trigger failed ({type(exc).__name__})"}
+        # Poll rather than wait a fixed grace period: a dialog opened from a
+        # setTimeout or a fetch callback arrives long after click() returns, and
+        # a 50ms window missed it entirely. Exits as soon as one is captured, so
+        # the synchronous case costs one poll. asyncio.sleep (not
+        # page.wait_for_timeout) so a page closing under us can't raise here.
+        deadline = time.monotonic() + max(0, timeout_ms) / 1000
+        while not captured and time.monotonic() < deadline:
+            await asyncio.sleep(_POLL_S)
     finally:
         # Always hand control back to the always-on recorder, even if the click
         # raised — a leaked override would swallow every later dialog.
@@ -82,7 +100,7 @@ async def expect_dialog(action: str = "accept", expected_text: str | None = None
 
     if not captured:
         return {"passed": False, "dialog_type": None, "message": None,
-                "error": "no dialog appeared"}
+                "error": f"no dialog appeared within {timeout_ms}ms"}
 
     passed = expected_text is None or (expected_text in (captured.get("message") or ""))
     return {"passed": passed, "dialog_type": captured.get("type"),

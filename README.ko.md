@@ -262,8 +262,13 @@ ui-blackbox run a b c --junit results.xml       # 스위트 + CI용 JUnit
 ui-blackbox run a b c --parallel 3              # 시나리오당 격리 서브프로세스
 ui-blackbox run a b c --parallel 3 --timeout 300  # 시나리오당 워치독(초)
 ui-blackbox run smoke --trace-on-failure        # 실패한 실행만 Playwright trace.zip 보존
+ui-blackbox run a b --share-session             # 시나리오 연결(기본: 각자 깨끗한 상태로 시작)
 ui-blackbox doctor                              # 브라우저/디렉토리/설정 자가진단
 ```
+
+> 순차 실행도 시나리오마다 **깨끗한 컨텍스트**에서 시작한다(쿠키/스토리지/모킹 초기화).
+> `--parallel` 여부와 무관하게 같은 스위트가 같은 판정을 낸다. 한 번 로그인해 이어서
+> 쓰는 등 **의도적으로 연결**하는 스위트만 `--share-session`을 쓴다.
 
 GitHub Actions 예시:
 ```yaml

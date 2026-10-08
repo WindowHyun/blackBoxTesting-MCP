@@ -60,29 +60,18 @@ def _append_skipped(result: dict, steps: list[dict], *, failed_idx: int) -> None
     records so summaries/JUnit/renderers see the whole scenario, not a
     silently truncated one."""
     for j, rest in enumerate(steps[failed_idx:], start=failed_idx + 1):
-        result["steps"].append(secrets.scrub_record({
-            "step": j,
-            "action": rest.get("action"),
-            "raw": secrets.mask_step(rest),
-            "selector_input": rest.get("selector") or rest.get("target"),
-            "resolved_by": None,
-            "expected": None,
-            "actual": f"not run (step {failed_idx} failed)",
-            "passed": False,
-            "skipped": True,
-            "duration_ms": 0,
-            "screenshot": None,
-            "page_url": None,
-            "tag": rest.get("tag"),
-            "priority": rest.get("priority"),
-            "retries": 0,
-            "console_errors": [],
-            "network_errors": [],
-            "dialogs": [],
-            "severity": None,
-            "ai_reason": "이전 스텝 실패로 미실행",
-            "ai_suggestion": None,
-        }))
+        result["steps"].append(secrets.scrub_record(report.step_record(
+            step=j,
+            action=rest.get("action"),
+            raw=secrets.mask_step(rest),
+            selector_input=rest.get("selector") or rest.get("target"),
+            actual=f"not run (step {failed_idx} failed)",
+            passed=False,
+            skipped=True,
+            tag=rest.get("tag"),
+            priority=rest.get("priority"),
+            ai_reason="이전 스텝 실패로 미실행",
+        )))
 
 
 def _resolve_step(step: dict) -> tuple[dict, list[str]]:
@@ -151,6 +140,7 @@ async def _dispatch_resolved(step: dict) -> dict:
             # status-based verdict would wrongly read the absent status as "fine".
             out.update(expected=(f"HTTP {expect}" if expect is not None else "도착 (2xx/3xx)"),
                        actual=res["error"], passed=False,
+                       severity_hint=report.severity_hint("navigate", res),
                        ai_reason="navigation failed before a response",
                        ai_suggestion="확인: URL/DNS, 프록시(PROXY_SERVER), 인증서"
                                      "(IGNORE_HTTPS_ERRORS), 사내망 접근 권한")
@@ -159,6 +149,11 @@ async def _dispatch_resolved(step: dict) -> dict:
             ok = status == expect
             reason = f"expected HTTP {expect}, got {status}"
             suggestion = None if ok else f"server returned {status}, not {expect}"
+            # expect_status IS an assertion on the navigate, so a mismatch that
+            # is NOT a server error (expected 500 via a mock, got 200) is an
+            # assertion failure — severity_hint below only speaks for 4xx/5xx.
+            if not ok:
+                out["severity_hint"] = "assertion"
         else:
             # status is None on file:// or when the settle timed out (no response
             # object) — treat as reachable. A real 4xx/5xx is a failed load.
@@ -168,6 +163,10 @@ async def _dispatch_resolved(step: dict) -> dict:
                                           "error or missing page (set expect_status to allow)")
         out.update(expected=(f"HTTP {expect}" if expect is not None else "도착 (2xx/3xx)"),
                    actual=f"“{res.get('title')}” · HTTP {status}",
+                   # a real 4xx/5xx outranks the assertion framing: "the server
+                   # errored" is the more actionable finding.
+                   severity_hint=(report.severity_hint("navigate", res)
+                                  or out.get("severity_hint")),
                    passed=ok, ai_reason=reason, ai_suggestion=suggestion)
         if not res.get("settled"):
             out["ai_reason"] += " · load not settled (proceeded on timeout)"
@@ -300,9 +299,14 @@ async def _dispatch_resolved(step: dict) -> dict:
                    ai_reason="explicit screenshot step", force_screenshot=True)
 
     elif action == "expect_dialog":
+        # timeout_ms must ride along: a dialog raised after a server round trip
+        # needs more than the default window, and dropping the field silently
+        # capped every expect_dialog step at it.
         res = await expect_dialog(step.get("dialog_action", "accept"),
                                   step.get("expected_text"), step.get("trigger"),
-                                  step.get("accept_text"))
+                                  step.get("accept_text"),
+                                  **({"timeout_ms": step["timeout_ms"]}
+                                     if "timeout_ms" in step else {}))
         out.update(expected=step.get("expected_text") or "dialog",
                    actual=res.get("message") or res.get("error"),
                    passed=bool(res.get("passed")),
@@ -422,29 +426,33 @@ async def run(
             reason += (f" · 예상치 못한 {surprise[0]['type']} 발생: "
                        f"{surprise[0]['message'][:80]!r} (자동 dismiss)")
 
-        result["steps"].append(secrets.scrub_record({
-            "step": idx,
-            "action": step.get("action"),
-            "raw": secrets.mask_step(step, sensitive_value=fields.get("sensitive", False)),
-            "selector_input": step.get("selector") or step.get("target"),
-            "resolved_by": fields.get("resolved_by"),
-            "expected": fields.get("expected"),
-            "actual": fields.get("actual"),
-            "passed": passed,
-            "duration_ms": duration_ms,
-            "screenshot": shot,
-            "page_url": page_url,
-            "tag": step.get("tag"),            # 요구사항/이슈 연결용 passthrough
-            "priority": step.get("priority"),  # 비즈니스 우선순위 passthrough
-            "retries": retries_used,
-            "console_errors": [e for e in new_console if e.get("level") == "error"],
-            "network_errors": new_network,
-            "dialogs": new_dialogs,
-            "severity": (_severity(step.get("action", ""), exc, failed_by_js)
-                         if not passed else None),
-            "ai_reason": reason,
-            "ai_suggestion": fields.get("ai_suggestion"),
-        }))
+        record = report.step_record(
+            step=idx,
+            action=step.get("action"),
+            raw=secrets.mask_step(step, sensitive_value=fields.get("sensitive", False)),
+            selector_input=step.get("selector") or step.get("target"),
+            resolved_by=fields.get("resolved_by"),
+            expected=fields.get("expected"),
+            actual=fields.get("actual"),
+            passed=passed,
+            duration_ms=duration_ms,
+            screenshot=shot,
+            page_url=page_url,
+            tag=step.get("tag"),            # 요구사항/이슈 연결용 passthrough
+            priority=step.get("priority"),  # 비즈니스 우선순위 passthrough
+            retries=retries_used,
+            console_errors=[e for e in new_console if e.get("level") == "error"],
+            network_errors=new_network,
+            dialogs=new_dialogs,
+            severity=(_severity(step.get("action", ""), exc, failed_by_js,
+                                hint=fields.get("severity_hint"))
+                      if not passed else None),
+            ai_reason=reason,
+            ai_suggestion=fields.get("ai_suggestion"),
+        )
+        # cap first, then scrub: scrubbing entries that are about to be dropped
+        # is wasted work on the exact pages that produce hundreds of them.
+        result["steps"].append(secrets.scrub_record(report.cap_evidence(record)))
 
         if not passed and not continue_on_fail:
             # The un-run remainder must not silently vanish from the report —

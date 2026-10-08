@@ -89,3 +89,60 @@ async def test_dialog_handler_is_released_after_a_failed_trigger(session):
     res = await expect_dialog("accept", None, "css=#missing")
     assert not res["passed"]
     assert session.buffers.dialog_handler is None
+
+
+# ── a dialog raised asynchronously (P-09 regression) ─────────────
+#
+# expect_dialog used to allow a fixed 50ms grace after the trigger click. A
+# dialog opened from a timer or a fetch callback — i.e. any app that confirms
+# after a server round trip — arrived later than that and was reported as
+# "no dialog appeared", a false failure.
+
+async def test_dialog_raised_after_a_delay_is_still_caught(session):
+    await session.page.set_content(
+        "<div id=out></div>"
+        "<button id=b onclick=\"setTimeout(() => {"
+        " document.getElementById('out').textContent ="
+        " confirm('정말 삭제할까요?') ? 'ACCEPTED' : 'DISMISSED'; }, 400)\">go</button>")
+
+    res = await expect_dialog("accept", "삭제", "css=#b")
+
+    assert res["passed"] is True, res
+    assert res["handled"] == "accept"
+    await session.page.wait_for_function(
+        "() => document.getElementById('out').textContent === 'ACCEPTED'")
+
+
+async def test_synchronous_dialog_does_not_wait_out_the_timeout(session):
+    """The poll exits on capture, so the common case stays fast."""
+    import time
+
+    await session.page.set_content(
+        "<button id=b onclick=\"alert('즉시')\">go</button>")
+
+    t0 = time.monotonic()
+    res = await expect_dialog("accept", "즉시", "css=#b", timeout_ms=5000)
+    elapsed = time.monotonic() - t0
+
+    assert res["passed"] is True
+    assert elapsed < 2.0, f"a synchronous dialog waited {elapsed:.2f}s"
+
+
+async def test_no_dialog_reports_the_window_it_waited(session):
+    await session.page.set_content("<button id=b>does nothing</button>")
+    res = await expect_dialog("accept", None, "css=#b", timeout_ms=300)
+    assert res["passed"] is False
+    assert "300ms" in res["error"]
+
+
+async def test_runner_passes_timeout_ms_to_expect_dialog(session):
+    """Dropping the field silently capped every scenario step at the default."""
+    from blackbox_mcp.testing import runner
+
+    await session.page.set_content(
+        "<button id=b onclick=\"setTimeout(() => confirm('느린 확인'), 600)\">go</button>")
+
+    res = await runner.run([{"action": "expect_dialog", "dialog_action": "accept",
+                             "expected_text": "느린", "trigger": "css=#b",
+                             "timeout_ms": 4000}], name="slow_dialog")
+    assert res["steps"][0]["passed"] is True, res["steps"][0]

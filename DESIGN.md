@@ -263,7 +263,7 @@ API:
 |---|---|---|---|
 | `reset_session` | `reset_session()` | `{ok, message}` | SHOULD |
 | `use_real_browser` | `use_real_browser(headless=False, channel="chrome")` | `{ok, mode, browser, profile}` | 확장 |
-| `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...]}` | 확장 |
+| `dismiss_banners` | `dismiss_banners()` | `{ok, dismissed:[label...], skipped:[label...]}` | 확장 |
 | `save_state` | `save_state(name="default")` | `{ok, name, path}` | 확장 |
 | `load_state` | `load_state(name="default")` | `{ok, name, path}` | 확장 |
 | `list_states` | `list_states()` | `[{name, saved_at}]` | 확장 |
@@ -278,7 +278,17 @@ API:
 > **dismiss_banners (실사이트 하드닝):** GDPR/쿠키/동의 오버레이가 클릭을 가로채는
 > ("intercepts pointer events") 실사이트용 — 흔한 수락/닫기 라벨(KO/EN)을 role로
 > 순회하며 **보이는 첫 항목**을 클릭(짧은 per-try 타임아웃, 매치 없어도 무에러).
-> 최대 3개까지만 눌러 무관 컨트롤 오클릭을 방지. navigate 후 클릭이 막히면 호출.
+> 최대 3개(서로 다른 컨트롤)까지만 눌러 무관 컨트롤 오클릭을 방지. navigate 후
+> 클릭이 막히면 호출.
+>
+> **부정 컨트롤 가드(2026-09):** `get_by_role(name=...)`은 **부분 일치**라 긍정
+> 라벨이 자기 부정형에도 매칭된다 — `name="동의"`가 "동의하지 않음"에,
+> `name="Allow"`가 "Don't allow"에 걸린다. 그대로 누르면 방금 준 동의를 되돌리거나
+> (배너가 아예 없는 페이지에선) 무관한 부정 컨트롤을 누른다. 그래서 클릭 전에
+> 후보의 **실제 접근성 이름**을 읽어 거부(거부/비동의/Decline/Reject/Don't…)와
+> 드릴다운(설정/관리/Manage preferences — 닫히지 않고 하위 대화상자가 열림) 계열을
+> 배제하고, 배제한 항목은 `skipped`로 반환해 리포트에 증거로 남긴다. 넓은 라벨이
+> 이미 누른 컨트롤을 다시 누르지 않도록 이름 기준 중복도 제거한다.
 >
 > **save_state / load_state (로그인 재사용, 2026-07):** 현재 컨텍스트의 쿠키+
 > localStorage를 `~/ui-blackbox/state/{name}.json`(POSIX 0600)으로 내보내고,
@@ -309,7 +319,7 @@ API:
 | `get_network_errors` | `get_network_errors()` | `[{url,status/failure,method}]` | MUST |
 | `wait` | `wait(ms=None, selector=None)` | `{ok, waited}` | SHOULD |
 | `switch_frame` | `switch_frame(selector=None)` | `{ok, context}` | SHOULD |
-| `expect_dialog` | `expect_dialog(action, expected_text=None)` | `{passed, dialog_type, message}` | SHOULD |
+| `expect_dialog` | `expect_dialog(action, expected_text=None, trigger=None, accept_text=None, timeout_ms=3000)` | `{passed, dialog_type, message, handled}` | SHOULD |
 
 세부:
 - **navigate (CT-01):** `wait_until` ∈ {load, domcontentloaded, networkidle, commit}.
@@ -346,6 +356,12 @@ API:
   / `dialog.dismiss()` 호출. 미노출(timeout) 시 `passed=False`. dialog는 반드시
   accept/dismiss 처리하지 않으면 페이지가 멈추므로 핸들러에서 항상 처리.
   (action 트리거 전에 arm 하는 사용 패턴을 README에 명시.)
+  > **비동기 dialog 대기(2026-10):** 트리거 클릭 후 **고정 50ms**만 유예했다. 동기
+  > dialog는 `click()` 반환 시점에 이미 잡히지만 타이머/fetch 콜백에서 뜬 것은 아니라,
+  > 서버 왕복 뒤 확인을 띄우는 앱(대부분이 그렇다)이 "no dialog appeared"로 **거짓
+  > 실패**했다. 이제 `timeout_ms`(기본 3000)까지 50ms 간격으로 폴링하고 잡히는 즉시
+  > 빠져나온다 — 동기 케이스는 폴 1회 비용. runner 스텝의 `timeout_ms`도 전달한다
+  > (안 넘기면 모든 시나리오 스텝이 기본값에 묶인다).
 
 ### 5.3 시나리오 모드 (SM)
 | Tool | 시그니처 | 우선순위 |
@@ -431,7 +447,11 @@ SM-01~04와 함께(또는 직후) 구현한다.
 - 기본 경로 **`~/ui-blackbox/reports`(홈 기준 절대경로)**, `REPORT_DIR` env로 재정의, 없으면 자동 생성.
   > cwd 상대(`./reports`)는 MCP 서버 cwd가 예측 불가·쓰기 불가(system32 등)일 수 있어 폐기. 쓰기 실패 시 홈으로 폴백.
 - 파일명 `report_YYYYMMDD_HHMMSS.json` / `.md` / `.html`.
-- `formats` ∈ {json, md, html, both(json+md), all(json+md+html)}.
+- `formats` ∈ {json, md, html, both(json+md), all(json+md+html)} — 대소문자 무시,
+  `markdown`/`htm` 같은 대체 표기와 `"json,html"` 조합 허용. **목록 밖 값은 예외**
+  (`report.resolve_formats`): 과거엔 멤버십 검사에 else가 없어 파일을 하나도 쓰지
+  않고 성공을 반환했고, `save_report`가 그걸 성공으로 읽어 레코더를 리셋해 흐름
+  자체가 사라졌다. 이제 거부하고 기록은 보존한다(재시도 가능).
 - 스크린샷은 `reports/screenshots/`에 저장하고 md/json은 상대경로 참조,
   HTML은 base64 data URI로 임베드(단일 파일 이식성).
 
@@ -479,9 +499,16 @@ SM-01~04와 함께(또는 직후) 구현한다.
         // 자동 dismiss되어 흐름은 이어지지만, 그 자체가 결함 신호다.
         // {type,message,handled,expected,ts}
       ],
-      "severity": null,                  // SM-08: assertion|js_error|network|timeout
+      "severity": null,                  // SM-08: assertion|js_error|network|timeout|error
+                                         // assertion = 단언 불성립 · js_error = 페이지가
+                                         // 예외를 던짐 · network = navigate가 4xx/5xx거나
+                                         // 응답 자체를 못 받음(DNS/거부/TLS/프록시) ·
+                                         // timeout = 스텝이 Timeout 예외로 죽음 ·
+                                         // error = 그 외(실패한 interact/wait/dialog 등)
       "ai_reason": "버튼이 보이고 활성 상태여서 클릭 성공으로 판단",  // SM-05
-      "ai_suggestion": null              // SM-05: 실패 시 가설/수정 제안
+      "ai_suggestion": null,             // SM-05: 실패 시 가설/수정 제안
+      "evidence_dropped": null           // {kind: n} — 스텝당 상한(50건)으로 잘린
+                                         // 증거 수. null이면 전부 담겼다는 뜻.
     }
   ],
   "a11y_findings": [],                   // SM-09: role/label 누락 등
@@ -503,6 +530,32 @@ SM-01~04와 함께(또는 직후) 구현한다.
 > JUnit에서 `<skipped/>`로 표현되어 CI 대시보드가 "실패"가 아닌 "미실행"으로 집계한다.
 > history 파일(`reports/history/{name}.json`)은 baseline 스텝에 더해 `runs`(최근
 > 10회 요약)를 보관 — trend의 단일 출처.
+> **스텝 레코드 단일 출처(2026-10):** runner와 recorder가 각자 dict 리터럴을 쌓던 탓에
+> recorder가 `skipped`/`tag`/`priority`/`retries`를 빼먹었고, 렌더러의 모든 읽기가
+> `.get()`이라 아무도 눈치채지 못했다. 이제 두 생산자 모두
+> `report.step_record(**fields)`를 경유한다 — 스키마 키마다 기본값을 주고, **스키마에
+> 없는 키는 예외**로 막는다(오타 필드가 죽은 키로 리포트에 실리고 진짜 필드는 조용히
+> 기본값을 유지하는 사고 방지). 필드 추가는 `_STEP_DEFAULTS` 한 곳 수정으로 끝난다.
+>
+> **스텝당 증거 상한(2026-10):** 세션 버퍼 상한은 **전체** 1000건인데, 광고/폴링이 많은
+> 페이지에선 한 스텝이 그걸 혼자 소진한다. 그 배열은 JSON 리포트와 `run_scenario`의 MCP
+> 응답에 **그대로 실려**, 설명해야 할 결과를 밀어낸다. `report.cap_evidence`가
+> console/network/dialog 각각 **앞 50건**만 남긴다(스텝 안에서는 먼저 난 에러가 원인이고
+> 뒤는 보통 그 연쇄). 자른 수는 `evidence_dropped`에 기록하고 MD/HTML 모두 "생략" 줄로
+> 표기 — 부분 리포트가 완전한 리포트처럼 읽히지 않게 한다.
+>
+> **severity 어휘(2026-09 정정):** 구현이 내는 값은 `assertion|js_error|timeout|error`
+> 뿐이었다 — `network`는 **아무도 생산하지 않았고** `error`는 문서에 없었다. 그래서 HTTP
+> 500으로 죽은 navigate와 도구가 터진 스텝이 똑같이 `error`로 기록돼, severity로 거르는
+> CI 대시보드가 "서버가 죽었다"와 "자동화가 깨졌다"를 구분할 수 없었다. 이제
+> `report.severity_hint(action, result)`가 디스패처가 **아는** 원인(navigate 결과의
+> `error`/`status>=400`)을 `classify_failure`에 넘긴다. 우선순위는 js_error → 예외
+> (Timeout 분리) → hint → 액션명. 의도적으로 좁다: 단언이 실패한 스텝 구간에 무관한 광고
+> 404가 끼었다고 network로 바꾸면 오분류이므로, **네트워크 작업 자체의 실패**만 센다.
+> runner·recorder 양쪽 동일. `expect_status`는 navigate에 대한 단언이므로 불성립은
+> `assertion`이고(예: mock으로 500을 기대했는데 200), 실제 4xx/5xx면 `network`가
+> 이긴다 — "서버가 에러를 냈다"가 더 실행 가능한 발견이다.
+>
 > **회귀 baseline 가드(2026-07):** 직전 실행과 `(step, action)` 키가 하나도 겹치지
 > 않으면(이름만 공유한 무관한 흐름 — ad-hoc 리포트는 기본 이름이 "session") 비교를
 > 건너뛰고 이번 실행을 새 baseline으로 기록한다. 가짜 "absent" diff 방지.
@@ -516,6 +569,14 @@ SM-01~04와 함께(또는 직후) 구현한다.
 - **HTML(SM-04)**: 단일 self-contained `.html` — 통과율 헤더, 스텝 카드(캡처 인라인),
   실패 강조·심각도 색상, AI 판단근거·수정제안, 회귀 diff, 환경 메타 푸터.
   CSS 인라인, 스크린샷 base64, 외부 의존성/네트워크 없음.
+  > **챕터 사이드바는 점진적 향상(2026-09).** 2챕터 이상이면 인라인 스크립트가 탭
+  > 전환을 붙이지만, 스크립트는 **콘텐츠의 관문이 아니다**. 서빙되는 HTML에는
+  > `hidden`이 하나도 없어 스크립트를 실행하지 않는 뷰어(인쇄 미리보기·사내 문서
+  > 뷰어·메일 미리보기)도 모든 챕터를 읽는다. 이전 구현은 첫 챕터 외에 `hidden`을
+  > 인라인으로 박아, 리포트에서 가장 먼저 봐야 할 **회귀 diff가 일어날 수 없는
+  > 클릭 뒤에 봉인**됐다. 스크립트는 로드 시 비활성 패널을 숨기고, `<noscript>`
+  > 규칙이 그때 무의미한 사이드바를 감춰 챕터가 그냥 세로로 쌓인다(탭 도입 이전
+  > 레이아웃 그대로). 탭은 `role="tab"`이 약속하는 좌우 화살표 이동도 지원한다.
 
 ### 6.3 단계적 구현
 - 1차(Phase 3): meta(SM-08) · 스텝 캡처/셀렉터/에러귀속(SM-06) · AI 근거/제안(SM-05) · JSON/MD/HTML.
@@ -582,6 +643,13 @@ SM-01~04와 함께(또는 직후) 구현한다.
   경쟁 제거), `--timeout SEC`(기본 600) 워치독으로 멈춘 자식은 kill 후 error 처리,
   시그널사(음수 rc, OOM=-9 등)는 **성공 아닌 error**로 매핑, KeyboardInterrupt 시
   자식 서브프로세스를 kill(브라우저 고아 방지). `--junit`은 순차 실행 전용.
+- **시나리오 간 격리(2026-09):** 순차 실행은 브라우저 세션 하나를 공유하므로
+  시나리오마다 컨텍스트를 리셋해 쿠키/스토리지/모킹을 비운다. 없을 때는 A의
+  localStorage·로그인이 B로 새는데 `--parallel`은 프로세스를 분리해 안 샜다 —
+  스케줄링만 바꿔야 할 플래그가 **같은 스위트의 판정을 바꿨고** 기본값이 새는
+  쪽이었다. 의도적으로 이어 붙이는 스위트(한 번 로그인 후 재사용)는
+  `--share-session`으로 예전 동작을 선택한다(`--parallel`과는 공유할 세션이
+  없으므로 거부).
 - 시나리오 하나가 예외로 죽어도(브라우저 기동 실패·디스크 풀 등) 합성 error 결과로
   기록하고 스위트를 계속 — 완료 결과·JUnit이 유실되지 않는다.
 - `ui-blackbox doctor` — 브라우저 해석 가능 여부·출력 디렉토리 쓰기 가능·유효 설정
@@ -598,6 +666,14 @@ SM-01~04와 함께(또는 직후) 구현한다.
 저장을 절대 깨지 않는다.
 > 이전 구현은 스크린샷 스탬프(시나리오 시작)와 리포트 스탬프(저장 시점)가 달라
 > `REPORT_RETENTION=1`이 방금 저장한 리포트의 스크린샷을 지웠다(2026-07 수정).
+
+**리포트 없는 run도 정리 대상(2026-09).** run_id 집합을 `report_*.*`에서만 모으면
+리포트를 남기지 않은 실행은 삭제 대상에 **들어갈 방법이 없었다** — 그런데 그게 대화형
+경로의 정상 형태다(recorder는 실패한 도구 호출마다 스크린샷을 찍고 `save_report`는
+선택). 그 PNG들이 리텐션이 지키려던 바로 그 디렉터리에 영구히 쌓였다. 이제 run_id는
+**모든 아티팩트 종류**(리포트·스크린샷·트레이스)에서 모은다. 더해서 `_prune`이
+`save()`에서만 돌던 것도 문제라, `save_report`에 도달하지 않는 흐름을 위해 **기록
+흐름이 시작될 때**(recorder가 run_id를 발급하는 시점) `prune_now()`를 1회 호출한다.
 
 ---
 
@@ -822,6 +898,13 @@ PRD 보안 제약(로컬 전용·자격증명 마스킹·외부 전송 없음) �
   URL이 담기는 `ai_reason`, 예외 메시지, 콘솔/네트워크 항목)에서 `${VAR}`
   플레이스홀더로 치환한다(`scrub`/`scrub_record`, runner·recorder·interact 적용).
   미설정 `${VAR}`는 조용히 리터럴 입력되지 않고 `ai_suggestion` 경고를 남긴다.
+- **타이핑된 값 비수집(2026-10):** `snapshot(mode="dom")`과 `generate_scenario`의
+  수집 JS가 `el.value`를 무조건 읽었다. `value`는 `<input type=submit value="로그인">`
+  에선 **라벨**이지만 그 외 필드에선 **사용자 데이터**다 — 이미 입력돼 있던 비밀번호·
+  이메일·계좌번호가 호스트 LLM에 가는 키트/아웃라인에, 그리고 추천 셀렉터에까지 실렸다
+  (`${VAR}` 마스킹은 시나리오 입력 경로만 덮으므로 여기엔 닿지 않는다). 이제 value는
+  submit/button/reset 타입에서만 읽고, 그 외 input은 `placeholder`로 설명한다 —
+  내용을 노출하지 않으면서 필드 식별은 유지.
 - **명령 주입 없음:** `subprocess.run`은 리스트 인자, `shell=True` 미사용, 사용자 입력
   미포함(브라우저 설치만).
 - **MCP stdout 보호(2026-07):** 첫 실행 자동설치(`playwright install`)의 서브프로세스
